@@ -1041,7 +1041,12 @@ impl ApplicationHandler for App {
                 }
                 match loading.poll_handoff() {
                     None => Step::Waiting,
-                    Some(Ok(Some(game))) => Step::Ready(Box::new(game)),
+                    Some(Ok(Some(game))) => {
+                        // Starling: the prepared resources loaded, the files they came from
+                        // can go.
+                        horizon_client::preparer::drop_downloads(&loading.vanilla_root);
+                        Step::Ready(Box::new(game))
+                    }
                     Some(Ok(None)) => Step::Done,
                     Some(Err(e)) => Step::Failed(e),
                 }

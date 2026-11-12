@@ -17946,6 +17946,8 @@ pub(crate) fn run_with(
     options.resources = loaded.root.clone();
     // Starling: a phone's setup before 0.1.6 left the sounds out.
     horizon_client::preparer::complete_sounds(&vanilla_root);
+    // Starling: the prepared resources loaded, the files they came from can go.
+    horizon_client::preparer::drop_downloads(&vanilla_root);
     let audio = if !options.execution_role.is_client() || options.headless {
         Audio::silent(&loaded.pack.source)
     } else {
