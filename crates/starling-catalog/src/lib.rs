@@ -418,7 +418,7 @@ mod instances {
 
 /// How a native mod fits an instance's build: no instance, nothing to say.
 mod native_fit {
-    pub fn line(_instance: &super::instances::Instance, _id: &str, _pin: &str) -> Option<String> {
+    pub fn line(_instance: &super::instances::Instance, _pin: &str) -> Option<String> {
         None
     }
 }

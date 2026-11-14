@@ -5060,7 +5060,7 @@ impl OptionsUi {
                         Act::Key(name) => self.selected_key = Some(*name),
                         Act::ResetKey(name) => {
                             if name.starts_with("key.keypad.") {
-                                s.keypad.bindings.remove(name);
+                                s.keypad.bindings.remove(*name);
                             } else {
                                 s.keys.set(name, KeyBinds::default_of(name));
                             }
@@ -5076,13 +5076,13 @@ impl OptionsUi {
                             events.push(Event::Changed);
                         }
                         Act::ToggleMod(i) => {
-                            s.mods.toggle(i);
+                            s.mods.toggle(*i);
                             events.push(Event::Changed);
-                            events.push(Event::ModToggled(i));
+                            events.push(Event::ModToggled(*i));
                         }
                         Act::ModSettings(i) => {
-                            self.push(Page::NativeMod(i));
-                            events.push(Event::NativeSettings(i));
+                            self.push(Page::NativeMod(*i));
+                            events.push(Event::NativeSettings(*i));
                         }
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
                         Act::ModKey(i, k) => {
@@ -5109,8 +5109,8 @@ impl OptionsUi {
                                 events.push(Event::NativeSetting(*i, *j));
                             }
                         }
-                        Act::NativeGame(act) => events.push(Event::NativeGame(act)),
-                        Act::OpenCatalog(shelf) => events.push(Event::OpenCatalog(shelf)),
+                        Act::NativeGame(act) => events.push(Event::NativeGame(*act)),
+                        Act::OpenCatalog(shelf) => events.push(Event::OpenCatalog(*shelf)),
                         Act::ModProject(i) => {
                             if let Some(listing) = self.mod_browser.listings.get(*i) {
                                 self.mod_project = listing.id.clone();
@@ -5125,6 +5125,7 @@ impl OptionsUi {
                             self.custom_add(s);
                         }
                         Act::CustomEdit(id) => {
+                            let id = *id;
                             let line =
                                 s.custom_buttons.iter().find(|b| b.id == id).map(|b| {
                                     match &b.action {
@@ -5138,34 +5139,39 @@ impl OptionsUi {
                             self.push(Page::CustomButton(id));
                         }
                         Act::CustomDelete(id) => {
+                            let id = *id;
                             own_buttons::remove_all(id);
                             s.custom_buttons.retain(|b| b.id != id);
                             events.push(Event::CustomButtons);
                         }
                         Act::CustomToggle(id) => {
+                            let id = *id;
                             if let Some(b) = s.custom_buttons.iter_mut().find(|b| b.id == id) {
                                 b.toggle = !b.toggle;
                             }
                         }
                         Act::CustomKey(id, name) => {
+                            let id = *id;
                             if let Some(b) = s.custom_buttons.iter_mut().find(|b| b.id == id) {
-                                b.action = crate::settings::CustomAction::Key(name.to_owned());
+                                b.action = crate::settings::CustomAction::Key((*name).to_owned());
                             }
                             self.custom_send.set_value("");
                             self.custom_send.focused = false;
                             events.extend(self.back(s));
                         }
                         Act::CustomInput(id, name) => {
+                            let id = *id;
                             if let Some(b) = s.custom_buttons.iter_mut().find(|b| b.id == id) {
-                                b.action = crate::settings::CustomAction::Input(name.to_owned());
+                                b.action = crate::settings::CustomAction::Input((*name).to_owned());
                             }
                             self.custom_send.set_value("");
                             self.custom_send.focused = false;
                             events.extend(self.back(s));
                         }
                         Act::CustomModKey(id, i, k) => {
-                            let key = s.mods.installed.get(i).and_then(|m| {
-                                let mapping = m.native.as_ref()?.mappings.get(k)?;
+                            let id = *id;
+                            let key = s.mods.installed.get(*i).and_then(|m| {
+                                let mapping = m.native.as_ref()?.mappings.get(*k)?;
                                 let chosen =
                                     s.mods.keys.get(&m.id).and_then(|c| c.get(&mapping.id));
                                 Some(chosen.unwrap_or(&mapping.key).clone())
@@ -5180,6 +5186,7 @@ impl OptionsUi {
                             events.extend(self.back(s));
                         }
                         Act::CustomIcon(id, icon) => {
+                            let id = *id;
                             if let Some(b) = s.custom_buttons.iter_mut().find(|b| b.id == id) {
                                 b.icon = icon.map(str::to_owned);
                                 if b.image {
@@ -5190,6 +5197,7 @@ impl OptionsUi {
                             events.extend(self.back(s));
                         }
                         Act::CustomDraw(id) => {
+                            let id = *id;
                             if id < own_buttons::SLOTS {
                                 self.painter
                                     .open(atlas, s.custom_buttons.iter().find(|b| b.id == id));
@@ -5200,7 +5208,7 @@ impl OptionsUi {
                         }
                         Act::CanvasClear => self.painter.clear(),
                         Act::CanvasPlate => self.painter.plate(atlas),
-                        Act::CanvasImport(id) => events.push(Event::ImportButtonImage(id)),
+                        Act::CanvasImport(id) => events.push(Event::ImportButtonImage(*id)),
                         Act::InstallMod => {
                             self.mod_browser.message = None;
                             events.push(Event::InstallMod(self.mod_project.clone()));
@@ -8086,7 +8094,7 @@ mod tests {
                     unicode: false,
                 },
             );
-            ui.draw(&s, NONE, &mut batch, &atlas, away);
+            ui.draw_test_frame(&s, NONE, &mut batch, &atlas, away, &mut |_, _| {});
             batch.vertices
         };
         let plain = drawn(&mut never);
@@ -11071,6 +11079,7 @@ mod tests {
             required: false,
             position: crate::packs::Position::Top,
             fixed: false,
+            hidden: false,
         }
     }
 

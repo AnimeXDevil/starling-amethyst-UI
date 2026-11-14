@@ -2473,7 +2473,7 @@ mod catalog_button_tests {
         let mut screen = PackScreen::new(&m, tr("resourcePack.title"), 800, 360, false, packs, &[]);
         screen.catalog = true;
         screen.confirm = Some(Confirm {
-            id: "incompatible".into(),
+            action: ConfirmAction::Select("incompatible".into()),
             title: Text::literal("Confirm"),
             message: Text::literal("Use this pack?"),
         });

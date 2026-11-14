@@ -784,7 +784,6 @@ impl Chunk {
             .ok()
             .and_then(|s| self.sections.get(s))
             .map(|section| &section.blocks)
-            .map(|section| &section.blocks)
     }
 
     /// The blocks that `matches`, section by section from the bottom, each section's in y, z, x
