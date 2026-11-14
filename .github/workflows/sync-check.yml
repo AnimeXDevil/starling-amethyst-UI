@@ -1,11 +1,11 @@
 name: sync-check
-# Temporary, for the sync with Horizon (sync-horizon-6): a pushed commit of this branch gets `cargo check` of the
+# Temporary, for the sync with Horizon (sync-horizon-7): a pushed commit of this branch gets `cargo check` of the
 # workspace on one runner, and the step summary lists the errors, cut short. The PC has no build and the VM is out
 # of reach. Delete before the branch merges.
 
 on:
   push:
-    branches: [sync-horizon-6]
+    branches: [sync-horizon-7]
 
 concurrency:
   group: sync-check
