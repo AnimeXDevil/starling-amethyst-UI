@@ -28,15 +28,11 @@ pub struct FrameSummary {
 pub struct FrameGraph {
     /// Frame, CPU and GPU milliseconds of recent frames, oldest first.
     frames: VecDeque<(f32, f32, f32)>,
-<<<<<<< HEAD
     /// Frame milliseconds over a longer window, for the 1% low.
     window: VecDeque<f32>,
-||||||| 980f0459eb
-=======
     /// The resolution scale Dynamic Resolution has the world at, in percent, while it is on:
     /// the numbers above were measured at a resolution that moves.
     pub dynamic_scale: Option<u32>,
->>>>>>> arismoko/main
 }
 impl FrameGraph {
     pub fn record(&mut self, frame_ms: f32, cpu_ms: f32, gpu_ms: Option<f32>) {

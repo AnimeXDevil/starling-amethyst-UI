@@ -232,10 +232,10 @@ impl Hub {
                 let state = world.block(x, y, z).0;
                 let tag = match world.block_entities.get(&(x, y, z)) {
                     Some(entity) => self.encoder.change_tag((x, y, z), state, entity),
-                    None => world
-                        .chunks
-                        .get(&(x >> 4, z >> 4))
-                        .and_then(|c| crate::lan::chunks::pot_tag(c, (x, y, z))),
+                    None => world.chunks.get(&(x >> 4, z >> 4)).and_then(|c| {
+                        crate::lan::chunks::pot_tag(c, (x, y, z))
+                            .or_else(|| crate::lan::chunks::machine_tag(c, (x, y, z)))
+                    }),
                 };
                 let Some(tag) = tag else {
                     continue;

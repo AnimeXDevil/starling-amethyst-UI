@@ -2416,13 +2416,7 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
         super::piglin::before_goals(m, w, level.random(), events);
     }
     if m.alive() && !immobile {
-<<<<<<< HEAD
-        parts::time(2, || server_ai_step(m, w, level, events));
-||||||| 980f0459eb
-        server_ai_step(m, w, level, events);
-=======
-        super::dab::step(m, w, level, events);
->>>>>>> arismoko/main
+        parts::time(2, || super::dab::step(m, w, level, events));
     } else {
         m.ai.jumping = false;
         m.ai.xxa = 0.0;

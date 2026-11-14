@@ -2351,7 +2351,6 @@ fn render_visible(
         else {
             continue;
         };
-<<<<<<< HEAD
         // A pack's custom armour in the leather texture (`custom_armor`), picked by the dye
         // colour the layer carries; its animation runs on the mob's age.
         let mut color = layer.color;
@@ -2363,8 +2362,6 @@ fn render_visible(
             let day = (m.age as f32 + alpha).rem_euclid(24000.0) / 24000.0;
             (uv, color) = crate::custom_armor::layer_look(Some(armor), Some(rgb), uv, day);
         }
-||||||| 980f0459eb
-=======
         // VillagerProfessionLayer: the type layer under a profession's full hat draws on
         // `noHatModel`, a model of its own, the others on the parent model.
         let type_hat_shown = if matches!(m.species(), Species::Villager | Species::ZombieVillager)
@@ -2381,7 +2378,6 @@ fn render_visible(
         } else {
             true
         };
->>>>>>> arismoko/main
         if custom.is_none() && custom_body.is_none() && std::sync::Arc::ptr_eq(&part, &model) {
             // A layer over the body's own model (a villager's type, profession
             // and level, a spider's eyes): `setupAnim` gives the body's poses,

@@ -963,14 +963,18 @@ pub(super) fn content_overlay(
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
     let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));
-    // Starling: the loading screen says a build is due. `resource_root_with_conditions` has no
-    // `on_build` callback, so this is said before the root is looked up, reused or not.
+    // Starling: the loading screen says a build is due, only when one is.
     let names = (mods.iter().map(|m| m.id.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
-    note(Some(ContentNote::Building(&names).text()));
     let prepared = super::load_conditions::content_root_with_conditions(
-        root, jar_store, &mods, &cache, &inventory, sources,
+        root,
+        jar_store,
+        &mods,
+        &cache,
+        &inventory,
+        sources,
+        &mut || note(Some(ContentNote::Building(&names).text())),
     )?;
     let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
     let _ = sources.content_base.set(original_base);

@@ -238,23 +238,15 @@ pub fn start<G>(
     raise_open_file_limit();
     if let Err(error) = game::run_with(options, native) {
         // A bad command line is the caller's mistake, not a crash: no report.
-<<<<<<< HEAD
-        let usage = error.is::<game::UsageError>();
+        let missing_mods = game::dedicated::is_missing_mods_refusal(error.as_ref());
+        let usage = error.is::<game::UsageError>() || missing_mods;
         #[cfg(target_os = "android")]
         if !usage {
             crate::diagnostics::fatal_error(&error.to_string());
         }
-        log::error!("Horizon: {error}");
-||||||| 980f0459eb
-        let usage = error.is::<game::UsageError>();
-        log::error!("Horizon: {error}");
-=======
-        let missing_mods = game::dedicated::is_missing_mods_refusal(error.as_ref());
-        let usage = error.is::<game::UsageError>() || missing_mods;
         if !missing_mods {
             log::error!("Horizon: {error}");
         }
->>>>>>> arismoko/main
         logging::flush();
         // The report's path is the last line on stderr (crash::SAVED_LINE).
         if !usage {

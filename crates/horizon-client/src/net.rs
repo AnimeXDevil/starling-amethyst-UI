@@ -1126,17 +1126,9 @@ fn run(
     c.send(&cfg::Serverbound::ClientInformation(info).encode())
         .map_err(e)?;
     let (mut reader, writer) = c.split();
-<<<<<<< HEAD
-    *shared_writer.lock().unwrap() = Some(writer);
-    let registries = match configure(
-||||||| 980f0459eb
-    *shared_writer.lock().unwrap() = Some(writer);
-    let registries = configure(
-=======
     *shared_writer.lock().unwrap() =
         Some(QueuedWriter::new(writer).map_err(|error| Reason::plain(error.to_string()))?);
-    let registries = configure(
->>>>>>> arismoko/main
+    let registries = match configure(
         &mut reader,
         shared_writer,
         configuring,
@@ -1144,17 +1136,11 @@ fn run(
         send,
         cookies,
         resources,
-<<<<<<< HEAD
+        payloads,
     )? {
         Ok(registries) => registries,
         Err(kicked) => return Ok(kicked),
     };
-||||||| 980f0459eb
-    )?;
-=======
-        payloads,
-    )?;
->>>>>>> arismoko/main
     let _ = send.send(Event::Joined {
         registries: Arc::new(registries),
         uuid: profile.uuid,
@@ -1249,17 +1235,11 @@ fn receive_play(
                     send,
                     cookies,
                     resources,
-<<<<<<< HEAD
+                    payloads,
                 )? {
                     Ok(registries) => registries,
                     Err(kicked) => return Ok(kicked),
                 };
-||||||| 980f0459eb
-                )?;
-=======
-                    payloads,
-                )?;
->>>>>>> arismoko/main
                 let _ = send.send(Event::Reconfigured(Arc::new(registries)));
             }
             // ClientCommonPacketListenerImpl.handleRequestCookie: the stored
@@ -1356,14 +1336,8 @@ fn configure(
     send: &ingress::Producer<Event>,
     cookies: &Cookies,
     resources: &ItemData,
-<<<<<<< HEAD
-) -> Result<Result<Dynamic, Reason>, Reason> {
-||||||| 980f0459eb
-) -> Result<Dynamic, Reason> {
-=======
     payloads: &Arc<crate::raw_payloads::Transport>,
-) -> Result<Dynamic, Reason> {
->>>>>>> arismoko/main
+) -> Result<Result<Dynamic, Reason>, Reason> {
     let mut registries = Dynamic::default();
     let mut content_verified = false;
     payloads.begin_configuration();
@@ -1565,21 +1539,6 @@ fn configure(
                 }
                 crate::datapack_net::finish_transfer().map_err(Reason::plain)?;
                 registries.custom_components = content_verified;
-<<<<<<< HEAD
-                let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
-                let w = w.as_mut().ok_or_else(|| Reason::plain("Disconnected"))?;
-                w.send(&cfg::Serverbound::FinishConfiguration(Empty).encode())
-                    .map_err(|e| Reason::plain(connection_lost(e, lang)))?;
-                configuring.store(false, Ordering::Relaxed);
-                return Ok(Ok(registries));
-||||||| 980f0459eb
-                let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
-                let w = w.as_mut().ok_or_else(|| Reason::plain("Disconnected"))?;
-                w.send(&cfg::Serverbound::FinishConfiguration(Empty).encode())
-                    .map_err(|e| Reason::plain(connection_lost(e, lang)))?;
-                configuring.store(false, Ordering::Relaxed);
-                return Ok(registries);
-=======
                 payloads
                     .finish_configuration_with(|| {
                         let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
@@ -1593,8 +1552,7 @@ fn configure(
                         Ok(())
                     })
                     .map_err(Reason::plain)?;
-                return Ok(registries);
->>>>>>> arismoko/main
+                return Ok(Ok(registries));
             }
             _ => {}
         }
@@ -2026,15 +1984,9 @@ mod tests {
             thread
                 .join()
                 .unwrap()
-<<<<<<< HEAD
                 .unwrap_or_else(|reason| panic!("configuration failed: {}", reason.text))
                 .unwrap_or_else(|reason| panic!("configuration ended: {}", reason.text));
-||||||| 980f0459eb
-                .unwrap_or_else(|reason| panic!("configuration failed: {}", reason.text));
-=======
-                .unwrap_or_else(|reason| panic!("configuration failed: {}", reason.text));
             drop(shared_writer);
->>>>>>> arismoko/main
             std::fs::remove_dir_all(root).unwrap();
         }
     }

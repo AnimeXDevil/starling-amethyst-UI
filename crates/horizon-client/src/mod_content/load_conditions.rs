@@ -447,6 +447,35 @@ pub fn build_with_conditions(
     // under it (`data/minecraft/tags/...`): every loader reads it already, and
     // listed again it read each vanilla recipe twice, once as `minecraft:<name>`.
     namespaces.remove("minecraft");
+    // The blocks' kinetic parts, by block id: the game's networks (kinetics.rs) and the models
+    // it turns (the model catalog bakes those no blockstate names).
+    let kinetic: BTreeMap<&str, &horizon_mod_package::content::Kinetic> = mods
+        .iter()
+        .flat_map(|m| &m.content.blocks)
+        .filter_map(|b| Some((b.id.as_str(), b.kinetic.as_ref()?)))
+        .collect();
+    if !kinetic.is_empty() {
+        overlay.write(KINETIC, &serde_json::to_vec(&kinetic)?)?;
+    }
+    // The machines keeping items of their own, by block id (game/kinetic_machines.rs).
+    let machines: BTreeMap<&str, horizon_mod_package::content::Machine> = mods
+        .iter()
+        .flat_map(|m| &m.content.blocks)
+        .filter_map(|b| Some((b.id.as_str(), b.machine?)))
+        .collect();
+    if !machines.is_empty() {
+        overlay.write(MACHINES, &serde_json::to_vec(&machines)?)?;
+    }
+    // The models the game draws for blocks besides their own (a blaze burner's blaze).
+    let models: BTreeMap<&str, &Vec<String>> = mods
+        .iter()
+        .flat_map(|m| &m.content.blocks)
+        .filter(|b| !b.models.is_empty())
+        .map(|b| (b.id.as_str(), &b.models))
+        .collect();
+    if !models.is_empty() {
+        overlay.write(BLOCK_MODELS, &serde_json::to_vec(&models)?)?;
+    }
     overlay.write(MARKER, &serde_json::to_vec(&namespaces)?)?;
     let requirements =
         collect_jar_requirements(mods.iter().map(|m| (m.id.as_str(), m.jars.as_slice())))?;
@@ -524,6 +553,20 @@ pub fn resource_root_with_conditions(
     inventory: &horizon_mod_package::enabled::EnabledMods,
     conditions: &horizon_world::conditions::LoadConditions,
 ) -> Result<PathBuf> {
+    resource_root_noting_build(base, jar_store, mods, cache, inventory, conditions, &mut || {})
+}
+
+/// [`resource_root_with_conditions`], calling `on_build` before a build (none when the root is
+/// reused), so a loading screen can say why it waits.
+pub fn resource_root_noting_build(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    cache: &Path,
+    inventory: &horizon_mod_package::enabled::EnabledMods,
+    conditions: &horizon_world::conditions::LoadConditions,
+    on_build: &mut dyn FnMut(),
+) -> Result<PathBuf> {
     let has_content = mods.iter().any(|m| {
         !m.jars.is_empty()
             || !m.content.is_empty()
@@ -556,7 +599,7 @@ pub fn resource_root_with_conditions(
                 .is_ok_and(|loaded| &loaded == inventory)
         })
     {
-        // A reused root warns as the build did.
+        // A reused root warns as the build did; rewriting the stamp marks it as used.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
         // Used again: kept another day. Marked beside the root, not in it: the pack overlay
@@ -564,6 +607,7 @@ pub fn resource_root_with_conditions(
         let _ = fs::write(used_path(&out), b"");
         return Ok(out);
     }
+    on_build();
     if has_content {
         for warning in build_with_conditions(base, jar_store, mods, &out, inventory, conditions)? {
             log::warn!("Horizon: {warning}");

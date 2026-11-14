@@ -338,17 +338,7 @@ impl MobWorld<'_> {
                     {
                         continue;
                     }
-<<<<<<< HEAD
-                    if !self.state_collision_meets(state, x, y, z, area) {
-||||||| 980f0459eb
-                    if !self
-                        .block_collision_boxes(x, y, z)
-                        .iter()
-                        .any(|b| b.intersects(area))
-                    {
-=======
                     if !self.block_collides_with(x, y, z, area) {
->>>>>>> arismoko/main
                         continue;
                     }
                     let d = (f64::from(x) + 0.5 - from.x).powi(2)
@@ -779,38 +769,21 @@ impl Mob {
         // do the entities it may not pass through.
         let border = w.border.map(|b| (b, [self.position.x, self.position.z]));
         let entities = self.entity_collisions(w, wanted);
-<<<<<<< HEAD
         let bounds = self.bounds();
         let on_ground = self.on_ground;
         let moved = parts::time(6, || {
-            scene
-                .resolve_in_border_with(bounds, wanted, step, on_ground, border, &entities)
-                .unwrap_or(Vec3::ZERO)
-        });
-||||||| 980f0459eb
-        let moved = scene
-            .resolve_in_border_with(
-                self.bounds(),
+            crate::move_gate::scene_resolve_in_border_with(
+                gate,
+                scene,
+                bounds,
                 wanted,
                 step,
-                self.on_ground,
+                on_ground,
                 border,
                 &entities,
             )
-            .unwrap_or(Vec3::ZERO);
-=======
-        let moved = crate::move_gate::scene_resolve_in_border_with(
-            gate,
-            scene,
-            self.bounds(),
-            wanted,
-            step,
-            self.on_ground,
-            border,
-            &entities,
-        )
-        .unwrap_or(Vec3::ZERO);
->>>>>>> arismoko/main
+            .unwrap_or(Vec3::ZERO)
+        });
         let length = moved.x * moved.x + moved.y * moved.y + moved.z * moved.z;
         let wanted_length = wanted.x * wanted.x + wanted.y * wanted.y + wanted.z * wanted.z;
         if length > 1.0e-7 || wanted_length - length < 1.0e-7 {

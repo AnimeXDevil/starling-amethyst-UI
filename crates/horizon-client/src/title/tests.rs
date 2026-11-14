@@ -3071,7 +3071,6 @@ fn cancelling_a_realms_new_world_returns_to_the_realm() {
     ));
     let _ = fs::remove_dir_all(&f.root);
 }
-<<<<<<< HEAD
 
 #[test]
 fn account_secret_fields_accept_credentials_without_chat_filtering_or_debug_disclosure() {
@@ -3100,8 +3099,8 @@ fn account_secret_fields_accept_credentials_without_chat_filtering_or_debug_disc
         assert!(!format!("{screen:?}").contains("Secret"));
     }
     assert!(!format!("{:?}", f.title.caret.borrow()).contains("Secret"));
-||||||| 980f0459eb
-=======
+}
+
 #[cfg(test)]
 mod hidden_features {
     use super::*;
@@ -3135,5 +3134,4 @@ mod hidden_features {
             Some(vec!["vanilla".to_owned(), "hidden".to_owned()])
         );
     }
->>>>>>> arismoko/main
 }
