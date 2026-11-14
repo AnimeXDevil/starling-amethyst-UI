@@ -133,7 +133,6 @@ impl TextEdit {
     fn insert_filtered(&mut self, filtered: &str) {
         self.clamp();
         let (a, b) = self.selected();
-        let filtered = filter_text(text, self.multiline);
         let selected_units: usize = self
             .value
             .chars()

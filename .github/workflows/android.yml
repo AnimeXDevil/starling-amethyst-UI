@@ -67,8 +67,8 @@ jobs:
             "build-tools;35.0.0" "platforms;android-36" "ndk;28.2.13676358" > /dev/null
       - name: Install Rust for Android and cargo-ndk
         run: |
-          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
-          rustup default stable
+          # The Rust Horizon pins (tools/ci/rust-version), as its CI and the launcher's native mods build with.
+          bash tools/ci/rustup_install.sh --profile minimal --target ${{ matrix.target }}
           cargo install cargo-ndk --version 3.5.4 --locked
       - uses: Swatinem/rust-cache@v2
         with:
