@@ -5058,6 +5058,12 @@ impl OptionsUi {
                             events.push(Event::Changed);
                         }
                         Act::Key(name) => self.selected_key = Some(*name),
+                        Act::KeyboardProfile => {
+                            s.keypad.enabled ^= true;
+                            self.selected_key = None;
+                            self.scroll = 0.;
+                            events.push(Event::Changed);
+                        }
                         Act::ResetKey(name) => {
                             if name.starts_with("key.keypad.") {
                                 s.keypad.bindings.remove(*name);
@@ -6430,12 +6436,6 @@ impl OptionsUi {
                             events.push(Event::Changed);
                         }
                         Act::Key(name) => self.selected_key = Some(name),
-                        Act::KeyboardProfile => {
-                            s.keypad.enabled ^= true;
-                            self.selected_key = None;
-                            self.scroll = 0.;
-                            events.push(Event::Changed);
-                        }
                         Act::KeyboardProfile => {
                             s.keypad.enabled ^= true;
                             self.selected_key = None;
