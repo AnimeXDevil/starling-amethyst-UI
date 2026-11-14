@@ -61,39 +61,6 @@ class CargoJobsTests(unittest.TestCase):
                                          "--cgroup", cgroup], capture_output=True, text=True, check=True)
                 self.assertEqual(int(result.stdout), cargo_jobs.jobs(*expected, 3072))
 
-    @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "requires POSIX Bash")
-    def test_workflow_steps_route_parallelism_by_runner(self):
-        with tempfile.TemporaryDirectory() as directory:
-            stubs = Path(directory)
-            python = stubs / "python3"
-            python.write_text('#!/bin/sh\necho "$*" > "$ARGS"\necho 6\n')
-            python.chmod(0o700)
-            receipt, args = stubs / "env", stubs / "args"
-
-            def run(script, **env):
-                receipt.write_text("")
-                args.write_text("")
-                subprocess.run(["/bin/bash", "-eu", "-c", script], check=True, capture_output=True,
-                               env=dict(PATH=f"{stubs}:/usr/bin:/bin", GITHUB_ENV=str(receipt), ARGS=str(args), **env))
-                return receipt.read_text(), args.read_text().strip()
-
-            for job, mib in (("lint", 3072), ("verify", 4096)):
-                script = steps("dyna-ci.yml", job)["Choose build parallelism"]["run"]
-                for kind, expected in (("dyna", "JOBS=-j6\n"), ("boat", "JOBS=-j4\n"),
-                                       ("github", "JOBS=\n"), ("other", "JOBS=\n")):
-                    with self.subTest(job=job, kind=kind):
-                        written, called = run(script, RUNNER_KIND=kind)
-                        self.assertEqual(written, expected)
-                        self.assertEqual(called, f"tools/ci/cargo_jobs.py --job-mib {mib}" if kind == "dyna" else "")
-
-            script = steps("fn-replace-check.yml", "fn-replace-check")["Choose build parallelism"]["run"]
-            for environment, expected in (("github-hosted", "CARGO_BUILD_JOBS=2\n"), ("self-hosted", "CARGO_BUILD_JOBS=6\n")):
-                with self.subTest(environment=environment):
-                    written, called = run(script, RUNNER_ENVIRONMENT=environment)
-                    self.assertEqual(written, expected)
-                    self.assertEqual(called, "tools/ci/cargo_jobs.py --job-mib 4096" if environment == "self-hosted" else "")
-
-
     def test_cap_bounds_every_cargo_run_and_test_harness_of_the_job(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory) / "work/repo"

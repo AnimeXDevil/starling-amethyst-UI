@@ -29,7 +29,8 @@ HORIZON_CLIENT = [
     "crates/horizon-client-render/src", "crates/horizon-world/src", "crates/horizon-items/src",
     "crates/horizon-guest-stack/src/guest_stack_constants.rs", "crates/horizon-mod-wasm/tests/fixture/src",
     "docs/api/launch-reference.md", "docs/horizon-ctl-commands.md", "docs/modding/examples/src/worldgen.rs",
-    "docs/parity/random-chance-seeded.jsonl", "packaging/executable_link.rs", "packaging/windows/exe.rs",
+    "docs/parity/random-chance-seeded.jsonl", "packaging/android/bedrock-controls.json",
+    "packaging/android/build-server.txt", "packaging/executable_link.rs", "packaging/windows/exe.rs",
     "research-lock.json", "tests/fixture_support/item_resource_properties.rs", "tests/fixtures",
 ]
 # The generator scans these to write the mod API, the points and the host boundary: its own sources, the vocabulary, the
@@ -47,12 +48,15 @@ READERS = {
         "crates/horizon-mod-package/tests/index", "docs/modding/src/how-to/native-mods.md", "tools/ci/rust-version",
     ],
     "horizon-client": HORIZON_CLIENT,
+    # Starling's Android library is built from horizon-client's files, like horizon-client-lib.
+    "horizon-android": HORIZON_CLIENT,
     # Shares horizon-client's sources, so its unit tests run the same reads.
     "horizon-client-lib": HORIZON_CLIENT,
     # lang.rs embeds the bundled language files.
     "horizon-client-core": ["crates/horizon-client/assets/horizon/lang"],
     "horizon-client-render": [
         "crates/horizon-client/assets/horizon/lang", "crates/horizon-client/assets/horizon/textures/gui",
+        "crates/horizon-client/assets/touch",
     ],
     # The build scripts hand the repository root to the generator.
     "horizon-engine-slots": MOD_API_GEN,
@@ -86,6 +90,9 @@ READERS = {
     ],
     "horizon-shader-api": ["docs/api/shaders-reference.md", "docs/api/shaders-reference-0.2.md"],
     "horizon-world": ["crates/horizon-core", "Cargo.lock"],
+    # Starling's own crates: the account tests read the research lock, the catalog its launcher's sources.
+    "starling-account": ["research-lock.json"],
+    "starling-catalog": ["launcher/src"],
     # Commands (tokens, icons, package), not tests: listed so the scan finds nothing unexplained.
     "xtask": [
         "crates/horizon-client/src", "crates/horizon-mod-vocab/src/hooks", "crates/horizon-perf/web",
@@ -99,7 +106,7 @@ SCANNED = {"horizon-client-core": ["crates"]}
 # Literals the scan takes for a walk up to crates/ that are not one (a ".." among path-traversal checks).
 # "machines/.." in a test's sample paths, "mods/" in an instance's file names: no read either.
 NOT_READS = {
-    "horizon-client": {"crates"}, "horizon-client-lib": {"crates"}, "horizon-mod-package": {"crates"},
+    "horizon-android": {"crates"}, "horizon-client": {"crates"}, "horizon-client-lib": {"crates"}, "horizon-mod-package": {"crates"},
     "horizon-mod-vocab": {"."}, "horizon-port-pack": {"mods"}, "horizon-prepare": {"crates"},
 }
 
