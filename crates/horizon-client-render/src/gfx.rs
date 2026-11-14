@@ -5105,9 +5105,8 @@ impl Renderer {
         let world_post = world_post::Post::new(&device, frame_format, &adapter.get_info().name);
         let uploads = upload::Uploads::new(&device);
         let section_uploads = upload::Uploads::with_chunk(&device, SECTION_UPLOAD_CHUNK);
-<<<<<<< HEAD
-        let stars = stars::Stars::new(&device, frame_format);
-        let custom_sky = custom_sky::CustomSky::new(&device, frame_format);
+        let stars = stars::Stars::new(&device, (frame_format, linear_light));
+        let custom_sky = custom_sky::CustomSky::new(&device, (frame_format, linear_light));
         let late_sky = adreno::adreno_vulkan(&adapter_info)
             .then(|| {
                 late_sky::LateSky::new(
@@ -5124,13 +5123,6 @@ impl Renderer {
                 )
             })
             .flatten();
-||||||| 980f0459eb
-        let stars = stars::Stars::new(&device, frame_format);
-        let custom_sky = custom_sky::CustomSky::new(&device, frame_format);
-=======
-        let stars = stars::Stars::new(&device, (frame_format, linear_light));
-        let custom_sky = custom_sky::CustomSky::new(&device, (frame_format, linear_light));
->>>>>>> arismoko/main
         let entity_outline = entity_outline::EntityOutline::new(
             &device,
             (&entity_shader, &entity_layout, &entity_vertex),
@@ -5205,14 +5197,8 @@ impl Renderer {
             translucent_mark,
             flat_on: flat.is_some(),
             packed_quads,
-<<<<<<< HEAD
-            cull_on,
-||||||| 980f0459eb
-            cull_on: cull.is_some(),
-=======
             packed_on: packed_wanted(),
-            cull_on: cull.is_some(),
->>>>>>> arismoko/main
+            cull_on,
             sides_on: true,
             gpu_culling: None,
             gpu_culling_offer,
@@ -10681,7 +10667,6 @@ impl Renderer {
             );
             pass.set_bind_group(0, &self.group, &[]);
             pack_frame(&mut pass);
-<<<<<<< HEAD
             // The vanilla Overworld sky waits for solid terrain (`late_sky`).
             let late_sky = self.late_sky.as_ref().filter(|_| {
                 self.late_sky_on
@@ -10696,12 +10681,7 @@ impl Renderer {
             if late_sky.is_none()
                 && (frame.title || (sky_visible && (frame.skybox || frame.end_sky)))
             {
-||||||| 980f0459eb
-            if frame.title || (sky_visible && (frame.skybox || frame.end_sky)) {
-=======
-            if frame.title || (sky_visible && (frame.skybox || frame.end_sky)) {
                 pass.stage(self.own_timing.as_mut(), "sky");
->>>>>>> arismoko/main
                 if !frame.title && frame.skybox && !pack_draws_sky && !native_sky_pass {
                     match self
                         .native

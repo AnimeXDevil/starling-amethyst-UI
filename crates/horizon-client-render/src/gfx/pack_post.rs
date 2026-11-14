@@ -3084,8 +3084,7 @@ impl PackPost {
                 p.name
             ));
         }
-<<<<<<< HEAD
-        match (&terrain, &mut terrain_cutout) {
+        match (&terrain, &terrain_cutout) {
             (Some(t), None) => {
                 let first = match &t.prepass {
                     Some((_, cut)) => format!(", its depth first (alpha above {cut})"),
@@ -3093,13 +3092,6 @@ impl PackPost {
                 };
                 notes.push(format!("terrain draws with {}{first}", t.name));
             }
-||||||| 980f0459eb
-        match (&terrain, &mut terrain_cutout) {
-            (Some(t), None) => notes.push(format!("terrain draws with {}", t.name)),
-=======
-        match (&terrain, &terrain_cutout) {
-            (Some(t), None) => notes.push(format!("terrain draws with {}", t.name)),
->>>>>>> arismoko/main
             (t, Some(c)) => {
                 if let Some(t) = t {
                     notes.push(format!("solid terrain draws with {}", t.name));

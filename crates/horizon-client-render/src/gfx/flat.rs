@@ -226,14 +226,13 @@ pub fn is_adreno_dx12(info: &wgpu::AdapterInfo) -> bool {
     info.backend == wgpu::Backend::Dx12 && matches!(info.vendor, 0x4d4f_4351 | 0x5143)
 }
 
-<<<<<<< HEAD
 /// PowerVR Rogue's Vulkan driver (the GE8320's 1.13) draws terrain in pieces with per-section
 /// draws, without an error: flat frames need neither `first_instance` nor a vertex offset.
 pub fn is_powervr_vulkan(info: &wgpu::AdapterInfo) -> bool {
     info.backend == wgpu::Backend::Vulkan
         && (info.vendor == 0x1010 || info.name.contains("PowerVR"))
-||||||| 980f0459eb
-=======
+}
+
 /// A released Mesa version from its driver info, allowing distribution suffixes.
 /// Development and release-candidate builds do not establish a stable release's safety.
 fn parse_mesa_version(driver_info: &str) -> Option<(u32, u32, u32)> {
@@ -252,7 +251,6 @@ fn parse_mesa_version(driver_info: &str) -> Option<(u32, u32, u32)> {
         parts.next()?.parse().ok()?,
     );
     parts.next().is_none().then_some(version)
->>>>>>> arismoko/main
 }
 
 /// Intel Gen11 (Ice Lake) and Gen12 (Tiger Lake, Rocket Lake, Alder Lake,

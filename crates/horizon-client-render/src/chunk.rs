@@ -776,7 +776,6 @@ impl Chunk {
     pub fn block(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         BlockStateId(self.get(x, y, z))
     }
-<<<<<<< HEAD
     /// The blocks of the section at `section` (`y >> 4`); None outside the
     /// world's height, where [`Self::get`] reads 0.
     pub fn section_blocks(&self, section: i32) -> Option<&PalettedContainer> {
@@ -785,8 +784,9 @@ impl Chunk {
             .ok()
             .and_then(|s| self.sections.get(s))
             .map(|section| &section.blocks)
-||||||| 980f0459eb
-=======
+            .map(|section| &section.blocks)
+    }
+
     /// The blocks that `matches`, section by section from the bottom, each section's in y, z, x
     /// order. A section whose palette holds none is skipped.
     pub fn blocks_where(
@@ -811,7 +811,6 @@ impl Chunk {
             }
         }
         out
->>>>>>> arismoko/main
     }
     /// The highest y where `matches`, scanning down. Sections holding only
     /// `skip` are passed over whole: `matches` must be false for it.

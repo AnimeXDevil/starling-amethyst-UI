@@ -371,7 +371,6 @@ impl ResourceSource {
                 .read(),
         }
     }
-<<<<<<< HEAD
     /// [`Self::read`], but a folder's file from its disk too when the folder's prepared data
     /// file lacks it: one put there after preparing (Starling's downloaded touch controls),
     /// which `read` reports missing without asking the disk.
@@ -382,8 +381,8 @@ impl ResourceSource {
                 read => read,
             },
             _ => self.read(name),
-||||||| 980f0459eb
-=======
+        }
+    }
     /// The folder that supplies `name`, following an index to the layer its
     /// winning file comes from. None for an archive, merged bytes, or no file.
     pub fn folder_of(&self, name: &str) -> Option<PathBuf> {
@@ -399,7 +398,6 @@ impl ResourceSource {
                 ResourceStorage::File { source, name } => source.folder_of(name),
                 ResourceStorage::Bytes(_) => None,
             },
->>>>>>> arismoko/main
         }
     }
     /// Copy a resource under a shared output budget, streaming archive entries.

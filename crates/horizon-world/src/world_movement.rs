@@ -78,17 +78,10 @@ where
         request.max_step,
         request.on_ground,
         |bounds| {
-<<<<<<< HEAD
-            let mut shapes = Vec::with_capacity(entities.len() + 8);
-            shapes.extend(entities.iter().cloned().map(Collider::Shape));
-||||||| 980f0459eb
-            let mut shapes = entities.clone();
-=======
             // A box's blocks are a few dozen shapes at most: one allocation,
             // not the doubling a push-by-push list makes.
             let mut shapes = Vec::with_capacity(entities.len() + 16);
-            shapes.extend_from_slice(&entities);
->>>>>>> arismoko/main
+            shapes.extend(entities.iter().cloned().map(Collider::Shape));
             if let Some(border) = world
                 .movement_border(request.entity, bounds)
                 .map_err(CollisionScanError::World)?
@@ -121,33 +114,14 @@ pub fn no_world_collision<W, E>(
 where
     W: BlockCollisionWorld<Error = E> + EntityMovementWorld<Error = E>,
 {
-<<<<<<< HEAD
-    let mut scan = BlockCollisionScan::new(
-||||||| 980f0459eb
-    for hit in BlockCollisionScan::new(
-=======
     if BlockCollisionScan::any_collision(
->>>>>>> arismoko/main
         world,
         request.context,
         request.bounds,
         false,
         request.candidate_budget,
-<<<<<<< HEAD
-    )?;
-    while let Some(hit) = scan.next_collider() {
-        if !hit?.1.is_empty() {
-            return Ok(false);
-        }
-||||||| 980f0459eb
-    )? {
-        if !hit?.shape.is_empty() {
-            return Ok(false);
-        }
-=======
     )? {
         return Ok(false);
->>>>>>> arismoko/main
     }
     if !world
         .entity_collisions(request.entity, request.bounds)

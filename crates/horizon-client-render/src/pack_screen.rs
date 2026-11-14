@@ -457,13 +457,10 @@ pub struct PackScreen {
     browser_search: TextField,
     /// The browser's search box has the keyboard.
     browser_focus: bool,
-<<<<<<< HEAD
     /// Data packs and world mods (Create New World's) rather than resource packs.
     pub data: bool,
     /// A Catalog button beside the footer's two (`OptionsUi::offer_catalog`).
     pub catalog: bool,
-||||||| 980f0459eb
-=======
     /// Which atlas slot holds which icon, kept from one frame to the next
     /// ([`PackScreen::bind_icons`]).
     icon_slots: std::cell::RefCell<IconSlots>,
@@ -515,7 +512,6 @@ impl IconSlots {
             .push((texture.to_owned(), slot, icon.clone(), self.frame));
         Some((slot, true))
     }
->>>>>>> arismoko/main
 }
 
 fn tr(key: &str) -> Text {

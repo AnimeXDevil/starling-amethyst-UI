@@ -2088,7 +2088,6 @@ impl HudAtlas {
             images.push(("horizon/recipes/settings".to_owned(), width, height, rgba));
         }
         images.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
-<<<<<<< HEAD
         let (width, placements, glyph_region) = Self::layout_within(
             &mut images,
             &mut animated,
@@ -2096,27 +2095,18 @@ impl HudAtlas {
             &bordered,
             limit,
             &mut full_sizes,
-        )?;
-||||||| 980f0459eb
-        let (width, placements, glyph_region) =
-            Self::layout_leaving_out(&mut images, &mut animated, &cit_names, MAX_ATLAS_SIZE)?;
-=======
-        let (width, placements, glyph_region) =
-            Self::layout_leaving_out(&mut images, &mut animated, &cit_names, MAX_ATLAS_SIZE)
-                .or_else(|error| -> Result<_> {
-                    let models = reducible_model_sprites(root, &images, &bordered);
-                    let layout = Self::layout_reducing_models(
-                        &mut images,
-                        &mut gui_sizes,
-                        &models,
-                        MAX_ATLAS_SIZE,
-                    )?;
-                    log::warn!(
-                        "reduced HUD model texture resolution to keep the resource pack: {error}"
-                    );
-                    Ok(layout)
-                })?;
->>>>>>> arismoko/main
+        )
+        .or_else(|error| -> Result<_> {
+            let models = reducible_model_sprites(root, &images, &bordered);
+            let layout = Self::layout_reducing_models(
+                &mut images,
+                &mut gui_sizes,
+                &models,
+                MAX_ATLAS_SIZE,
+            )?;
+            log::warn!("reduced HUD model texture resolution to keep the resource pack: {error}");
+            Ok(layout)
+        })?;
         // A multiple of 1024 rather than a power of two: the default resources
         // need 4096x5120 (8192 rows before), Faithful 32x 4096x12288 (16384).
         let height = (glyph_region + GLYPH_ROWS)

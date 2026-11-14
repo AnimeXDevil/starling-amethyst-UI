@@ -1169,7 +1169,6 @@ impl Opt {
         let v = v.clamp(0.0, 1.0);
         let step = |lo: f32, hi: f32| (lo + v * (hi - lo)).round();
         match self {
-<<<<<<< HEAD
             Opt::TouchCircleSize => s.touch.circle_size = step(16.0, 64.0),
             Opt::TouchDynamicAreaX => s.touch.dynamic_area_x = (v * 100.0).round() / 100.0,
             Opt::TouchDynamicAreaY => s.touch.dynamic_area_y = (v * 100.0).round() / 100.0,
@@ -1182,10 +1181,7 @@ impl Opt {
             Opt::TouchMouseSensitivity => s.touch.virtual_mouse_sensitivity = 0.25 + v * 2.75,
             Opt::TouchButtonScale => s.touch.button_scale = 0.5 + v * 1.5,
 
-||||||| 980f0459eb
-=======
             Opt::ChatDelay => values::set(s, v),
->>>>>>> arismoko/main
             Opt::FovEffects | Opt::DarknessPulsing => s.file.set(
                 self.file_key().unwrap(),
                 crate::options_file::V::Double(f64::from(v).powi(2)),
@@ -2065,17 +2061,11 @@ pub enum Page {
     Music,
 }
 #[derive(Clone, Debug, PartialEq)]
-<<<<<<< HEAD
-enum Act {
+pub(crate) enum Act {
     DiagnosticsExport,
     DiagnosticsOpen,
     DiagnosticsRecord,
     DiagnosticsGpu,
-||||||| 980f0459eb
-enum Act {
-=======
-pub(crate) enum Act {
->>>>>>> arismoko/main
     None,
     Push(Page),
     Done,
@@ -2270,16 +2260,12 @@ pub enum SkinAction {
 /// What the game must do after an interaction.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-<<<<<<< HEAD
     DiagnosticsExport,
     DiagnosticsOpen,
     DiagnosticsRecord,
     DiagnosticsGpu,
-||||||| 980f0459eb
-=======
     /// Dropped resource packs accepted on the confirmation screen.
     ImportPacks(Vec<std::path::PathBuf>),
->>>>>>> arismoko/main
     /// The Pack Options page closed with changes: the player's choices of its entries, the
     /// ones that differ from their defaults (the others went back to theirs).
     PackOptions {
@@ -2529,7 +2515,6 @@ pub struct OptionsUi {
     /// The PvP & HUD items that take a whole row (`wide_extras`), measured
     /// when the page is drawn.
     wide_extras: Vec<crate::extras::Item>,
-<<<<<<< HEAD
     /// Whether Options opens Skin Customization: the game's options do; the menus before the
     /// game, which can't put a skin on, keep vanilla's greyed button.
     pub skin_page: bool,
@@ -2544,6 +2529,16 @@ pub struct OptionsUi {
     /// game's options on a phone (`offer_catalog`). The menus before the game can't show it.
     catalog_buttons: bool,
     skin: SkinPage,
+    /// The page layout's revision: every change to an input the layout reads
+    /// (the page, the scroll, the search text, a setting's shown value) bumps
+    /// it, so the layout is made again once and not on every draw or click.
+    rev: u64,
+    /// The page's layout at `layout_key`: shared by the drawing, the hit
+    /// tests and the scroll, so all three read the same rectangles.
+    layout_cache: Option<((f32, f32, u64, u32), std::sync::Arc<OptionsLayout>)>,
+    /// How many layouts were made (the caching test).
+    #[cfg(test)]
+    layouts_built: u32,
 }
 /// The Skin Customization page: the name being typed and the skins to choose from, read from
 /// beside options.txt when the page opens.
@@ -2579,19 +2574,6 @@ impl Default for SkinPage {
             actions: Vec::new(),
         }
     }
-||||||| 980f0459eb
-=======
-    /// The page layout's revision: every change to an input the layout reads
-    /// (the page, the scroll, the search text, a setting's shown value) bumps
-    /// it, so the layout is made again once and not on every draw or click.
-    rev: u64,
-    /// The page's layout at `layout_key`: shared by the drawing, the hit
-    /// tests and the scroll, so all three read the same rectangles.
-    layout_cache: Option<((f32, f32, u64, u32), std::sync::Arc<OptionsLayout>)>,
-    /// How many layouts were made (the caching test).
-    #[cfg(test)]
-    layouts_built: u32,
->>>>>>> arismoko/main
 }
 
 impl Default for OptionsUi {
@@ -3471,7 +3453,6 @@ impl OptionsUi {
     }
     /// Open a page whose Done/Escape returns directly to the calling screen.
     pub fn open_at(&mut self, in_world: bool, page: Page) {
-<<<<<<< HEAD
         // Starling: the Mods buttons open its Mods page (the switches and Compile: a phone has no
         // launcher to choose the mods); upstream's Mods screen is that page's Details.
         let page = if page == Page::Mods {
@@ -3479,10 +3460,7 @@ impl OptionsUi {
         } else {
             page
         };
-||||||| 980f0459eb
-=======
         self.discard_draw();
->>>>>>> arismoko/main
         self.stack.clear();
         self.data_pack_dir = None;
         self.focus = None;
@@ -4880,30 +4858,10 @@ impl OptionsUi {
                 crate::pack_screen::Action::BrowsePick(i) => {
                     events.push(Event::DownloadPack(i));
                 }
-<<<<<<< HEAD
                 crate::pack_screen::Action::Catalog => {
                     events.push(Event::OpenCatalog(CatalogShelf::ResourcePacks));
                 }
-                crate::pack_screen::Action::Options(id) => {
-                    let mut configs = horizon_polytone::pack::Configs::default();
-                    if let Some(own) = self.pack_configs.get(&id) {
-                        configs.merge(own);
-                    }
-                    self.pack_options = crate::pack_options_ui::PackOptionsUi::open(configs);
-                    self.push(Page::PackOptions);
-                }
-||||||| 980f0459eb
-                crate::pack_screen::Action::Options(id) => {
-                    let mut configs = horizon_polytone::pack::Configs::default();
-                    if let Some(own) = self.pack_configs.get(&id) {
-                        configs.merge(own);
-                    }
-                    self.pack_options = crate::pack_options_ui::PackOptionsUi::open(configs);
-                    self.push(Page::PackOptions);
-                }
-=======
                 crate::pack_screen::Action::Options(id) => self.open_pack_options(&id),
->>>>>>> arismoko/main
                 crate::pack_screen::Action::None => {}
             }
             return events;
@@ -5064,16 +5022,10 @@ impl OptionsUi {
                                 s.shader_options = None;
                                 events.push(Event::OpenShaderOptions);
                             }
-<<<<<<< HEAD
-                            if p == Page::Mods || p == Page::NativeGame {
+                            if *p == Page::Mods || *p == Page::NativeGame {
                                 events.push(Event::ListMods);
                             }
-                            if p == Page::Music {
-||||||| 980f0459eb
-                            if p == Page::Music {
-=======
                             if *p == Page::Music {
->>>>>>> arismoko/main
                                 events.push(Event::ListMusicTracks);
                             }
                             if *p == Page::ModBrowser {
@@ -5904,16 +5856,12 @@ impl OptionsUi {
         } else if self.settings_search_active() {
             self.settings_search.insert_text(text);
             self.scroll = 0.0;
-<<<<<<< HEAD
+            self.relayout();
         } else if self.page() == Page::Skin && self.profile_name.is_none() && self.skin.name.focused
         {
             self.skin.name.insert_text(text);
         } else if matches!(self.page(), Page::CustomButton(_)) && self.custom_send.focused {
             self.custom_send.insert_text(text);
-||||||| 980f0459eb
-=======
-            self.relayout();
->>>>>>> arismoko/main
         }
     }
     /// Ctrl+A/C/V/X in the language or pack search box; false when neither
@@ -6216,7 +6164,7 @@ impl OptionsUi {
                 }
             }
             self.scroll = 0.0;
-<<<<<<< HEAD
+            self.relayout();
         } else if self.page() == Page::Skin && self.profile_name.is_none() && self.skin.name.focused
         {
             // Enter (the on-screen keyboard's Done) keeps the name.
@@ -6250,10 +6198,6 @@ impl OptionsUi {
                 }
             }
             field.reset_blink();
-||||||| 980f0459eb
-=======
-            self.relayout();
->>>>>>> arismoko/main
         }
 
         // Gather focusables on the current page

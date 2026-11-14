@@ -111,14 +111,11 @@ pub struct Manifest {
     pub internals: Vec<Internal>,
     #[serde(default, deserialize_with = "inject::rows")]
     pub inject: Vec<inject::Inject>,
-<<<<<<< HEAD
     /// Files the `.hmod` leaves out and the game fetches on the player's device (Starling): a
     /// ported Java mod's assets, which its authors keep (All Rights Reserved), from the very
     /// file on Modrinth the player could download themselves ([`crate::fetch`]).
     #[serde(default)]
     pub assets: Option<Assets>,
-||||||| 980f0459eb
-=======
     /// Free-form values other mods read through `PackageInfo::property`.
     #[serde(default)]
     pub properties: std::collections::BTreeMap<String, Property>,
@@ -137,7 +134,6 @@ pub enum Property {
     Integer(i64),
     Float(f64),
     String(String),
->>>>>>> arismoko/main
 }
 
 /// A manifest's `[assets]`.
@@ -1461,7 +1457,6 @@ mod tests {
     use super::*;
 
     #[test]
-<<<<<<< HEAD
     fn an_index_reads_wasm_mods_capabilities_and_ones_it_does_not_know() {
         // The registry's index lists wasm mods (`coords_hud`: game-read, hud, chat); a capability
         // a newer game adds must not make the whole index unreadable.
@@ -1479,8 +1474,9 @@ mod tests {
             ]
         );
         assert_eq!(Capability::GameRead.to_string(), "game-read");
-||||||| 980f0459eb
-=======
+    }
+
+    #[test]
     fn injections_at_dependency_functions_are_refused_by_name() {
         let text = format!(
             "{EXAMPLE}[native]\ngame='26.3'\nmixins='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\nhorizon='0123456789012345678901234567890123456789'\n[dependencies]\nchemlib='1'\n[[inject]]\nid='listen'\nat='chemlib::transfer'\nkind='head'\nwith='listen'\n"
@@ -1511,7 +1507,6 @@ mod tests {
                 "{value}"
             );
         }
->>>>>>> arismoko/main
     }
 
     #[test]

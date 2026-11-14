@@ -589,22 +589,7 @@ pub fn button(
     } else {
         "widget/button"
     };
-<<<<<<< HEAD
     sprite(out, &crate::ui::button_take(sprite_id, x, y), x, y, w, h);
-    // A skin whose pressed buttons turn whiter writes on them in its dark ink, unshadowed.
-    let label = match crate::ui::pressed_label() {
-        Some(rgb) if active && highlighted => label.clone().with_style(&Style {
-            shadow_color: Some(0),
-            ..Style::color(rgb)
-        }),
-        _ => label.clone(),
-    };
-    scrolling_string_over_contents(out, m, &label, x, y, w, h, 2, now_ms);
-||||||| 980f0459eb
-    sprite(out, sprite_id, x, y, w, h);
-    scrolling_string_over_contents(out, m, label, x, y, w, h, 2, now_ms);
-=======
-    sprite(out, sprite_id, x, y, w, h);
     // `AbstractWidget.WithInactiveMessage.defaultInactiveMessage`: an inactive
     // widget's message is -6250336 (0xFFA0A0A0), not the active white.
     let inactive;
@@ -614,8 +599,15 @@ pub fn button(
         inactive = label.clone().with_color(0xFFA0_A0A0);
         &inactive
     };
-    scrolling_string_over_contents(out, m, label, x, y, w, h, 2, now_ms);
->>>>>>> arismoko/main
+    // A skin whose pressed buttons turn whiter writes on them in its dark ink, unshadowed.
+    let label = match crate::ui::pressed_label() {
+        Some(rgb) if active && highlighted => label.clone().with_style(&Style {
+            shadow_color: Some(0),
+            ..Style::color(rgb)
+        }),
+        _ => label.clone(),
+    };
+    scrolling_string_over_contents(out, m, &label, x, y, w, h, 2, now_ms);
 }
 /// `Tooltip.splitTooltip` of a widget's tooltip, shown under the mouse.
 pub fn tooltip(out: &mut Vec<Draw>, m: &Measure, message: &Text, mouse: (i32, i32)) {

@@ -806,16 +806,10 @@ impl PackAtlas {
             scale[0], scale[1],
         );
         let mut body = body;
-<<<<<<< HEAD
         // Developers' aid: `HORIZON_SHADER_PACK_NO_FACE=1` leaves the faces' normal and tangent
         // out (wrong lighting), to time what working them out per vertex costs.
         if flat && std::env::var_os("HORIZON_SHADER_PACK_NO_FACE").is_none() {
-||||||| 980f0459eb
-        if flat {
-=======
-        if flat {
             body.insert_str(0, PULL_FLAT);
->>>>>>> arismoko/main
             body.push_str(FACE);
             body.push_str(
                 "    uint hz_quad = uint(gl_VertexIndex) / 4u;\n    \

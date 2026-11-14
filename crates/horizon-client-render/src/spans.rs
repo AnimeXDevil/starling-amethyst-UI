@@ -153,16 +153,10 @@ pub fn record_here(on: bool) {
 /// Whether this thread records spans: all of them on, or [`record_here`].
 #[inline]
 pub fn recording_here() -> bool {
-<<<<<<< HEAD
     ENABLED.load(Ordering::Relaxed)
         || HERE.with(Cell::get)
         || RECORDING.load(Ordering::Relaxed)
-        || trace::on()
-||||||| 980f0459eb
-    ENABLED.load(Ordering::Relaxed) || HERE.with(Cell::get) || trace::on()
-=======
-    ENABLED.load(Ordering::Relaxed) || HERE.with(Cell::get) || timeline::on()
->>>>>>> arismoko/main
+        || timeline::on()
 }
 /// The thread's CPU time when spans are on for every thread (`HORIZON_SPIKES`): spans recorded
 /// by `record_here` alone keep wall time only.
@@ -773,7 +767,6 @@ mod tests {
         SWITCH.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-<<<<<<< HEAD
     #[test]
     fn diagnostic_aggregates_do_not_retain_worker_raw_spans() {
         let _switch = spans_switch();
@@ -804,8 +797,8 @@ mod tests {
         assert_eq!(step["calls"], 10000);
         assert_eq!(step["role"], "worker");
         super::record_timings(false);
-||||||| 980f0459eb
-=======
+    }
+
     /// Samples taken inside a named span carry its id, with spans off, and the span is left after it.
     #[cfg(target_os = "linux")]
     #[test]
@@ -858,7 +851,6 @@ mod tests {
                 format!("{named} named, {plain} outside")
             })
         });
->>>>>>> arismoko/main
     }
 
     /// A slow tick's notes are its slowest steps, slowest first; short steps and steps on a

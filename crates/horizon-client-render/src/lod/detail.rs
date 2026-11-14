@@ -1,12 +1,12 @@
-//! Reduced far detail.
+//! Far detail coarser than Full.
 use super::*;
 
 impl Lod {
-    /// Reduced far detail (`graphics::FarDetail::Reduced`): the next update
-    /// replans when it changes, and tiles sampled from then on approximate
-    /// wide cells (`GeneratorWorker::lod_grid`).
-    pub fn set_reduced_detail(&mut self, reduced: bool) {
-        if self.reduced_detail != reduced {
+    /// Far detail coarser than Full (`graphics::FarDetail::coarseness`: 1
+    /// Reduced, 2 Mobile): the next update replans when it changes, and tiles
+    /// sampled from then on approximate wide cells (`GeneratorWorker::lod_grid`).
+    pub fn set_far_coarseness(&mut self, coarseness: u8) {
+        if self.far_coarseness != coarseness {
             let keys: Vec<_> = self
                 .ready
                 .keys()
@@ -17,7 +17,9 @@ impl Lod {
                 self.mark_stale(key);
             }
         }
-        self.reduced_detail = reduced;
-        self.shared.approximate.store(reduced, Ordering::Relaxed);
+        self.far_coarseness = coarseness;
+        self.shared
+            .approximate
+            .store(coarseness > 0, Ordering::Relaxed);
     }
 }

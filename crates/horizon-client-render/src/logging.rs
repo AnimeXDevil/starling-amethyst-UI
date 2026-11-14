@@ -450,7 +450,6 @@ impl Floods {
 
 static LOGGER: std::sync::OnceLock<Logger> = std::sync::OnceLock::new();
 
-<<<<<<< HEAD
 /// Where messages are printed instead of stderr, which a platform may discard (Android's
 /// logcat, set by horizon-android). It gets every message the file gets, and other crates'
 /// warnings too (the graphics driver's, wgpu's), since nothing else shows them there.
@@ -459,8 +458,8 @@ static CONSOLE: std::sync::OnceLock<fn(log::Level, &str)> = std::sync::OnceLock:
 /// Prints messages with `console` from now on (before `init`).
 pub fn set_console(console: fn(log::Level, &str)) {
     let _ = CONSOLE.set(console);
-||||||| 980f0459eb
-=======
+}
+
 /// The most lines the tap keeps between two drains (`take_tapped`); older ones are dropped.
 pub const TAP_LINES: usize = 4096;
 
@@ -538,7 +537,6 @@ fn tap(thread: &str, level: log::Level, message: &str) {
         thread: capped(thread, TAP_THREAD_BYTES),
         message: capped(message, TAP_MESSAGE_BYTES),
     });
->>>>>>> arismoko/main
 }
 
 fn ours(target: &str) -> bool {
@@ -601,14 +599,8 @@ impl log::Log for Logger {
             ),
             _ => {}
         }
-<<<<<<< HEAD
         let stderr = (console.is_none() && horizon).then(|| message.clone());
-||||||| 980f0459eb
-        let stderr = horizon.then(|| message.clone());
-=======
-        let stderr = horizon.then(|| message.clone());
         tap(thread, level, &message);
->>>>>>> arismoko/main
         self.send(thread, level, &message, stderr);
         if gate == Gate::Last {
             self.write(
