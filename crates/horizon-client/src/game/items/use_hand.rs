@@ -23,9 +23,6 @@ impl Game<'_> {
             return self.use_target_then_item(hit);
         }
         self.use_failed = false;
-        // The click's target as it was decided, before the adventure gate
-        // below may drop the block for the item's own use.
-        let aimed_at_block = block_hit.is_some();
         // isSecondaryUseActive with something in either hand keeps blocks
         // from reacting.
         let sneaking = self.keys.held(Mapping::Sneak);
@@ -884,7 +881,6 @@ impl Game<'_> {
             (self.known_player_movement(), pl.ground.on_ground)
         });
         arrow.shoot_from_rotation(
-            &mut self.world.random,
             self.pitch,
             self.yaw,
             0.0,

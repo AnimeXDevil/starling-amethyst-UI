@@ -4,6 +4,7 @@
 use super::*;
 
 impl Game<'_> {
+    /// `Level.isDarkOutside`.
     pub(super) fn dark_outside(&self) -> bool {
         !self.dimension_type().has_fixed_time && self.sky_darken() >= 4
     }
@@ -16,6 +17,8 @@ impl Game<'_> {
         )
     }
 
+    /// The rain and thunder levels (`Level.getRainLevel`, `getThunderLevel`):
+    /// the world's, where the level can have weather, else none.
     pub(super) fn weather_levels(&self, partial: f32) -> (f32, f32) {
         if self.can_have_weather() {
             self.world.weather.levels(partial)
@@ -57,6 +60,8 @@ impl Game<'_> {
         darken
     }
 
+    /// Whether precipitation at a column is snow (Biome.coldEnoughToSnow:
+    /// height adjusted temperature) or none (no precipitation).
     pub(super) fn precipitation(&self, x: i32, y: i32, z: i32) -> Option<bool> {
         let chunk = self.world.chunks.get(&(x >> 4, z >> 4))?;
         self.res
@@ -65,6 +70,8 @@ impl Game<'_> {
             .snows_at(x, y, z)
     }
 
+    /// `Level.isRainingAt`: it rains, the sky light is 15, nothing that stops
+    /// motion is above, and the biome's precipitation there is rain.
     pub(super) fn raining_at(&self, p: BlockPos) -> bool {
         self.weather_levels(1.0).0 > 0.2
             && self.world.light(p.x, p.y, p.z) >> 4 == 15
@@ -72,6 +79,8 @@ impl Game<'_> {
             && self.precipitation(p.x, p.y, p.z) == Some(false)
     }
 
+    /// `getHeight(Heightmap.Types.MOTION_BLOCKING, x, z)`: one above the
+    /// highest block in `blocks_motion_in_heightmap` or holding a fluid.
     pub(super) fn rain_height(&self, x: i32, z: i32) -> i32 {
         render_tick::motion_blocking_height(&self.world, &self.pack.assets.properties, x, z)
     }

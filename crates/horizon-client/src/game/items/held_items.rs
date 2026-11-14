@@ -4,6 +4,7 @@
 use super::*;
 
 impl Game<'_> {
+    /// The stack in the hand that acts (`getItemInHand(hand)`).
     pub(super) fn held(&self) -> Option<&ItemStack> {
         self.stack_in(self.held_slot())
     }
@@ -26,6 +27,11 @@ impl Game<'_> {
         .is_some()
     }
 
+    /// `LivingEntity.updateFallFlying`: the glide's wear. `Util.getRandom`
+    /// picks one of the gliders that will not break (from the entity's own
+    /// random), and
+    /// `ItemStack.hurtAndBreak` takes `points` of its durability (Unbreaking
+    /// may save it). Callers skip creative.
     pub(super) fn wear_glider(&mut self, points: u32) {
         // Every 20th glide tick only, so collecting the candidates here is fine.
         let mut pieces: Vec<usize> = super::glide_wear::gliding_slots(
@@ -66,6 +72,8 @@ impl Game<'_> {
         }
     }
 
+    /// `LivingEntity.canFreeze`'s armor half: any worn piece in
+    /// `freeze_immune_wearables`.
     pub(crate) fn wears_freeze_immune(&self) -> bool {
         let immune = self
             .res

@@ -3,13 +3,17 @@
 use super::*;
 
 impl Game<'_> {
+    /// ServerLevel.tick block phases: scheduled ticks, random ticks in the
+    /// chunks the tickets simulate, block events and moving pistons.
+    /// The length the block log had after the changed blocks went out
+    /// (`ServerChunkCache.tick`'s broadcast), before the block events and the
+    /// block entities ran.
     pub(super) fn tick_blocks(&mut self) -> Result<Option<usize>> {
         let mut scratch = std::mem::take(&mut self.tick_scratch);
         let result = self.tick_blocks_with_scratch(&mut scratch);
         self.tick_scratch = scratch;
         result
     }
-    /// The ticks shown by this frame; still mode follows world time.
     pub(super) fn tick_blocks_with_scratch(
         &mut self,
         scratch: &mut TickScratch,
@@ -22,21 +26,7 @@ impl Game<'_> {
         self.sync_tick_chunks();
         self.start_ticking_chunks();
         laps.lap("tb_tickets");
-        let levels = self.tickets.levels();
-        let bounds = levels.random_tick_bounds();
-        // Keep the world map's chunk order, including empty chunks
-        // (tick_chunk_random still draws for precipitation in those).
-        scratch.ticking.clear();
-        scratch
-            .ticking
-            .extend(self.world.chunks.keys().copied().filter(|&(x, z)| {
-                if let Some((min_x, min_z, max_x, max_z)) = bounds
-                    && (x < min_x || x > max_x || z < min_z || z > max_z)
-                {
-                    return false;
-                }
-                levels.random_ticking(x, z) && ticking_chunk(&self.world, x, z)
-            }));
+        self.random_tick_chunks(&mut scratch.ticking);
         laps.lap("tb_chunks");
         // Entity.checkInsideBlocks for the plates, tripwires, detector rails and
         // buttons under the players (the host and the LAN guests), the minecarts
@@ -234,7 +224,21 @@ impl Game<'_> {
         if !debug {
             self.tick_scheduled()?;
         }
+        horizon_threads::work::clear_work();
         self.with_level(|b, level, ticks| {
+            // The masks the random ticks will read, built on helper threads first while the
+            // parallel tick is on (`HORIZON_PARALLEL_TICK`): the draws and ticks don't depend on them.
+            if !debug && horizon_client::parallel::lanes() > 1 {
+                horizon_client::spans::time("random_tick_masks", || {
+                    let chunks = &level.world.chunks;
+                    level.random_tick_sections.prepare_masks(
+                        &scratch.ticking,
+                        |key| chunks.get(&key).cloned(),
+                        level.facts,
+                        &|id| b.random_tick_candidate(BlockStateId(id)),
+                    );
+                });
+            }
             horizon_client::spans::time("random_ticks", || {
                 for (x, z) in scratch.ticking.drain(..).filter(|_| !debug) {
                     // The last answer, asked from Y `from` at a world revision:
@@ -269,6 +273,7 @@ impl Game<'_> {
                 }
             });
         });
+        horizon_threads::work::clear_work();
         laps = horizon_client::spans::laps();
         let sent = self.lan_broadcast_changes();
         laps.lap("tb_broadcast");
@@ -336,6 +341,7 @@ impl Game<'_> {
         self.tick_chunks.recycle_added(added);
     }
 
+    /// `ServerLevel.tick`: moving block entities push after entity travel.
     pub(super) fn tick_moving_pistons(&mut self) -> Result<()> {
         self.with_level(|b, level, ticks| b.tick_block_entities(level, ticks));
         let pushes = std::mem::take(&mut self.block_ticks.piston_pushes);
@@ -345,6 +351,9 @@ impl Game<'_> {
         Ok(())
     }
 
+    /// `ServerLevel.tick`'s scheduled block then fluid ticks, one at a time:
+    /// the side effects of each (a shrieker summoning a warden, drops, game
+    /// events) happen before the next tick runs, as they do inline in vanilla.
     pub(super) fn tick_scheduled(&mut self) -> Result<()> {
         for fluids in [false, true] {
             let mut laps = horizon_client::spans::laps();

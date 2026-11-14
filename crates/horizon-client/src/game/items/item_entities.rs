@@ -23,14 +23,25 @@ impl Game<'_> {
         let mut cells = horizon_client::entities::ItemCells::new(&items);
         // A LAN or server guest only shows the host's items.
         let merging = self.remote.is_none();
+        // `Entity.checkBelowWorld`: below `Level.getMinY() - 64`.
+        let void = f64::from(self.level_min_y() - 64);
         let mut obstacles =
             horizon_client::entities::ObstacleGrid::new(self.item_entity_collisions());
         let mut nearby = Vec::new();
         let mut bubble_tops = Vec::new();
+        let mut moves = ahead::Moves::work_out(self, &items, &obstacles, round, |item| {
+            !self.joined_during_entity_pass(item.id)
+                && ticking(
+                    item.position.x.floor() as i32,
+                    item.position.z.floor() as i32,
+                )
+        });
         // `ItemUtils.onContainerDestroyed`: what a destroyed item held, and
         // where it lay, for adding to the level once its own tick is done.
         let mut destroyed: Vec<(ItemStack, Vec3)> = Vec::new();
+        let item_type = horizon_threads::work::entity_id("minecraft:item");
         for i in 0..items.len() {
+            horizon_threads::work::set_entity(item_type);
             if removed[i] {
                 // Merged into an earlier item before its own tick: it never ticked.
                 round.not_ticked(items[i].id);
@@ -71,17 +82,15 @@ impl Game<'_> {
                     item,
                     escape_speed,
                     &nearby,
-                    Some(self.border.geometry()),
-                );
-            let escape_speed = no_physics.then(|| item.random.next_float() * 0.2 + 0.1);
-            let mut entered = Vec::new();
-            let (alive, discarded) = self.tick_item_with_block_contacts(
-                item,
-                escape_speed,
-                &nearby,
                 false,
                 &mut |splash| entered.push(splash),
             );
+                (no_physics, alive, discarded, entered)
+            };
+            let (no_physics, alive, discarded, entered) = match moves.take(i, item, &mut at_turn) {
+                Some(moved) => moved,
+                None => at_turn(item),
+            };
             // Entity.doWaterSplashEffect: the server plays the sound (broadcast
             // to clients). Its addParticle is empty.
             for splash in entered {
@@ -123,7 +132,7 @@ impl Game<'_> {
                 2
             };
             if merging
-                && (alive || item.age == 6000 && item.position.y > -128.0)
+                && (alive || item.age == 6000 && item.position.y >= void)
                 && item.ticks.is_multiple_of(rate)
             {
                 let max_stack = |stack: &ItemStack| self.stack_max_size(stack).max(1);
@@ -137,8 +146,8 @@ impl Game<'_> {
                 );
             }
             let item = &mut items[i];
-            let mut alive = alive || (item.age < 6000 && item.position.y > -128.0);
-            if merging && !removed[i] && item.age >= 6000 && item.position.y > -128.0 {
+            let mut alive = alive || (item.age < 6000 && item.position.y >= void);
+            if merging && !removed[i] && item.age >= 6000 && item.position.y >= void {
                 let mut extra_life = 0;
                 self.native_item_expire(item.id, &item.stack, &mut extra_life);
                 if extra_life > 0 {
@@ -273,13 +282,7 @@ impl Game<'_> {
     /// motion (0.2 up and ±0.1 sideways), leaving the level random untouched.
     pub(super) fn spawn_destroyed_contents(&mut self, destroyed: Vec<(ItemStack, Vec3)>) {
         for (stack, at) in destroyed {
-            let r = &mut self.world.random;
-            let motion = [
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-                r.next_double() * 0.2 - 0.1,
-            ];
-            self.spawn_item(stack, [at.x, at.y, at.z], motion, 0);
+            self.spawn_item_own(stack, [at.x, at.y, at.z], 0);
         }
     }
     /// `ExperienceOrb.award`: orbs of the largest sizes; each draws the id
@@ -513,6 +516,7 @@ impl Game<'_> {
             count: 1,
             ticks: 0,
             health: 5,
+            air: 300,
             following: None,
         });
         // ServerLevel.addFreshEntity.

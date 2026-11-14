@@ -448,7 +448,7 @@ impl Game<'_> {
             .as_ref()
             .map(|s| (s.selected.map_or(-1, |i| i as i32), s.stone.clone()));
         let crafter_data = match self.container_kind() {
-            Some(BlockEntity::Crafter(c)) => Some((c.disabled, c.triggered)),
+            Some(BlockEntity::Crafter(c)) => Some((c.disabled, c.is_triggered())),
             _ => None,
         };
         // The merchant's session, lent to the menu for this click.
@@ -675,7 +675,9 @@ impl Game<'_> {
             if let Some(s) = self.station.as_mut() {
                 s.selected = usize::try_from(menu.data[0]).ok();
                 s.stone = std::mem::take(&mut menu.stone);
+                if input_changed {
                 s.stonecutter_changed();
+                }
             }
             for sound in sounds.into_iter().filter(|_| !predicting) {
                 self.station_sound(sound);
@@ -694,14 +696,8 @@ impl Game<'_> {
             // EnchantmentMenu.slotsChanged: new offers for the item.
             self.station_changed();
         }
-        if kind == Kind::CrafterBlock
-            && let Some(BlockEntity::Crafter(c)) = self
-                .container
-                .and_then(|k| self.world.block_entities.get_mut(&k))
-        {
-            for (i, d) in c.disabled.iter_mut().enumerate() {
-                *d = menu.data[i] == 1;
-            }
+        if kind == Kind::CrafterBlock {
+            self.apply_crafter_slot_states(&menu);
         }
         if matches!(kind, Kind::Furnace(_))
             && let Some(BlockEntity::Furnace(f)) = self
@@ -724,6 +720,25 @@ impl Game<'_> {
             self.register_made_maps(maps);
         }
         true
+    }
+    /// `CrafterBlockEntity.setSlotState`: the menu's slot states land on the
+    /// block entity, whose `setChanged` marks the chunk for saving.
+    pub(super) fn apply_crafter_slot_states(&mut self, menu: &horizon_client::menu::Menu) {
+        let Some(key) = self.container else {
+            return;
+        };
+        let Some(BlockEntity::Crafter(c)) = self.world.block_entities.get_mut(&key) else {
+            return;
+        };
+        let mut changed = false;
+        for (i, d) in c.disabled.iter_mut().enumerate() {
+            let disabled = menu.data[i] == 1;
+            changed |= *d != disabled;
+            *d = disabled;
+        }
+        if changed {
+            self.container_changed(key);
+        }
     }
     pub(super) fn click_inventory(&mut self, right: bool) {
         if self.mod_browser_press(right) || self.mount_click(right) {
