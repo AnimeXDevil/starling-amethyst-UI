@@ -26,6 +26,10 @@ impl OptionsUi {
     /// (`PackSelectionScreen`'s directory watcher): the screen is made again over
     /// `infos`, keeping the selection made on it so far.
     pub fn update_pack_infos(&mut self, infos: Vec<crate::pack_screen::PackInfo>) {
+        // Create World's data packs are what this page lists then, and they have their watcher.
+        if self.data_pack_dir.is_some() {
+            return;
+        }
         if let Some(p) = self.pack_screen.take()
             && p.changed
         {

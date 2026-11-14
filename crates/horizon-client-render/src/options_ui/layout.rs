@@ -125,6 +125,7 @@ impl OptionsUi {
                     Act::Push(Page::Online),
                 ));
                 let entries = [
+                    // Everywhere for the layers and Main Hand; `skin_page` adds the name and skin.
                     ("options.skinCustomisation", Some(Page::Skin)),
                     ("options.sounds", Some(Page::Sound)),
                     // Video Settings... opens Horizon's graphics screen, which holds every
@@ -145,7 +146,8 @@ impl OptionsUi {
                     // settings and its mods, as a mod adds its button here.
                     // Credits & Attribution (WinScreen's credits) follows them.
                     ("horizon.pages.open.horizon_settings", Some(Page::Horizon)),
-                    ("horizon.pages.open.mods", Some(Page::Mods)),
+                    // Starling's Mods page (`open_at`).
+                    ("horizon.pages.open.mods", Some(Page::NativeGame)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
                 // horizon-extras: without it, vanilla's last row instead of Horizon Settings and
@@ -164,6 +166,7 @@ impl OptionsUi {
                     .concat();
                     &plain
                 };
+                let entries = with_diagnostics(entries);
                 let rows = entries.len().div_ceil(2) as f32;
                 let gy = (61.0 + 30.0f32).min(h - 33.0 - rows * 24.0);
                 for (i, (key, page)) in entries.iter().enumerate() {
@@ -195,6 +198,27 @@ impl OptionsUi {
                 });
                 let y = (33.0 + 30.0f32).min(h - 33.0 - 76.0);
                 let x = cx - 105.0;
+                if ON_A_PHONE {
+                    // Starling's founders, then the game it is built on (THIRD_PARTY_NOTICES.md).
+                    for (i, key) in ["starling.credits.founders", "starling.credits.horizon"]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        out.push(Widget {
+                            x: 0.0,
+                            y: y - 26.0 + 12.0 * i as f32,
+                            w,
+                            h: 9.0,
+                            kind: WKind::Text {
+                                text: tr(key),
+                                color: u32::MAX,
+                                centered: true,
+                            },
+                            list: false,
+                            row: 0,
+                        });
+                    }
+                }
                 out.push(button(
                     x,
                     y,
@@ -248,17 +272,43 @@ impl OptionsUi {
                     list: false,
                     row: 0,
                 });
-                let mut mappings: Vec<(&str, &str)> =
-                    MAPPINGS.iter().map(|(n, _, c)| (*n, *c)).collect();
+                let keypad = s.keypad.enabled;
+                if ON_A_PHONE || keypad {
+                    top = 64.0;
+                    out.push(button(
+                        cx - 150.0,
+                        39.0,
+                        300.0,
+                        Text::literal(if keypad {
+                            "Input profile: D-pad / keypad"
+                        } else {
+                            "Input profile: Keyboard"
+                        }),
+                        Act::KeyboardProfile,
+                    ));
+                }
+                let label = |name: &str| {
+                    crate::keypad::ACTIONS
+                        .iter()
+                        .find(|a| a.0 == name)
+                        .map_or_else(|| lang::get(name), |a| a.1.to_owned())
+                };
+                let mut mappings: Vec<(&str, &str)> = if keypad {
+                    crate::keypad::ACTIONS
+                        .iter()
+                        .map(|a| (a.0, "movement"))
+                        .collect()
+                } else {
+                    MAPPINGS.iter().map(|(n, _, c)| (*n, *c)).collect()
+                };
                 let query = self.settings_search.value.to_lowercase();
                 mappings.retain(|(name, _)| {
-                    query.is_empty() || lang::get(name).to_lowercase().contains(&query)
+                    query.is_empty() || label(name).to_lowercase().contains(&query)
                 });
                 mappings.sort_by(|a, b| {
                     let ca = CATEGORIES.iter().position(|c| *c == a.1).unwrap_or(99);
                     let cb = CATEGORIES.iter().position(|c| *c == b.1).unwrap_or(99);
-                    ca.cmp(&cb)
-                        .then_with(|| lang::get(a.0).cmp(&lang::get(b.0)))
+                    ca.cmp(&cb).then_with(|| label(a.0).cmp(&label(b.0)))
                 });
                 let row_left = cx - 170.0;
                 let scrollbar_x = row_left + 340.0 + 6.0 + 2.0;
@@ -315,16 +365,39 @@ impl OptionsUi {
                         w: 200.0,
                         h: 9.0,
                         kind: WKind::Text {
-                            text: tr(name),
+                            text: if keypad {
+                                Text::literal(label(name))
+                            } else {
+                                tr(name)
+                            },
                             color: u32::MAX,
                             centered: false,
                         },
                         list: false,
                         row: 0,
                     });
-                    let key = s.keys.get(name).to_owned();
+                    let key = if keypad {
+                        s.keypad
+                            .keys(name)
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| "key.keyboard.unknown".into())
+                    } else {
+                        s.keys.get(name).to_owned()
+                    };
                     let mut message = keybinds::display_name(&key);
-                    let conflicts = key_conflicts(
+                    let conflicts: Vec<_> = if keypad {
+                        crate::keypad::ACTIONS
+                            .iter()
+                            .filter(|a| {
+                                a.0 != name
+                                    && s.keypad.keys(a.0).contains(&key)
+                                    && key != "key.keyboard.unknown"
+                            })
+                            .map(|a| a.0.to_owned())
+                            .collect()
+                    } else {
+                        key_conflicts(
                         s,
                         "",
                         name,
@@ -332,7 +405,8 @@ impl OptionsUi {
                         0,
                         crate::mod_list::KeyConflictContext::Universal,
                         s.keys.is_default(name),
-                    );
+                        )
+                    };
                     if !conflicts.is_empty() {
                         message = Text::literal("[ ")
                             .append(message.with_color(text::WHITE))
@@ -351,7 +425,14 @@ impl OptionsUi {
                     }
                     let reset_x = scrollbar_x - 50.0 - 10.0;
                     let change_x = reset_x - 5.0 - 75.0;
-                    let name_static = MAPPINGS.iter().find(|m| m.0 == name).map_or("", |m| m.0);
+                    let name_static = if keypad {
+                        crate::keypad::ACTIONS
+                            .iter()
+                            .find(|a| a.0 == name)
+                            .map_or("", |a| a.0)
+                    } else {
+                        MAPPINGS.iter().find(|m| m.0 == name).map_or("", |m| m.0)
+                    };
                     out.push(button(change_x, y, 75.0, message, Act::Key(name_static)));
                     if !conflicts.is_empty() {
                         out.push(Widget {
@@ -375,11 +456,15 @@ impl OptionsUi {
                         tr("controls.reset"),
                         Act::ResetKey(name_static),
                     );
-                    out.push(if s.keys.is_default(name) {
+                    out.push(
+                        if (keypad && !s.keypad.bindings.contains_key(name))
+                            || (!keypad && s.keys.is_default(name))
+                        {
                         inactive(reset)
                     } else {
                         reset
-                    });
+                        },
+                    );
                     y += 20.0;
                     rows.end(&mut out, y);
                 }
@@ -626,13 +711,94 @@ impl OptionsUi {
                         Row::Buttons(mut a, b) => {
                             a.x = cx - 155.0;
                             a.y = y + 2.0;
+                            let after = a.x + a.w + 10.0;
                             out.push(a);
                             if let Some(mut b) = b {
-                                b.x = cx + 5.0;
+                                b.x = after;
                                 b.y = y + 2.0;
                                 out.push(b);
                             }
                             y += 25.0;
+                        }
+                        Row::Field => {
+                            out.push(Widget {
+                                x: cx - 155.0,
+                                y: y + 8.0,
+                                w: 40.0,
+                                h: 9.0,
+                                kind: WKind::Text {
+                                    text: Text::literal("Name"),
+                                    color: 0xFFA0_A0A0,
+                                    centered: false,
+                                },
+                                list: false,
+                                row: 0,
+                            });
+                            // Drawn and edited by the page itself (`skin.name`).
+                            let field = &mut self.skin.name;
+                            (field.x, field.y) = (cx - 115.0, y + 2.0);
+                            (field.width, field.height) = (270.0, 20.0);
+                            y += 25.0;
+                        }
+                        Row::SendField => {
+                            // Drawn and edited by the page itself.
+                            let field = &mut self.custom_send;
+                            (field.x, field.y) = (cx - 155.0, y + 2.0);
+                            (field.width, field.height) = (310.0, 20.0);
+                            y += 25.0;
+                        }
+                        Row::Icons(icons) => {
+                            let mut x = cx - 155.0;
+                            for mut icon in icons {
+                                (icon.x, icon.y) = (x, y + 2.0);
+                                icon.list = true;
+                                x += 44.0;
+                                out.push(icon);
+                            }
+                            y += 42.0;
+                        }
+                        Row::Canvas(id) => {
+                            // As big as the page has room for, its tools beside it.
+                            let side = own_buttons::SIZE as f32;
+                            let cell = ((h - 72.0) / side).floor().clamp(3.0, 8.0);
+                            let x = cx - 155.0;
+                            self.painter.at = [x, y + 2.0, cell];
+                            let tools = x + side * cell + 46.0;
+                            for (i, (label, act)) in [
+                                ("Clear", Act::CanvasClear),
+                                ("Plate", Act::CanvasPlate),
+                                ("Import PNG", Act::CanvasImport(id)),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            {
+                                let mut tool = button(
+                                    tools,
+                                    y + 2.0 + i as f32 * 24.0,
+                                    80.0,
+                                    Text::literal(label),
+                                    act,
+                                );
+                                tool.list = true;
+                                out.push(tool);
+                            }
+                            y += side * cell + 6.0;
+                        }
+                        Row::Warning(text) => {
+                            out.push(Widget {
+                                x: 0.0,
+                                y: y + 4.0,
+                                w,
+                                h: 9.0,
+                                kind: WKind::Text {
+                                    text: Text::literal(text),
+                                    color: rgba(255, 85, 85, 255),
+                                    centered: true,
+                                },
+                                list: false,
+                                row: 0,
+                            });
+                            y += 16.0;
                         }
                     }
                     rows.end(&mut out, y);
@@ -643,10 +809,31 @@ impl OptionsUi {
                     Page::Accessibility => {
                         Some(("options.accessibility.link", Act::AccessibilityHelp))
                     }
+                    // Starling's Mods page.
+                    Page::NativeGame => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
+                    Page::Skin if self.skin_page => Some(("Open Skin Folder", Act::OpenSkinFolder)),
                     _ => None,
                 };
                 if let Some((label, act)) = folder {
-                    out.push(button(cx - 154.0, h - 27.0, 150.0, tr(label), act));
+                    // Android's way to find mods, resource packs and shader packs.
+                    let shelf = catalog_shelf(page).filter(|_| self.catalog_buttons);
+                    let (open_w, catalog) =
+                        crate::pack_screen::open_folder_slot(cx - 154.0, shelf.is_some());
+                    if let (Some(shelf), Some((x, width))) = (shelf, catalog) {
+                        out.push(button(
+                            x,
+                            h - 27.0,
+                            width,
+                            tr("Catalog"),
+                            Act::OpenCatalog(shelf),
+                        ));
+                    }
+                    let label = if catalog.is_some() {
+                        crate::pack_screen::SHORT_OPEN_FOLDER
+                    } else {
+                        label
+                    };
+                    out.push(button(cx - 154.0, h - 27.0, open_w, tr(label), act));
                     out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
                 } else {
                     out.push(done(h - 27.0));
@@ -669,6 +856,9 @@ impl OptionsUi {
             {
                 *active = self.in_world && self.minecart_improvements;
             }
+        }
+        if page == Page::Skin && self.skin_page {
+            self.skin.name.y += previous_scroll - self.scroll;
         }
         self.row_bands = rows
             .bands

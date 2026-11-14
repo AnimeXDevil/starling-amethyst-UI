@@ -5,7 +5,7 @@ use std::{
     ops::Range,
 };
 
-use super::{anonymous_structs, atomic_vectors, interface_blocks, scan::is_ident};
+use super::{anonymous_structs, atomic_vectors, interface_blocks, scan::is_ident, shadowed_types};
 use crate::{Preprocessed, macros::lex};
 
 struct Token<'a> {
@@ -185,6 +185,8 @@ pub(super) fn prepare(pp: &Preprocessed) -> Option<Preprocessed> {
     let pruned = prune(&pp.code).map(|code| Preprocessed { code, ..pp.clone() });
     let pp = pruned.as_ref().unwrap_or(pp);
     let named = anonymous_structs::name(&pp.code);
+    let code = named.as_deref().unwrap_or(&pp.code);
+    let named = shadowed_types::rename(code).or(named);
     let code = named.as_deref().unwrap_or(&pp.code);
     let flat = interface_blocks::flatten(code)
         .or(named)

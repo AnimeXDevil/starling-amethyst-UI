@@ -355,8 +355,17 @@ impl OptionsUi {
                     (!pointer_over || self.pad_driving).then_some([wd.x, wd.y, wd.w, wd.h]);
             }
             match &wd.kind {
-                WKind::Button { label, active, act } => {
-                    ui::focused_button(
+                WKind::Button {
+                    label,
+                    active,
+                    icon,
+                    act,
+                } => {
+                    match icon.as_deref().filter(|i| atlas.sprites.contains_key(*i)) {
+                        Some(icon) => {
+                            ui::sprite_sized(batch, atlas, icon, wd.x, wd.y, wd.w, wd.h, u32::MAX)
+                        }
+                        None => ui::focused_button(
                         batch,
                         atlas,
                         [wd.x, wd.y, wd.w, wd.h],
@@ -365,7 +374,8 @@ impl OptionsUi {
                         pointer_over,
                         is_focused,
                         matches!(act, Act::Done).then_some(crate::widgets::Action::Done),
-                    );
+                        ),
+                    }
                     crate::widgets::last_narratable(|n| {
                         narrate_widget(n, s, wd, hover, list_key, framebuffer);
                     });
@@ -520,6 +530,41 @@ impl OptionsUi {
                 );
             }
             self.settings_search = search;
+        }
+        if self.page() == Page::Skin && self.skin_page && self.profile_name.is_none() {
+            let mut name = self.skin.name.clone();
+            if name.y >= top && name.y + name.height <= bottom {
+                // Red while what is typed is no name, which leaving the box refuses.
+                name.text_color = if crate::offline_name::is_valid_choice(&name.value) {
+                    rgba(224, 224, 224, 255)
+                } else {
+                    rgba(255, 85, 85, 255)
+                };
+                name.draw(batch, atlas, None);
+            }
+            self.skin.name = name;
+        }
+        if matches!(self.page(), Page::CustomButton(_)) {
+            let mut field = self.custom_send.clone();
+            if field.y >= top && field.y + field.height <= bottom {
+                field.draw(batch, atlas, None);
+            }
+            self.custom_send = field;
+        }
+        if matches!(self.page(), Page::CustomDraw(_)) {
+            self.painter.draw(batch, atlas);
+        }
+        // An image just kept, into its slot of the atlas: the button wears it at once.
+        if let Some((id, pixels)) = self.painter.upload.take()
+            && let Some(r) = atlas.sprites.get(&own_buttons::sprite(id))
+        {
+            batch.patches.push(crate::font::Patch {
+                x: (r.u0 * atlas.width as f32).round() as u32,
+                y: (r.v0 * atlas.height as f32).round() as u32,
+                width: own_buttons::SIZE,
+                height: own_buttons::SIZE,
+                rgba: pixels,
+            });
         }
         FrameDraw::Tooltip(tooltip, tooltip_rect)
     }

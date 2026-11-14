@@ -1476,7 +1476,6 @@ impl HudAtlas {
             blinks: Default::default(),
         }
     }
-<<<<<<< HEAD
     /// Pack against a skyline so space below shorter neighbours stays usable.
     /// Pixel UI must not be reduced merely because tall shelves leave gaps.
     #[cfg(any(target_os = "android", test))]
@@ -1661,47 +1660,6 @@ impl HudAtlas {
             log::warn!("the atlas does not fit {max}x{max}: {side} px textures at half size");
         }
     }
-    /// `layout`, but when `extras` (Custom Item Textures) make the images more than `max`
-    /// holds, without them: they are left out, not the packs.
-    fn layout_leaving_out(
-        images: &mut Vec<PackedImage>,
-        animated: &mut Vec<String>,
-        extras: &HashSet<String>,
-        max: u32,
-    ) -> Result<(u32, Vec<(u32, u32)>, u32)> {
-        match Self::layout(images, max) {
-            Err(e) if !extras.is_empty() => {
-                images.retain(|i| !extras.contains(&i.0));
-                animated.retain(|n| !extras.contains(n));
-                let layout = Self::layout(images, max)?;
-                log::warn!("left out the custom item textures: {e}");
-                Ok(layout)
-            }
-            layout => layout,
-        }
-    }
-||||||| 980f0459eb
-    /// `layout`, but when `extras` (Custom Item Textures) make the images more than `max`
-    /// holds, without them: they are left out, not the packs.
-    fn layout_leaving_out(
-        images: &mut Vec<PackedImage>,
-        animated: &mut Vec<String>,
-        extras: &HashSet<String>,
-        max: u32,
-    ) -> Result<(u32, Vec<(u32, u32)>, u32)> {
-        match Self::layout(images, max) {
-            Err(e) if !extras.is_empty() => {
-                images.retain(|i| !extras.contains(&i.0));
-                animated.retain(|n| !extras.contains(n));
-                let layout = Self::layout(images, max)?;
-                log::warn!("left out the custom item textures: {e}");
-                Ok(layout)
-            }
-            layout => layout,
-        }
-    }
-=======
->>>>>>> arismoko/main
     /// Shelf placements of `images` (tallest first) in the narrowest atlas
     /// width from 4096 up that keeps the atlas, glyph rows included, within
     /// `max` texels a side; and the first row free for glyphs. High-resolution

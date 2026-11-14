@@ -12,6 +12,7 @@ pub(crate) fn button(x: f32, y: f32, w: f32, label: Text, act: Act) -> Widget {
             label,
             active: true,
             act,
+            icon: None,
         },
         list: false,
         row: 0,

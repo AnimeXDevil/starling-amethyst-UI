@@ -3241,7 +3241,6 @@ fn write_dat_as(path: &Path, tag: Tag, durable: bool) -> Result<()> {
     }
     Ok(())
 }
-<<<<<<< HEAD
 /// World files written off the render thread while the game saves in the background (the
 /// autosave): Android's shared storage takes milliseconds per file call, and a save writes a
 /// dozen small files. One thread writes them in order; reads see what is still queued; a
@@ -3376,35 +3375,8 @@ pub mod later {
         }
     }
 }
-/// `SavedDataStorage`: `{data: ..., DataVersion}` under `data/minecraft/`.
-fn saved_data_path(world: &Path, name: &str) -> PathBuf {
-    world
-        .join("data")
-        .join("minecraft")
-        .join(format!("{name}.dat"))
-}
-fn read_saved_data(world: &Path, name: &str) -> Option<Tag> {
-    read_dat(&saved_data_path(world, name))?
-        .get("data")
-        .cloned()
-}
-||||||| 980f0459eb
-/// `SavedDataStorage`: `{data: ..., DataVersion}` under `data/minecraft/`.
-fn saved_data_path(world: &Path, name: &str) -> PathBuf {
-    world
-        .join("data")
-        .join("minecraft")
-        .join(format!("{name}.dat"))
-}
-fn read_saved_data(world: &Path, name: &str) -> Option<Tag> {
-    read_dat(&saved_data_path(world, name))?
-        .get("data")
-        .cloned()
-}
-=======
 mod saved_data;
 use saved_data::{read_saved_data, saved_data_path, write_saved_data};
->>>>>>> arismoko/main
 /// The world's generator settings: world_gen_settings.dat (26.3) or
 /// level.dat's Data.WorldGenSettings.
 pub fn world_gen_settings(world: &Path) -> Option<Tag> {
