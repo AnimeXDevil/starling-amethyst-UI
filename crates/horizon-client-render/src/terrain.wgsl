@@ -764,6 +764,19 @@ fn hdr_mark(tier: u32, y: f32) -> f32 {
     if color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
     return solid_finish(in, texel, color);
 }
+@fragment fn fs_cutout_static_sdr(wire: TerrainWire) -> @location(0) vec4<f32> {
+    let in = from_wire(wire);
+    if HDR_LIGHTING && globals.hdr_light.z != 0.0 {
+        hdr_normal = normalize(cross(dpdy(in.local), dpdx(in.local)));
+    }
+    let texel = sprite(in.uv, in.layer & 0x7fffu);
+    var color = texel * in.color;
+    if !SETTLED_TERRAIN {
+        color = mix(globals.fog_color * vec4(1.0, 1.0, 1.0, color.a), color, in.visibility);
+    }
+    if color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
+    return solid_finish(in, texel, color);
+}
 fn solid_color(in: TerrainOut) -> vec4<f32> {
     let dx = dpdx(in.local);
     let dy = dpdy(in.local);
