@@ -133,10 +133,6 @@ impl TextEdit {
     fn insert_filtered(&mut self, filtered: &str) {
         self.clamp();
         let (a, b) = self.selected();
-<<<<<<< HEAD
-||||||| 980f0459eb
-        let filtered = filter_text(text, self.multiline);
-=======
         let filtered = filter_text(text, self.multiline);
         let selected_units: usize = self
             .value
@@ -145,7 +141,6 @@ impl TextEdit {
             .take(b - a)
             .map(char::len_utf16)
             .sum();
->>>>>>> arismoko/main
         let room = self
             .max_length
             .saturating_sub(utf16_len(&self.value) - selected_units);

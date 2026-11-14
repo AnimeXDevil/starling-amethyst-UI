@@ -141,16 +141,10 @@ pub mod component {
     pub const BANNER_PATTERNS: i32 = 74;
     pub const BASE_COLOR: i32 = 75;
     pub const POT_DECORATIONS: i32 = 76;
-<<<<<<< HEAD
-||||||| 980f0459eb
-    pub const JUKEBOX_PLAYABLE: i32 = 66;
-    pub const DAMAGE_RESISTANT: i32 = 27;
-=======
     pub const JUKEBOX_PLAYABLE: i32 = 66;
     pub const DAMAGE_RESISTANT: i32 = 27;
     /// `Tool`: rules, default mining speed, wear per block, creative breaking.
     pub const TOOL: i32 = 28;
->>>>>>> arismoko/main
     pub const CONTAINER: i32 = 77;
     pub const BLOCK_STATE: i32 = 78;
     pub const BEES: i32 = 79;

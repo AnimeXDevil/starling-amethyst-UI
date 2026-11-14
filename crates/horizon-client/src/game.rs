@@ -7386,15 +7386,7 @@ impl Game<'_> {
         }
         self.tick_totem();
         self.update_totem_ready();
-<<<<<<< HEAD
-        self.tick_command_extras();
-        // Starling: the old tick hook, for the mods made for it (native_compat.rs).
-        self.native_tick();
-||||||| 980f0459eb
-        self.tick_command_extras();
-=======
         span("tick_command_extras", || self.tick_command_extras());
->>>>>>> arismoko/main
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the
@@ -16722,15 +16714,7 @@ pub(crate) fn run_with(
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-<<<<<<< HEAD
-    // Android has no launcher to start from: the setup screen asks for the game files instead.
-    #[cfg(not(target_os = "android"))]
-    if let Some(error) = missing_resources(&vanilla_root) {
-||||||| 980f0459eb
-    if let Some(error) = missing_resources(&vanilla_root) {
-=======
     if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
->>>>>>> arismoko/main
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.

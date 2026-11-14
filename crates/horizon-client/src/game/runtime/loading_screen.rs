@@ -839,21 +839,12 @@ impl ApplicationHandler for App {
 
 /// Every launch reads the prepared game files (`horizon-prepare`'s output, whose
 /// manifest is `horizon-resources.json`): without them, say where they were
-<<<<<<< HEAD
-/// looked for and how to get them, before a window or a loader starts.
-#[cfg(not(target_os = "android"))]
-pub(super) fn missing_resources(root: &std::path::Path) -> Option<String> {
-||||||| 980f0459eb
-/// looked for and how to get them, before a window or a loader starts.
-pub(super) fn missing_resources(root: &std::path::Path) -> Option<String> {
-=======
 /// looked for and how to get them, before a window or a loader starts. `get` is
 /// the page a hook sends the player to (`horizon_hooks::engine::get_the_game`).
 pub(super) fn missing_resources(
     root: &std::path::Path,
     get: Option<horizon_hooks::GetTheGame>,
 ) -> Option<String> {
->>>>>>> arismoko/main
     let shown = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
     if !root.join("horizon-resources.json").is_file() {
         let launcher = get.map_or(String::new(), |get| {

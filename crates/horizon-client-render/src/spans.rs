@@ -220,16 +220,8 @@ impl Drop for Guard {
             .and_then(|start| Some((thread_cpu()?, start)))
             .map_or(ms, |(end, start)| (end - start).as_secs_f32() * 1000.0);
         DEPTH.with(|d| d.set(depth));
-<<<<<<< HEAD
-        trace::span(name, started, ms);
-        emit(Span {
-||||||| 980f0459eb
-        trace::span(name, started, ms);
-        push(Span {
-=======
         timeline::span(name, started, elapsed, depth);
         push(Span {
->>>>>>> arismoko/main
             name,
             ms,
             cpu_ms,
@@ -316,17 +308,9 @@ impl Laps {
             .zip(*cpu)
             .map_or(ms, |(end, start)| (end - start).as_secs_f32() * 1000.0);
         let depth = DEPTH.with(Cell::get);
-<<<<<<< HEAD
-        trace::span(name, *started, ms);
-        emit(Span {
-||||||| 980f0459eb
-        trace::span(name, *started, ms);
-        push(Span {
-=======
         timeline::span(name, *started, elapsed, depth);
         nest_since(*mark, depth);
         push(Span {
->>>>>>> arismoko/main
             name,
             ms,
             cpu_ms,

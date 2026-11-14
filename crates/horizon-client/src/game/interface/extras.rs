@@ -69,17 +69,9 @@ impl Game<'_> {
         // For mods (`render.frame-stats`, `native_frame_rate`).
         let now = self.extras_now();
         self.extras.fps.record(now, elapsed.as_secs_f32() * 1000.0);
-<<<<<<< HEAD
-        self.native_render_frame_pre(elapsed);
-        // Starling: the old hook, for the mods made for it (native_compat.rs).
-        self.native_frame(elapsed);
-||||||| 980f0459eb
-        self.native_render_frame_pre(elapsed);
-=======
         let (world_partial_tick, partial_tick) = self.frame_partial_ticks();
         self.extras.frame_partial_ticks = Some((world_partial_tick, partial_tick));
         self.native_render_frame_pre(elapsed, world_partial_tick, partial_tick);
->>>>>>> arismoko/main
         // A clear a mod asked for (in this frame's `RenderFrameEvent.Pre`, or after the last
         // frame was drawn) lands before this frame's particles are drawn, paused or not.
         self.apply_mod_particle_clear();

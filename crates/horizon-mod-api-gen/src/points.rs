@@ -652,24 +652,6 @@ fn all_points<'a>(
                 .map(|found| (index, found)),
         );
     }
-<<<<<<< HEAD
-    if let Some(((origin, path), _)) = list.iter().zip(&used).find(|(_, used)| !**used) {
-        return Err(format!(
-            "{origin}: {path}: no function every build compiles that can be a point"
-        ));
-    }
-    // Starling: two functions whose points take one name are no error here: the later one is no
-    // point. A native mod's own modules can make them (`pickupnotifier::Config::label` and
-    // `pickupnotifier_config::label`, 2026-11-12), and upstream's refusal failed the whole build;
-    // nothing can name such a point, since no build ever had it.
-||||||| 980f0459eb
-    if let Some(((origin, path), _)) = list.iter().zip(&used).find(|(_, used)| !**used) {
-        return Err(format!(
-            "{origin}: {path}: no function every build compiles that can be a point"
-        ));
-    }
-=======
->>>>>>> arismoko/main
     let mut names = std::collections::BTreeMap::new();
     let mut kept = Vec::with_capacity(points.len());
     for (index, found) in points {

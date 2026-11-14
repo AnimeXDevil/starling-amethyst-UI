@@ -1854,30 +1854,6 @@ impl Game<'_> {
         if let Some(r) = self.renderer.as_mut() {
             r.clear_sections(self.world.layout());
         }
-<<<<<<< HEAD
-||||||| 980f0459eb
-        let saves = std::env::current_dir()?.join("saves");
-        let mut title = horizon_client::title::Title::new(saves.clone(), &self.options.resources)
-            .with_user(|| self.options.player_name());
-        title.last_server = self.settings.file.string("lastServer");
-        title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
-        if single_player && reason.is_none() {
-            self.show_title(title);
-            self.capture(false);
-            return Ok(());
-        }
-        title.mode = horizon_client::title::Mode::Multiplayer(match reason {
-            Some(reason) => horizon_client::multiplayer::Screen::Disconnected {
-                reason,
-                retry: None,
-                lines: std::cell::Cell::new(1),
-            },
-            None => horizon_client::multiplayer::Screen::list(&saves),
-        });
-        self.show_title(title);
-        self.capture(false);
-        Ok(())
-=======
         let saves = std::env::current_dir()?.join("saves");
         let mut title = self
             .new_title(saves.clone())
@@ -1900,7 +1876,6 @@ impl Game<'_> {
         self.show_title(title);
         self.capture(false);
         Ok(())
->>>>>>> arismoko/main
     }
     /// `Hud.onDisconnected`, from `Minecraft.disconnect` and `clearClientLevel`
     /// (a proxy's reconfiguration too), but the chat: joining clears it and a

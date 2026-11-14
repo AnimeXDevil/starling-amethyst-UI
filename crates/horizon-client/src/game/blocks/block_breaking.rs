@@ -28,12 +28,7 @@ impl Game<'_> {
     }
 
     pub(super) fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
-<<<<<<< HEAD
-        self.player_break_block(pos).map(|_| ())
-||||||| 980f0459eb
-=======
         self.carrier_break_block(pos)
->>>>>>> arismoko/main
     }
 
     /// `ServerPlayerGameMode.destroyBlock`: whether the block was removed.

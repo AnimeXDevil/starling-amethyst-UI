@@ -159,9 +159,6 @@ impl Game<'_> {
         }
     }
 }
-<<<<<<< HEAD
-||||||| 980f0459eb
-=======
 
 impl Game<'_> {
     /// The block's first up face (or any face) and its fixed tint, for block
@@ -192,4 +189,3 @@ impl Game<'_> {
         Some((name, tint))
     }
 }
->>>>>>> arismoko/main
