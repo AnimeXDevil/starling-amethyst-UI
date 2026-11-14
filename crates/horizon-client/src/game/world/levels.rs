@@ -1267,15 +1267,9 @@ impl Game<'_> {
             if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_post(level);
             }
-<<<<<<< HEAD
             // Starling: the old hook, for the mods made for it (native_compat.rs).
             self.native_level_tick_post_old(dim.id());
-            self.publish_server_debug(dim);
-||||||| 980f0459eb
-            self.publish_server_debug(dim);
-=======
             horizon_client::spans::time("server_debug", || self.publish_server_debug(dim));
->>>>>>> arismoko/main
             // An entity that crossed into a level that already ticked this
             // server tick is in it when the tick ends (`addDuringTeleport`).
             if running == Some(true) {

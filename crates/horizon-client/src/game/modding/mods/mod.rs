@@ -125,19 +125,9 @@ pub(super) struct ModsState {
     /// The entries of the mods' datapack registries this world session has published, at the
     /// generation of the load or reload that built them; `None` when no mod declared one.
     pub(super) datapack_registries: Option<Arc<mod_api::DatapackRegistrySet>>,
-<<<<<<< HEAD
-    /// The entries a table load decoded and checked, until its world open or reload takes them
-    /// to publish.
-    pub(super) datapack_candidate: Option<mod_api::DatapackCandidate>,
     /// Starling: what the content build tells the loading screen while it works
     /// ([`ContentNote`]'s line), and `None` once it is done. The menu's loader sets it.
     pub(super) note: Option<Arc<dyn Fn(Option<String>) + Send + Sync>>,
-||||||| 980f0459eb
-    /// The entries a table load decoded and checked, until its world open or reload takes them
-    /// to publish.
-    pub(super) datapack_candidate: Option<mod_api::DatapackCandidate>,
-=======
->>>>>>> arismoko/main
 }
 
 impl ModsState {
@@ -277,7 +267,6 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
         use std::os::windows::ffi::OsStrExt;
         mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
     };
-<<<<<<< HEAD
     // Android starts before the game files exist (its setup screen prepares them, no launcher did):
     // with none yet there is nothing to read, and no native mod runs in the APK's own game.
     let names = match builtin_registry_names(root) {
@@ -287,27 +276,9 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
         }
         Err(e) => return Err(e),
     };
-    mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
-        names,
-        horizon_world::native_load_context::capture_settings(
-            &Game::mod_data_root(),
-            packages.ids(),
-        ),
-        directory,
-    ));
-||||||| 980f0459eb
-    mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
-        builtin_registry_names(root)?,
-        horizon_world::native_load_context::capture_settings(
-            &Game::mod_data_root(),
-            packages.ids(),
-        ),
-        directory,
-    ));
-=======
     (horizon_engine_slots::platform()?.install_registration_data)(
         mod_api::__private::RegistrationData::new(
-            builtin_registry_names(root)?,
+            names,
             horizon_world::native_load_context::capture_settings(
                 &Game::mod_data_root(),
                 packages.ids(),
@@ -317,7 +288,6 @@ pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<(
         )
         .with_capability_coverage(coverage::builtin, coverage::block_entity),
     );
->>>>>>> arismoko/main
     Ok(())
 }
 
@@ -993,22 +963,15 @@ pub(super) fn content_overlay(
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
     let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));
-<<<<<<< HEAD
-    // Starling: a build (none when the root is reused) says so on the loading screen.
+    // Starling: the loading screen says a build is due. `resource_root_with_conditions` has no
+    // `on_build` callback, so this is said before the root is looked up, reused or not.
     let names = (mods.iter().map(|m| m.id.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
-    let prepared =
-        mod_content::resource_root_with(root, jar_store, &mods, &cache, &inventory, &mut || {
-            note(Some(ContentNote::Building(&names).text()))
-        })?;
-||||||| 980f0459eb
-    let prepared = mod_content::resource_root(root, jar_store, &mods, &cache, &inventory)?;
-=======
+    note(Some(ContentNote::Building(&names).text()));
     let prepared = super::load_conditions::content_root_with_conditions(
         root, jar_store, &mods, &cache, &inventory, sources,
     )?;
->>>>>>> arismoko/main
     let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
     let _ = sources.content_base.set(original_base);
     *sources.load_notices.lock().unwrap() = resolved.warnings;
@@ -1820,15 +1783,11 @@ impl Game<'_> {
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
         self.mods.report_refusals(&mut self.settings.mods.installed);
-<<<<<<< HEAD
         #[cfg(target_os = "android")]
         self.offer_compile();
-||||||| 980f0459eb
-=======
         self.settings
             .mods
             .apply_dependency_notices(&self.mods.load_notices.lock().unwrap());
->>>>>>> arismoko/main
     }
     /// The content mods the resources load with: the ones applied, which a
     /// switch that needs a restart doesn't change.

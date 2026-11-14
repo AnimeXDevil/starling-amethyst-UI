@@ -3,6 +3,7 @@ use super::*;
 impl Game<'_> {
     /// MultiPlayerGameMode.destroyBlock: the predicted break.
     pub(super) fn predict_break(&mut self, pos: [i32; 3], state: BlockStateId, sequence: i32) {
+        self.touch_vibrate(crate::game::touch::BREAK_BUZZ);
         self.tutorial_destroy(state, 1.0);
         // BlockStatePredictionHandler.retainKnownServerState.
         let here = self.player_position();

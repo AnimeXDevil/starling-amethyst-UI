@@ -33,41 +33,21 @@ pub fn packs_dir() -> PathBuf {
 }
 /// `Blaze3D.openPath`: the desktop's handler on the folder (the default file manager).
 pub fn open_folder(dir: &Path) {
-<<<<<<< HEAD
     // Android's file manager, through the activity.
     if horizon_client::platform::open_folder(dir).is_some() {
         return;
     }
-    if let Err(e) = folder::command(dir).and_then(|mut command| command.spawn()) {
-||||||| 980f0459eb
-    if let Err(e) = folder::command(dir).and_then(|mut command| command.spawn()) {
-=======
     if let Err(e) = horizon_client::desktop::open_path(dir) {
->>>>>>> arismoko/main
         log::warn!("Horizon: could not open {}: {e}", dir.display());
     }
 }
 /// `Blaze3D.openUri`: the system browser on the link.
 pub fn open_uri(uri: &str) {
-<<<<<<< HEAD
     // Android's browser, through the activity.
     if horizon_client::platform::open_link(uri).is_some() {
         return;
     }
-    // URLs need Windows' registered protocol handler, not Explorer's path
-    // handling. ShellExecute also preserves the URL as one Unicode value,
-    // without interpolating its query string into a command interpreter.
-    #[cfg(windows)]
-    if let Err(error) = open::that_detached(uri) {
-||||||| 980f0459eb
-    // URLs need Windows' registered protocol handler, not Explorer's path
-    // handling. ShellExecute also preserves the URL as one Unicode value,
-    // without interpolating its query string into a command interpreter.
-    #[cfg(windows)]
-    if let Err(error) = open::that_detached(uri) {
-=======
     if let Err(error) = horizon_client::desktop::open_uri(uri) {
->>>>>>> arismoko/main
         log::warn!("Horizon: could not open URI {uri}: {error}");
     }
 }
@@ -775,13 +755,9 @@ pub(super) fn stage_pack(
     let gui = UiResources {
         atlas,
         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
-<<<<<<< HEAD
         source: Some(source.clone()),
-||||||| 980f0459eb
-=======
         // `Game::apply_staged_pack` fills it with the client's setting.
         splashes: Arc::from(""),
->>>>>>> arismoko/main
     };
     progress.set(2);
     let mut pack = PackResources::load(

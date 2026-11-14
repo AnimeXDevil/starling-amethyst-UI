@@ -193,17 +193,11 @@ impl Game<'_> {
             horizon_client::command::MOD_COMMAND,
             &arguments,
         );
-<<<<<<< HEAD
         // Starling: and the names the old hook gives, for the mods made for it
         // (native_compat.rs).
         let mut names = vec!["studio"];
         self.native_commands(&mut names);
-        with_studio_commands(&with_native_commands(&tree_with_mods, &names))
-||||||| 980f0459eb
-        with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"]))
-=======
-        with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"])).with_profiler()
->>>>>>> arismoko/main
+        with_studio_commands(&with_native_commands(&tree_with_mods, &names)).with_profiler()
     }
 }
 
@@ -1439,29 +1433,7 @@ impl Game<'_> {
         )
     }
     pub(super) fn chat_scroll(&mut self, amount: f32) {
-<<<<<<< HEAD
         let cursor = self.chat_pointer();
-        let height = self.renderer.as_ref().map_or(720.0, |r| {
-            HudBatch::new(
-                [r.config.width, r.config.height],
-                self.settings.gui_scale_inputs(),
-            )
-            .height
-        });
-        let _ = height;
-||||||| 980f0459eb
-        let cursor = self.cursor;
-        let height = self.renderer.as_ref().map_or(720.0, |r| {
-            HudBatch::new(
-                [r.config.width, r.config.height],
-                self.settings.gui_scale_inputs(),
-            )
-            .height
-        });
-        let _ = height;
-=======
-        let cursor = self.cursor;
->>>>>>> arismoko/main
         let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
         if let Some(screen) = self.ui.chat_screen.as_mut()
             && screen.scroll(mouse, amount as f64)
@@ -1495,23 +1467,13 @@ impl Game<'_> {
                 )
                 .width
             });
-<<<<<<< HEAD
-            let (x, y, w, h) = Self::leave_bed_button(width, height);
-            // The button is in the middle, where the cutout's strip moves nothing.
-            let at = (self.cursor.0 as i32, cursor.1 as i32);
-            if horizon_client::screen_draw::inside(at, x, y, w, h) {
-                self.wake_up();
-||||||| 980f0459eb
-            let (x, y, w, h) = Self::leave_bed_button(width, height);
-            if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
-                self.wake_up();
-=======
             let (x, y, w, h) = self
                 .built_chat(width, height)
                 .map_or_else(|| Self::leave_bed_button(width, height), |l| l.leave_bed);
-            if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
+            // The button is in the middle, where the cutout's strip moves nothing.
+            let at = (self.cursor.0 as i32, cursor.1 as i32);
+            if horizon_client::screen_draw::inside(at, x, y, w, h) {
                 self.wake_up(false, true);
->>>>>>> arismoko/main
                 return;
             }
         }
@@ -1752,17 +1714,11 @@ impl Game<'_> {
             .map(|s| s.value());
         self.ui.chat.set_search(&self.gui.atlas, query);
         self.ui.chat.search_prompt = focused && self.pvp.chat_search;
-<<<<<<< HEAD
+        // `ChatComponent`'s queue row: the messages Chat Delay holds back.
+        self.ui.chat.queue = self.chat_queue_len();
         // ChatComponent.isChatHidden: Chat Visibility Hidden draws no lines (a server is told
         // too, and leaves out other players' chat for Commands Only).
         if (self.ui.hide_gui || self.settings.chat_visibility == 2) && !focused {
-||||||| 980f0459eb
-        if self.ui.hide_gui && !focused {
-=======
-        // `ChatComponent`'s queue row: the messages Chat Delay holds back.
-        self.ui.chat.queue = self.chat_queue_len();
-        if self.ui.hide_gui && !focused {
->>>>>>> arismoko/main
             return;
         }
         self.ui.chat.smooth = self.settings.extras.chat_animation;
@@ -1838,19 +1794,10 @@ impl Game<'_> {
         });
         // The build made the box at this size (`ChatScreen.resize`).
         let m = Measure(&self.gui.atlas.font);
-<<<<<<< HEAD
         let c = Commands {
             dispatcher: chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
-||||||| 980f0459eb
-        let c = Commands {
-            dispatcher: chat_tree(&self.remote),
-            registries: &self.ui.registries,
-        };
-        screen.resize(&m, &c, batch.width as i32, batch.height as i32);
-=======
->>>>>>> arismoko/main
         // Options.getBackgroundColor(Integer.MIN_VALUE).
         let background = if self.settings.file.bool("backgroundForChatOnly") {
             i32::MIN
@@ -1864,22 +1811,19 @@ impl Game<'_> {
             .ui
             .chat_opened
             .map_or(0, |t| t.elapsed().as_millis() as u64);
-<<<<<<< HEAD
         // The box and its suggestions keep out of a camera cutout's strips (#166).
+        let mut shown = None;
         self.draw_clear_of_cutout(batch, |batch, clear| {
             screen.resize(&m, &c, batch.width as i32, batch.height as i32);
             let mouse = ((pointer.0 - clear).floor() as i32, mouse.1);
             let draws = screen.draw(&m, mouse, blink, background);
-            horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
+            let tooltip = horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
+            shown = Some((draws, tooltip));
         });
-||||||| 980f0459eb
-        let draws = screen.draw(&m, mouse, blink, background);
-        horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
-=======
-        let draws = screen.draw(&m, mouse, blink, background);
->>>>>>> arismoko/main
         self.ui.chat_screen = Some(screen);
-        let tooltip = horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
+        let Some((draws, tooltip)) = shown else {
+            return;
+        };
         if in_bed {
             let (w, h) = (batch.width, batch.height);
             let rect = self
@@ -1889,7 +1833,9 @@ impl Game<'_> {
             let _ = horizon_client::screen_draw::paint(batch, &self.gui.atlas, &button);
         }
         self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
-        horizon_client::screen_draw::paint_tooltip(batch, &self.gui.atlas, &draws, tooltip);
+        self.draw_clear_of_cutout(batch, |batch, _| {
+            horizon_client::screen_draw::paint_tooltip(batch, &self.gui.atlas, &draws, tooltip);
+        });
         // The hovered message part's tooltip (`renderComponentHoverEffect`),
         // or the text of the message tag under the cursor.
         let height = batch.height as i32;
@@ -1903,12 +1849,7 @@ impl Game<'_> {
                 .focused_tags(&self.gui.atlas.font, height, cx, cy);
         let start = batch.vertices.len();
         horizon_client::hud_layout::paint(batch, &self.gui.atlas, &tag_icons);
-<<<<<<< HEAD
         batch.translate_since(start, clear, 0.0);
-        if let Some(style) = self.ui.chat.style_at(&self.gui.atlas.font, height, cx, cy) {
-||||||| 980f0459eb
-        if let Some(style) = self.ui.chat.style_at(&self.gui.atlas.font, height, cx, cy) {
-=======
         let style = self
             .ui
             .chat
@@ -1919,7 +1860,6 @@ impl Game<'_> {
                     .queue_style_at(&self.gui.atlas.font, height, cx, cy)
             });
         if let Some(style) = style {
->>>>>>> arismoko/main
             // ActiveTextCollector.ClickableStyleFinder: a click event, or an
             // insertion while Shift is held (ChatScreen.includeInsertions).
             if style.click.is_some() || (style.insertion.is_some() && self.has_shift_down()) {

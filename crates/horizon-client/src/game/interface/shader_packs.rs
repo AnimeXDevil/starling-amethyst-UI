@@ -737,7 +737,11 @@ impl Game<'_> {
     /// The world's resolution, of the screen's: the player's, and no more than Auto's while it
     /// runs a pack that isn't a light one.
     pub(super) fn world_scale(&self) -> f32 {
-        let chosen = self.settings.horizon.resolution_scale as f32 / 100.0;
+        // Dynamic Resolution's scale where it is on, else the setting's.
+        let chosen =
+            super::frame_autotune::world_scale(&self.settings.horizon, &self.dynamic_resolution)
+                as f32
+                / 100.0;
         match &self.shader_choice {
             Some((name, profile))
                 if profile == AUTO_PROFILE

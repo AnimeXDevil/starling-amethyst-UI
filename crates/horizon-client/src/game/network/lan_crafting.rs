@@ -1850,7 +1850,6 @@ mod machine_recipe_placement_tests {
 }
 
 #[cfg(test)]
-<<<<<<< HEAD
 mod creative_grid_tests {
     use super::*;
     use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
@@ -1947,8 +1946,10 @@ mod creative_grid_tests {
             );
             assert_eq!(set(game, None), None);
         });
-||||||| 980f0459eb
-=======
+    }
+}
+
+#[cfg(test)]
 mod recipe_check_tests {
     use super::*;
     use horizon_client::{
@@ -2472,6 +2473,5 @@ mod empty_ingredient_placement_tests {
                 });
             },
         );
->>>>>>> arismoko/main
     }
 }

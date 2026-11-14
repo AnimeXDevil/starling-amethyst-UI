@@ -248,7 +248,6 @@ impl Game<'_> {
                 }
             }
         }
-<<<<<<< HEAD
         if panel {
             // The crafting grid the window lacks, and the result's slot, as the game's windows
             // draw a slot.
@@ -266,20 +265,13 @@ impl Game<'_> {
             let (tx, ty) = Creative::tab_position(tab);
             batch.sprite(&self.gui.atlas, &tab_sprite(tab, true), ox + tx, oy + ty);
         }
+        if !panel {
+            self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
+        }
         for t in tabs
             .iter()
             .filter(|t| !panel && self.creative_screen.on_page(t))
         {
-||||||| 980f0459eb
-        let (tx, ty) = Creative::tab_position(tab);
-        batch.sprite(&self.gui.atlas, &tab_sprite(tab, true), ox + tx, oy + ty);
-        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
-=======
-        let (tx, ty) = Creative::tab_position(tab);
-        batch.sprite(&self.gui.atlas, &tab_sprite(tab, true), ox + tx, oy + ty);
-        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
-        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
->>>>>>> arismoko/main
             let (tx, ty) = Creative::tab_position(t);
             let stack = ItemStack {
                 item: Arc::from(t.icon.as_str()),
@@ -401,7 +393,6 @@ impl Game<'_> {
                 oy + Creative::SCROLL_Y + self.creative_screen.scroller_offset(),
             );
         }
-<<<<<<< HEAD
         if !panel {
             // Past both windows, when there are two.
             let width = if CREATIVE_SHIFT.get() == 0.0 {
@@ -421,21 +412,12 @@ impl Game<'_> {
         let inventory = self.creative_screen.tab().inventory;
         let hovered = self.creative_hovered.take();
         let effect_tip = self.creative_effect_tip.take();
+        let browser_tip = self.draw_mod_browser(batch);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
         for t in tabs
             .iter()
             .filter(|t| self.bedrock_items.is_none() && self.creative_screen.on_page(t))
         {
-||||||| 980f0459eb
-        let effect_tip = self.draw_inventory_effects(batch, (ox, oy), Creative::WIDTH as i32);
-        self.draw_creative_pages(batch, ox, oy);
-        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
-=======
-        let effect_tip = self.draw_inventory_effects(batch, (ox, oy), Creative::WIDTH as i32);
-        self.draw_creative_pages(batch, ox, oy);
-        let browser_tip = self.draw_mod_browser(batch);
-        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
-        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
->>>>>>> arismoko/main
             let (tx, ty) = Creative::tab_position(t);
             if self.cursor.0 >= ox + tx
                 && self.cursor.0 < ox + tx + 26.0

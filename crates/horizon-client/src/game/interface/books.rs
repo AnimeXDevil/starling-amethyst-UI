@@ -3,13 +3,7 @@
 //! pixels, 1024 characters, 100 pages), signing it into a written book,
 //! reading written books, and lecterns (placing a book, turning its pages
 //! with a redstone pulse, the comparator output and taking the book).
-<<<<<<< HEAD
-use super::{Game, Screen, screen_info};
-||||||| 980f0459eb
-use super::{Game, screen_info};
-=======
-use super::{Game, chat::PLAYER_NAME, screen_info};
->>>>>>> arismoko/main
+use super::{Game, Screen, chat::PLAYER_NAME, screen_info};
 use horizon_client::{
     block_entity_item,
     containers::{BlockEntity, Lectern},

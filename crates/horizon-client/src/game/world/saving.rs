@@ -430,7 +430,6 @@ impl Game<'_> {
     }
 }
 
-<<<<<<< HEAD
 /// Logs, from a thread of its own, once the writer threads have put a save that did not wait on
 /// disk: in a bug report it shows whether the process ended before.
 fn log_when_written(saves: Vec<Arc<SaveDir>>, started: Instant) {
@@ -456,14 +455,7 @@ fn log_when_written(saves: Vec<Arc<SaveDir>>, started: Instant) {
 impl Game<'_> {
     /// Save the level in place: its changed chunks, its entities and its raids.
     pub(super) fn save_level(&mut self, wait: bool) -> Result<()> {
-        Self::admit_entity_save()?;
-||||||| 980f0459eb
-=======
-impl Game<'_> {
-    /// Save the level in place: its changed chunks, its entities and its raids.
-    pub(super) fn save_level(&mut self, wait: bool) -> Result<()> {
         self.admit_level_save()?;
->>>>>>> arismoko/main
         self.save_border();
         self.save_chunk_tickets()?;
         let deadline = Instant::now() + Duration::from_secs(30);

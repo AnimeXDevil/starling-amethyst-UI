@@ -12,12 +12,8 @@ pub const HELP: &[&str] = &[
     "particle NAME X Y Z [DX DY DZ] [COUNT]  spawn particles (vanilla /particle spread)",
     "signedit X Y Z [front|back]    open the sign editor for the sign at X Y Z",
     "section-draws [flat|indirect]  how terrain sections are drawn (A/B checks); replies the mode",
-<<<<<<< HEAD
     "sky-order [early|late]         the vanilla sky before or after solid terrain, on Adreno's Vulkan (A/B checks); replies the mode",
-||||||| 980f0459eb
-=======
     "section-layout compact|wide    solid quads' layout in the arena, all meshed again (A/B checks); replies compact",
->>>>>>> arismoko/main
     "section-cull [on|off]          occlusion culling of solid sections (A/B checks); replies the mode",
     "static-cutout [on|off]         cutouts without their fade while nothing fades, on Adreno's Vulkan (A/B checks); replies the mode",
     "section-sides [on|off]         leave out solid quads facing away from the eye (A/B checks); replies the mode",

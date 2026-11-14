@@ -78,18 +78,7 @@ impl Game<'_> {
         });
         Some(FovPlayer {
             flying: p.flying,
-<<<<<<< HEAD
-            // Abilities.walkingSpeed: a server may change it.
-            walking_speed: self
-                .remote
-                .as_ref()
-                .and_then(|r| r.abilities.as_ref())
-                .map_or(WALKING_SPEED, |a| a.walking_speed),
-||||||| 980f0459eb
-            walking_speed: WALKING_SPEED,
-=======
             walking_speed: self.remote_walking_speed(),
->>>>>>> arismoko/main
             // Player.aiStep keeps `speed` as the float movement speed attribute.
             movement_speed: f64::from(p.speed),
             using,

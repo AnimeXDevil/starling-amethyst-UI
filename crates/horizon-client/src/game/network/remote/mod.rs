@@ -560,8 +560,7 @@ pub(super) struct Remote {
     /// `BlockStatePredictionHandler.lastTeleportSequence`: the sequence of the last
     /// teleport, so a prediction made before it keeps its block but not its snap.
     last_teleport_sequence: i32,
-<<<<<<< HEAD
-    position_sender: horizon_client::player_sync::PositionSender,
+    pub(super) position_sender: horizon_client::player_sync::PositionSender,
     /// When the last tick ended to the server, and the last movement packet went: an old
     /// server behind ViaVersion (its anticheat) wants one every tick, so gaps are logged.
     tick_end_at: Option<Instant>,
@@ -595,11 +594,6 @@ pub(super) struct Remote {
     stick_asked: bool,
     /// key.swapOffhand presses since the last tick, which sends them (`remote_handle_input`).
     swap_presses: u32,
-||||||| 980f0459eb
-    position_sender: horizon_client::player_sync::PositionSender,
-=======
-    pub(super) position_sender: horizon_client::player_sync::PositionSender,
->>>>>>> arismoko/main
     last_input: u8,
     was_sprinting: bool,
     /// The slot the server last heard (`MultiPlayerGameMode.carriedIndex`): a cell, so `send` can
@@ -1550,7 +1544,6 @@ impl Game<'_> {
 
         self.ui.registries.selector_tokens.clear();
         self.remote = Some(Remote {
-<<<<<<< HEAD
             names: HashMap::new(),
             tick_end_at: None,
             moved_at: None,
@@ -1573,11 +1566,8 @@ impl Game<'_> {
             setbacks: 0,
             player_attributes: Vec::new(),
             creative_menu: None,
-||||||| 980f0459eb
-=======
             selector_metadata_supported: true,
             professions: self.client_professions()?,
->>>>>>> arismoko/main
             session,
             brand: "horizon-studio".into(),
             recipe_viewer: Default::default(),
@@ -2657,22 +2647,12 @@ impl Game<'_> {
                 forgotten_credits.push(item.into_event_credit());
                 continue;
             }
-<<<<<<< HEAD
-            self.forget_remote_columns(&mut forgotten, true);
-            let chunk = matches!(item, Received::Chunk(_));
-            if chunk && chunks >= budget {
-||||||| 980f0459eb
-            self.forget_remote_columns(&mut forgotten, true);
-            let chunk = matches!(item, Received::Chunk(_));
-            if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
-=======
             horizon_client::spans::time("pr_forget", || {
                 self.forget_remote_columns(&mut forgotten, true)
             });
             forgotten_credits.clear();
             let chunk = matches!(item, Received::Chunk(_, _));
-            if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
->>>>>>> arismoko/main
+            if chunk && chunks >= budget {
                 events.push_front(item);
                 break;
             }
@@ -3286,168 +3266,6 @@ impl Game<'_> {
         gone.clear();
         freed_at
     }
-<<<<<<< HEAD
-    /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
-    /// packet's type, loads the tag (`loadWithComponents`); an empty tag
-    /// changes nothing.
-    pub(super) fn remote_block_entity_data(&mut self, pos: [i32; 3], kind: i32, tag: &Tag) {
-        // Starling: a content mod's machine (kinetics.rs). Its tag is kept as the chunk keeps the
-        // block entities it does not model, for the window to draw what the machine holds.
-        if kind == horizon_client::lan::chunks::MACHINE_ENTITY_TYPE {
-            if let Tag::Compound(fields) = tag
-                && !fields.is_empty()
-            {
-                let mut full = fields.clone();
-                for (k, v) in ["x", "y", "z"].into_iter().zip(pos) {
-                    full.insert(k.into(), Tag::Int(v));
-                }
-                super::spill::put_saved_entity(&mut self.world, pos, Tag::Compound(full));
-            }
-            return;
-        }
-        let key = (pos[0], pos[1], pos[2]);
-        let Some(name) = self
-            .remote
-            .as_ref()
-            .and_then(|r| r.builtin.get("minecraft:block_entity_type")?.name(kind))
-        else {
-            return;
-        };
-        // A decorated pot is no block entity here: its tag is kept with the chunk.
-        if name == "minecraft:decorated_pot" {
-            if let Tag::Compound(fields) = tag
-                && !fields.is_empty()
-            {
-                let mut full = fields.clone();
-                full.insert("id".into(), Tag::String(name.into()));
-                for (k, v) in ["x", "y", "z"].into_iter().zip(pos) {
-                    full.insert(k.into(), Tag::Int(v));
-                }
-                super::spill::put_saved_entity(&mut self.world, pos, Tag::Compound(full));
-                // The section is drawn again with the pot's sherds.
-                let state = self.world.block(pos[0], pos[1], pos[2]);
-                let _ = self.world.set(pos[0], pos[1], pos[2], state);
-            }
-            return;
-        }
-        let Tag::Compound(fields) = tag else {
-            return;
-        };
-        // Only the declared type on one of its valid blocks accepts an update tag.
-        // Nothing is drawn from it yet, so its section stays as it is.
-        let block = self.world.block(pos[0], pos[1], pos[2]);
-        if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
-            if m.id() == name
-                && horizon_client::block_entity_types::valid(
-                    &self.res.facts().get(block).name,
-                    name,
-                ) == Some(true)
-            {
-                m.merge_update_tag(fields);
-            }
-            return;
-        }
-        let Some(entity) = self.world.block_entities.get(&key) else {
-            return;
-        };
-        if entity.id() != name || fields.is_empty() {
-            return;
-        }
-        let mut full = fields.clone();
-        full.insert("id".into(), Tag::String(name.into()));
-        for (k, v) in ["x", "y", "z"].into_iter().zip(pos) {
-            full.insert(k.into(), Tag::Int(v));
-        }
-        if let Some((_, mut loaded)) =
-            horizon_client::save::decode_block_entity(&Tag::Compound(full))
-        {
-            keep_client_state(self.world.block_entities.get(&key), &mut loaded);
-            let command_block = matches!(loaded, BlockEntity::CommandBlock(_));
-            self.world.block_entities.insert(key, loaded);
-            self.update_spawner_display(key);
-            // The section is drawn again with what the block entity shows.
-            let state = self.world.block(pos[0], pos[1], pos[2]);
-            let _ = self.world.set(pos[0], pos[1], pos[2], state);
-            if command_block {
-                self.command_block_data_arrived(key);
-            }
-        }
-    }
-||||||| 980f0459eb
-    /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
-    /// packet's type, loads the tag (`loadWithComponents`); an empty tag
-    /// changes nothing.
-    pub(super) fn remote_block_entity_data(&mut self, pos: [i32; 3], kind: i32, tag: &Tag) {
-        let key = (pos[0], pos[1], pos[2]);
-        let Some(name) = self
-            .remote
-            .as_ref()
-            .and_then(|r| r.builtin.get("minecraft:block_entity_type")?.name(kind))
-        else {
-            return;
-        };
-        // A decorated pot is no block entity here: its tag is kept with the chunk.
-        if name == "minecraft:decorated_pot" {
-            if let Tag::Compound(fields) = tag
-                && !fields.is_empty()
-            {
-                let mut full = fields.clone();
-                full.insert("id".into(), Tag::String(name.into()));
-                for (k, v) in ["x", "y", "z"].into_iter().zip(pos) {
-                    full.insert(k.into(), Tag::Int(v));
-                }
-                super::spill::put_saved_entity(&mut self.world, pos, Tag::Compound(full));
-                // The section is drawn again with the pot's sherds.
-                let state = self.world.block(pos[0], pos[1], pos[2]);
-                let _ = self.world.set(pos[0], pos[1], pos[2], state);
-            }
-            return;
-        }
-        let Tag::Compound(fields) = tag else {
-            return;
-        };
-        // Only the declared type on one of its valid blocks accepts an update tag.
-        // Nothing is drawn from it yet, so its section stays as it is.
-        let block = self.world.block(pos[0], pos[1], pos[2]);
-        if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
-            if m.id() == name
-                && horizon_client::block_entity_types::valid(
-                    &self.res.facts().get(block).name,
-                    name,
-                ) == Some(true)
-            {
-                m.merge_update_tag(fields);
-            }
-            return;
-        }
-        let Some(entity) = self.world.block_entities.get(&key) else {
-            return;
-        };
-        if entity.id() != name || fields.is_empty() {
-            return;
-        }
-        let mut full = fields.clone();
-        full.insert("id".into(), Tag::String(name.into()));
-        for (k, v) in ["x", "y", "z"].into_iter().zip(pos) {
-            full.insert(k.into(), Tag::Int(v));
-        }
-        if let Some((_, mut loaded)) =
-            horizon_client::save::decode_block_entity(&Tag::Compound(full))
-        {
-            keep_client_state(self.world.block_entities.get(&key), &mut loaded);
-            let command_block = matches!(loaded, BlockEntity::CommandBlock(_));
-            self.world.block_entities.insert(key, loaded);
-            self.update_spawner_display(key);
-            // The section is drawn again with what the block entity shows.
-            let state = self.world.block(pos[0], pos[1], pos[2]);
-            let _ = self.world.set(pos[0], pos[1], pos[2], state);
-            if command_block {
-                self.command_block_data_arrived(key);
-            }
-        }
-    }
-=======
->>>>>>> arismoko/main
     /// `handleAnimate`: a player wakes up, or an entity gets the critical
     /// hit (`CRIT`) or magic critical hit (`ENCHANTED_HIT`) emitter.
     fn remote_animate(&mut self, id: i32, action: u8) {
@@ -5400,7 +5218,6 @@ impl Game<'_> {
             // HUD draws and the health it may hold), reach, speed and so on.
             // Then the received health again, which the old maximum clamped.
             C::UpdateAttributes(p) if self.remote.as_ref().is_some_and(|r| r.entity_id == p.id) => {
-<<<<<<< HEAD
                 // Kept for a LocalPlayer made after the packet came, and across respawns.
                 if let Some(r) = self.remote.as_mut() {
                     for snapshot in &p.values {
@@ -5409,12 +5226,6 @@ impl Game<'_> {
                         r.player_attributes.push(snapshot.clone());
                     }
                 }
-                if let Some(pl) = self.player.as_mut() {
-                    horizon_client::lan::attributes::apply(&mut pl.attributes, &p.values);
-||||||| 980f0459eb
-                if let Some(pl) = self.player.as_mut() {
-                    horizon_client::lan::attributes::apply(&mut pl.attributes, &p.values);
-=======
                 let nameplate = self.remote_nameplate_values(&p.values);
                 self.apply_own_attributes(p.values);
                 if let Some(m) = self.player_model.as_mut() {
@@ -5424,7 +5235,6 @@ impl Game<'_> {
                     if let Some(value) = nameplate.below_name {
                         m.set_below_name_distance(value);
                     }
->>>>>>> arismoko/main
                 }
                 self.apply_remote_health();
             }
@@ -7052,16 +6862,8 @@ impl Game<'_> {
             (yaw, pitch),
             p,
         );
-<<<<<<< HEAD
         let mut setback = false;
-        // BlockStatePredictionHandler.onTeleport: a prediction made before this
-        // one keeps its block but not the player position it remembered.
-||||||| 980f0459eb
-        // BlockStatePredictionHandler.onTeleport: a prediction made before this
-        // one keeps its block but not the player position it remembered.
-=======
         // BlockStatePredictionHandler.onTeleport: a prior prediction keeps its block, not its remembered player position.
->>>>>>> arismoko/main
         if let Some(r) = self.remote.as_mut() {
             r.last_teleport_sequence = r.sequence;
         }
@@ -7161,14 +6963,10 @@ impl Game<'_> {
                 self.apply_remote_health();
             }
         }
-<<<<<<< HEAD
         if setback {
             self.stick_setback();
         }
-||||||| 980f0459eb
-=======
         entity_section_steps::player_teleport(self, had_player, current, position);
->>>>>>> arismoko/main
         if !self.replay.playing() {
             self.previous_position = position;
         }
@@ -7779,25 +7577,7 @@ impl Game<'_> {
     pub(super) fn remote_abilities(&self) -> Option<&play::PlayerAbilities> {
         self.remote.as_ref()?.abilities.as_ref()
     }
-<<<<<<< HEAD
-||||||| 980f0459eb
-    /// ClientPacketListener.handlePlayerAbilities: the player flies, may fly
-    /// and is invulnerable as the server says (bits 2, 4 and 1).
-    fn apply_remote_abilities(&mut self) {
-        let (Some(player), Some(a)) = (
-            self.player.as_mut(),
-            self.remote.as_ref().and_then(|r| r.abilities.as_ref()),
-        ) else {
-            return;
-        };
-        player.invulnerable = a.flags & 1 != 0;
-        player.flying = a.flags & 2 != 0;
-        player.may_fly = a.flags & 4 != 0;
-        player.flying_speed = a.flying_speed;
-    }
-=======
 
->>>>>>> arismoko/main
     /// The local player's share of every touching entity's
     /// `LivingEntity.pushEntities`, and of the boats' pushes: on a client
     /// `EntitySelector.pushableBy` lets entities push only the local player,
@@ -9166,93 +8946,6 @@ impl Game<'_> {
         );
         canceled
     }
-<<<<<<< HEAD
-    /// MultiPlayerGameMode.destroyBlock: the predicted break.
-    fn predict_break(&mut self, pos: [i32; 3], state: BlockStateId, sequence: i32) {
-        self.touch_vibrate(super::touch::BREAK_BUZZ);
-        self.tutorial_destroy(state, 1.0);
-        // BlockStatePredictionHandler.retainKnownServerState.
-        let here = self.player_position();
-        if let Some(r) = self.remote.as_mut() {
-            r.predictions
-                .entry(pos)
-                .and_modify(|p| p.sequence = sequence)
-                .or_insert(Prediction {
-                    sequence,
-                    state: state.0 as i32,
-                    player_pos: here,
-                });
-        }
-        // Block.playerWillDestroy's destroy event (particles and the break
-        // sound), which BaseFireBlock skips: the server's extinguish sound
-        // is all a player hears.
-        let facts = self.res.facts().get(state);
-        if !facts.has_class("BaseFireBlock") {
-            let s = facts.sounds.clone();
-            let at = [
-                f64::from(pos[0]) + 0.5,
-                f64::from(pos[1]) + 0.5,
-                f64::from(pos[2]) + 0.5,
-            ];
-            self.audio.play(
-                &s.break_sound,
-                Some(at),
-                (s.volume + 1.0) / 2.0,
-                s.pitch * 0.8,
-            );
-            self.destroy_particles(pos, state);
-        }
-        // The server's block update follows (waterlogged blocks leave water).
-        let air = self.world.air;
-        if self.world.set(pos[0], pos[1], pos[2], air).is_ok() {
-            self.world.block_entities.remove(&(pos[0], pos[1], pos[2]));
-        }
-        self.mining = None;
-    }
-||||||| 980f0459eb
-    /// MultiPlayerGameMode.destroyBlock: the predicted break.
-    fn predict_break(&mut self, pos: [i32; 3], state: BlockStateId, sequence: i32) {
-        self.tutorial_destroy(state, 1.0);
-        // BlockStatePredictionHandler.retainKnownServerState.
-        let here = self.player_position();
-        if let Some(r) = self.remote.as_mut() {
-            r.predictions
-                .entry(pos)
-                .and_modify(|p| p.sequence = sequence)
-                .or_insert(Prediction {
-                    sequence,
-                    state: state.0 as i32,
-                    player_pos: here,
-                });
-        }
-        // Block.playerWillDestroy's destroy event (particles and the break
-        // sound), which BaseFireBlock skips: the server's extinguish sound
-        // is all a player hears.
-        let facts = self.res.facts().get(state);
-        if !facts.has_class("BaseFireBlock") {
-            let s = facts.sounds.clone();
-            let at = [
-                f64::from(pos[0]) + 0.5,
-                f64::from(pos[1]) + 0.5,
-                f64::from(pos[2]) + 0.5,
-            ];
-            self.audio.play(
-                &s.break_sound,
-                Some(at),
-                (s.volume + 1.0) / 2.0,
-                s.pitch * 0.8,
-            );
-            self.destroy_particles(pos, state);
-        }
-        // The server's block update follows (waterlogged blocks leave water).
-        let air = self.world.air;
-        if self.world.set(pos[0], pos[1], pos[2], air).is_ok() {
-            self.world.block_entities.remove(&(pos[0], pos[1], pos[2]));
-        }
-        self.mining = None;
-    }
-=======
->>>>>>> arismoko/main
     /// `Player.blockActionRestricted` for the block at `pos`: a spectator
     /// never breaks, an adventure player only with a main-hand item whose
     /// `can_break` matches the block (`ItemStack.canBreakBlockInAdventureMode`).
@@ -10419,26 +10112,8 @@ impl Game<'_> {
     /// Minecraft.handleKeybinds, key.swapOffhand: the server swaps the hands
     /// (ServerboundPlayerActionPacket SWAP_ITEM_WITH_OFFHAND at BlockPos.ZERO, facing down) and
     /// sends both slots back; nothing is predicted.
-<<<<<<< HEAD
-    fn remote_swap_hands(&mut self) {
-        self.send(S::PlayerAction(play::PlayerAction {
-            action: 7,
-            pos: [0; 3],
-            direction: 0,
-            sequence: 0,
-        }));
-||||||| 980f0459eb
-    pub(super) fn remote_swap_hands(&mut self) {
-        self.send(S::PlayerAction(play::PlayerAction {
-            action: 7,
-            pos: [0; 3],
-            direction: 0,
-            sequence: 0,
-        }));
-=======
     pub(super) fn remote_swap_hands(&mut self) {
         self.send_action(7);
->>>>>>> arismoko/main
         // Equal stacks swap with no slot update to wait for.
         let (main, off) = (self.stack_in(self.selected), self.offhand.as_ref());
         let moves = !super::hand::matches_for_swap(main, off);

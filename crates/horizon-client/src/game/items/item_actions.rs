@@ -143,20 +143,10 @@ impl Game<'_> {
                     &mut claimed,
                 );
             }
-<<<<<<< HEAD
-            if !claimed {
-                self.native_entity_interact(self.hand, id, &kind, stack.as_ref(), &mut claimed);
-            }
             // Starling: the old hook, for the mods made for it (native_compat.rs).
             if !claimed {
                 self.native_interact_entity(id, &kind, stack.as_ref(), &mut claimed);
             }
-||||||| 980f0459eb
-            if !claimed {
-                self.native_entity_interact(self.hand, id, &kind, stack.as_ref(), &mut claimed);
-            }
-=======
->>>>>>> arismoko/main
             if claimed {
                 self.swing_arm();
                 return Ok(true);

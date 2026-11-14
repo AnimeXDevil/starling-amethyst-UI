@@ -85,21 +85,15 @@ impl TryIntoEngine<()> for mod_api::Block {
     type Error = String;
     fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
         Ok(engine::Block {
-<<<<<<< HEAD
-            state_light: None,
-            kinetic: None,
-            machine: None,
-            models: Vec::new(),
-||||||| 980f0459eb
-            state_light: None,
-=======
             state_light: self.state_light.as_ref().map(|light| engine::StateValues {
                 property: String::new(),
                 properties: light.properties.clone(),
                 values: light.values.clone(),
                 default: light.default,
             }),
->>>>>>> arismoko/main
+            kinetic: None,
+            machine: None,
+            models: Vec::new(),
             id: self.id.clone(),
             template: self.template.clone(),
             pick_item: self.pick_item.clone(),

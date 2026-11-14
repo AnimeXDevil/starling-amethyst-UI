@@ -1,16 +1,6 @@
 use super::*;
 
 impl Game<'_> {
-<<<<<<< HEAD
-    pub(in crate::game) fn use_item_in_hand(&mut self, stack: &ItemStack, claimed: &mut bool) {
-        // Starling: the old hook first, for the mods made for it (native_compat.rs).
-        self.native_use_item_old(stack, claimed);
-        if *claimed {
-            return;
-        }
-||||||| 980f0459eb
-    pub(in crate::game) fn use_item_in_hand(&mut self, stack: &ItemStack, claimed: &mut bool) {
-=======
     /// Apply a consuming result's swing on its owning logical side.
     pub(in crate::game) fn interaction_consumed(
         &mut self,
@@ -89,8 +79,15 @@ impl Game<'_> {
     /// Dispatch the item Part and apply the result on this logical side.
     pub(in crate::game) fn use_item_in_hand(&mut self, stack: &ItemStack) -> Option<bool> {
         use mod_api::InteractionResult as Result;
+        // Starling: the old hook first, for the mods made for it (native_compat.rs): a claimed
+        // use swings the hand.
+        let mut claimed = false;
+        self.native_use_item_old(stack, &mut claimed);
+        if claimed {
+            self.swing_arm();
+            return Some(true);
+        }
         let mut result = None;
->>>>>>> arismoko/main
         if mod_api::__private::has_part_hook(mod_api::HookId::UseItem)
             && let Ok(snapshot) = stack.try_into_api()
         {

@@ -1851,12 +1851,8 @@ mod tests {
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([
                 96, 110, 111, 255,
             ])),
-<<<<<<< HEAD
             source: None,
-||||||| 980f0459eb
-=======
             splashes: Arc::from(""),
->>>>>>> arismoko/main
         }
     }
 

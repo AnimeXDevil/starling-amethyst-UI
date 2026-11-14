@@ -270,44 +270,28 @@ impl Game<'_> {
         self.watch_pack_folder();
         self.poll_diagnostics();
         let context = self.controller_settings_context();
-<<<<<<< HEAD
         self.show_skin_cloud();
         let mut ui = std::mem::take(&mut self.ui.options);
         if ui.controller_open() {
             ui.set_controller_context(context);
-||||||| 980f0459eb
-        let mut ui = std::mem::take(&mut self.ui.options);
-        if ui.controller_open() {
-            ui.set_controller_context(context);
-=======
-        if self.ui.options.controller_open() {
-            self.ui.options.set_controller_context(context);
->>>>>>> arismoko/main
         }
         let cursor = self.options_pointer(&mut ui);
+        self.ui.options = ui;
         let output = self
             .renderer
             .as_ref()
             .map_or(Default::default(), |r| r.output());
-<<<<<<< HEAD
-        ui.draw(&self.settings, output, batch, &self.gui.atlas, cursor);
-        self.ui.options = ui;
-||||||| 980f0459eb
-        ui.draw(&self.settings, output, batch, &self.gui.atlas, self.cursor);
-        self.ui.options = ui;
-=======
         self.ui
             .options
             .draw_background(&self.settings, output, batch, &self.gui.atlas);
         self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
         self.ui
             .options
-            .draw_contents(&self.settings, batch, &self.gui.atlas, self.cursor);
+            .draw_contents(&self.settings, batch, &self.gui.atlas, cursor);
         self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
         self.ui
             .options
-            .draw_overlays(batch, &self.gui.atlas, self.cursor);
->>>>>>> arismoko/main
+            .draw_overlays(batch, &self.gui.atlas, cursor);
         self.show_calibration((batch.width, batch.height));
     }
     /// Whose controller settings these are and what this game sees (`controller_ui`): the
@@ -732,12 +716,8 @@ impl Game<'_> {
     }
     /// Settings that Horizon applies beyond render distance, volume and GUI scale.
     pub(super) fn apply_ui_settings(&mut self) {
-<<<<<<< HEAD
         let scale = self.world_scale();
-||||||| 980f0459eb
-=======
         horizon_client::parallel::set_setting(self.settings.horizon.parallel_tick);
->>>>>>> arismoko/main
         if horizon_client_render::mipmap::set_dither_cutouts(
             self.settings.horizon.dither_cutout_mips,
         ) {
@@ -765,7 +745,10 @@ impl Game<'_> {
                 s.file.int("textureFiltering"),
                 s.file.int("maxAnisotropyBit"),
             );
-<<<<<<< HEAD
+            // Dynamic Resolution turned off starts over at the floor.
+            if !s.horizon.dynamic_resolution {
+                self.dynamic_resolution.reset();
+            }
             r.set_world_post(
                 scale,
                 s.horizon.fxaa,
@@ -773,22 +756,6 @@ impl Game<'_> {
                 s.horizon.upscaling.ratio(),
                 s.horizon.upscaling_sharpness as f32 / 100.0,
             );
-||||||| 980f0459eb
-            r.set_world_post(
-                s.horizon.resolution_scale as f32 / 100.0,
-                s.horizon.fxaa,
-                s.horizon.taa,
-                s.horizon.upscaling.ratio(),
-                s.horizon.upscaling_sharpness as f32 / 100.0,
-            );
-=======
-            // Dynamic Resolution's scale where it is on; turned off, it starts over at the floor.
-            if !s.horizon.dynamic_resolution {
-                self.dynamic_resolution.reset();
-            }
-            let scale = super::frame_autotune::world_scale(&s.horizon, &self.dynamic_resolution);
-            super::frame_autotune::apply_world_post(r, &s.horizon, scale);
->>>>>>> arismoko/main
             r.set_frame_generation(
                 s.horizon.frame_generation != horizon_client::graphics::FrameGeneration::Off,
             );

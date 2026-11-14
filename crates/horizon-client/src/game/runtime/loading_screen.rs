@@ -340,13 +340,7 @@ impl Loading {
             .as_ref()
             .map_or_else(Vec::new, |options| pack_finders::data_packs(&options.mods));
         self.menu
-<<<<<<< HEAD
-            .set_root(root, gui.source.clone(), &self.settings, additional.into());
-||||||| 980f0459eb
-        self.menu.set_root(root, &self.settings, additional.into());
-=======
-            .set_root(root, &self.settings, additional.into(), &gui.splashes);
->>>>>>> arismoko/main
+            .set_root(root, gui.source.clone(), &self.settings, additional.into(), &gui.splashes);
         self.gui = Some(gui);
         self.setup.starting = false;
         self.title_drawn = false;

@@ -493,10 +493,7 @@ impl Game<'_> {
                 }
                 Ok(Some(json!({ "ok": true, "flat": r.flat_draws() })))
             }
-<<<<<<< HEAD
             "static-cutout" => self.static_cutout_command(&words),
-||||||| 980f0459eb
-=======
             "section-layout" => {
                 let r = self.renderer.as_mut().ok_or("no renderer")?;
                 let compact = match words.get(1).copied() {
@@ -506,7 +503,6 @@ impl Game<'_> {
                 };
                 Ok(Some(json!({ "ok": true, "compact": compact })))
             }
->>>>>>> arismoko/main
             "section-cull" => {
                 let r = self.renderer.as_mut().ok_or("no renderer")?;
                 match words.get(1).copied() {

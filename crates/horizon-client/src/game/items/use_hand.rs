@@ -1,6 +1,19 @@
 use super::*;
 
 impl Game<'_> {
+    /// `Level.playSound(player, ...)`: a guest's client already predicted the
+    /// fire-starter sound, so play it locally on the server and forward it to
+    /// the other guests without leaving it in the broadcast capture.
+    pub(super) fn play_block_use_sound(&mut self, sound: &str, at: [f64; 3], pitch: f32) {
+        if self.lan_acting.is_some() {
+            self.audio.play_unshared(sound, Some(at), 1.0, pitch);
+            self.guest_block_sounds
+                .push((sound.to_owned(), at, 1.0, pitch));
+        } else {
+            self.audio.play(sound, Some(at), 1.0, pitch);
+        }
+    }
+
     /// One hand's turn in `startUseItem`: `useItemOn` the block aimed at,
     /// then `useItem`. Whether the click ends here (it acted or failed).
     pub(in crate::game) fn use_hand(&mut self, block_hit: Option<&Hit>) -> Result<bool> {
@@ -61,50 +74,8 @@ impl Game<'_> {
             && answer != Answer::Pass
         {
             if matches!(answer, Answer::Success | Answer::SuccessServer) {
-<<<<<<< HEAD
                 self.swing_arm();
             }
-            self.use_failed = answer == Answer::Fail;
-            return Ok(answer.consumes_action() || answer == Answer::Fail);
-        }
-        // ServerPlayerGameMode.useItemOn: after the spectator and sneak gates,
-        // BlockState.useItemOn runs before every block-specific behaviour.
-        if use_block.or(!(sneaking && hands_full))
-            && let Some(hit) = block_hit
-        {
-            let held = self.held().cloned();
-            // Create's arm in hand marks what it works with (arms.rs).
-            if self.use_arm_item(hit.pos) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            // A content mod's machine (Create's depot, millstone: processing.rs).
-            if self.use_machine(hit.pos, hit.face) {
-||||||| 441f49d57e
-            let held = self.held().cloned();
-            if self.use_lectern(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_sign_applicator(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_golem_statue(hit.pos, held.as_ref()) {
-=======
->>>>>>> arismoko/main
-                self.swing_arm();
-            }
-<<<<<<< HEAD
-            // Create's belt connector on a shaft (belts.rs).
-            if self.use_belt_connector(hit.pos, sneaking) {
-                self.swing_arm();
-                return Ok(true);
-||||||| 441f49d57e
-            if self.use_jukebox(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-=======
             self.use_failed = answer == Answer::Fail;
             return Ok(answer.consumes_action() || answer == Answer::Fail);
         }
@@ -115,6 +86,21 @@ impl Game<'_> {
         if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
+            // Create's arm in hand marks what it works with (arms.rs).
+            if self.use_arm_item(hit.pos) {
+                self.swing_arm();
+                return Ok(true);
+            }
+            // A content mod's machine (Create's depot, millstone: processing.rs).
+            if self.use_machine(hit.pos, hit.face) {
+                self.swing_arm();
+                return Ok(true);
+            }
+            // Create's belt connector on a shaft (belts.rs).
+            if self.use_belt_connector(hit.pos, sneaking) {
+                self.swing_arm();
+                return Ok(true);
+            }
             let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
             let mut block_answer =
                 self.use_item_on_block(hit, self.hand, held.as_ref(), mod_api::UsePhase::Block);
@@ -125,7 +111,6 @@ impl Game<'_> {
             {
                 let click = self.block_click(hit, self.hand, snapshot.as_ref());
                 self.native_use_item_on(state, &click, &mut block_answer);
->>>>>>> arismoko/main
             }
             let mut chains_sign = false;
             if block_answer.is_none() {
@@ -397,61 +382,6 @@ impl Game<'_> {
         }
         // Native mods, where ItemStack.useOn and Item.use start: the block aimed at had its turn, and the item is off cooldown. A guest's
         // UseItemOn reaches only useOn, its UseItem only use.
-<<<<<<< HEAD
-        let mut claimed = false;
-        // Starling: the old hook first, for the mods made for it (native_compat.rs): a claimed
-        // use swings the hand, and neither the item's useOn nor its use runs.
-        if let Some(hit) = block_hit {
-            self.native_use_item_on_old(&stack, hit.pos, hit.face, &mut claimed);
-            if claimed {
-                self.swing_arm();
-                return Ok(true);
-            }
-        }
-        if let Some(hit) = block_hit {
-            if let Some(answer) = self.use_item_on_block(
-                hit,
-                self.hand,
-                Some(&stack),
-                mod_api::UsePhase::ItemAfterBlock,
-            ) {
-                if answer.consumes_action() {
-                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &stack);
-                    if matches!(answer, Answer::Success | Answer::SuccessServer) {
-                        self.swing_arm();
-                    }
-                    return Ok(true);
-                }
-                if answer == Answer::Fail {
-                    self.use_failed = true;
-                    return Ok(true);
-                }
-                if on_block {
-                    return Ok(false);
-                }
-                block_hit = None;
-            } else if mod_api::__private::has_part_hook(mod_api::HookId::UseOn)
-                && let Ok(snapshot) = stack.try_into_api()
-            {
-                let (player, player_entity_id) = self.native_clicker();
-                let (hand, at) = (self.hand, hit.native());
-                self.native_use_on(mod_api::__private::UseOnCall {
-                    stack: &snapshot,
-                    pos: hit.pos,
-                    face: hit.face,
-                    hand,
-                    hit: at,
-                    player,
-                    player_entity_id,
-                    claimed: &mut claimed,
-                });
-            }
-||||||| 441f49d57e
-        let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
-        let mut claimed = false;
-        if let Some(hit) = block_hit {
-            self.native_use_item_on(&stack, hit.pos, hit.face, &mut claimed);
-=======
         if let Some(hit) = block_hit
             && let Some(answer) = self.use_item_on_block(
                 hit,
@@ -475,12 +405,21 @@ impl Game<'_> {
                 return Ok(false);
             }
             block_hit = None;
->>>>>>> arismoko/main
         }
         // An empty stack has no item Part or vanilla Item.useOn implementation.
         let (Some(stack), Some(info)) = (stack, info) else {
             return Ok(false);
         };
+        // Starling: the old hook first, for the mods made for it (native_compat.rs): a claimed
+        // use swings the hand, and neither the item's useOn nor its use runs.
+        if let Some(hit) = block_hit {
+            let mut claimed = false;
+            self.native_use_item_on_old(&stack, hit.pos, hit.face, &mut claimed);
+            if claimed {
+                self.swing_arm();
+                return Ok(true);
+            }
+        }
         if let Some(hit) = block_hit
             && let Some(answer) = self.item_on_interaction(hit, self.hand, &stack)
         {
@@ -495,11 +434,6 @@ impl Game<'_> {
         }
         if let Some(used) = self.use_item_fallthrough(&stack, on_block) {
             return Ok(used);
-        }
-        // LeadItem.useOn follows the block and the item's override, including
-        // when sneaking bypassed the block's useWithoutItem.
-        if block_hit.is_some() && &*stack.item == "minecraft:lead" && self.interact_knot() {
-            return Ok(true);
         }
         // LeadItem.useOn follows the block and the item's override, including
         // when sneaking bypassed the block's useWithoutItem.
@@ -728,6 +662,8 @@ impl Game<'_> {
             return Ok(true);
         };
         let target = [pos.x, pos.y, pos.z];
+        let game_master = self.can_use_game_master_blocks();
+        let state = self.lectern_placed(target, state, &stack, game_master)?;
         let state = self.apply_item_block_state(target, state, &stack)?;
         // Create's arm takes the points marked for it.
         self.arm_placed(target);
@@ -738,7 +674,6 @@ impl Game<'_> {
             self.world.block_entities.insert(key, entity);
         }
         if self.world.block_entities.get(&key).is_some() {
-            let game_master = self.can_use_game_master_blocks();
             self.apply_placed_item(target, &stack, game_master);
             // Block.setPlacedBy.
             match self.world.block_entities.get(&key) {
@@ -753,7 +688,9 @@ impl Game<'_> {
                 Some(BlockEntity::JigsawBlock(_)) => self.jigsaw_block_placed(key),
                 Some(BlockEntity::TestBlock(_)) => self.test_block_placed(key),
                 Some(BlockEntity::Jukebox(_)) => self.jukebox_placed(target, &stack),
-                Some(BlockEntity::Sign(sign)) if !sign.waxed => self.open_sign_editor(key, true),
+                Some(BlockEntity::Sign(sign)) if !sign.waxed && sign.front.has_editable_text() => {
+                    self.open_text_edit(key, true)
+                }
                 _ => {}
             }
         }
