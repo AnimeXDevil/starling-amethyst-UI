@@ -158,6 +158,37 @@ struct SectionFacts {
     reaches: bool,
 }
 
+/// Entries of the per-thread cache of moved full cubes.
+const MOVED_BLOCKS: usize = 256;
+type MovedBlocks = [Option<(BlockPos, VoxelShape)>; MOVED_BLOCKS];
+thread_local! {
+    static MOVED: std::cell::RefCell<Box<MovedBlocks>> =
+        std::cell::RefCell::new(Box::new(std::array::from_fn(|_| None)));
+}
+
+/// `shape.moved(offset)` for the full cube `shape` at block `p`: the same shape every time the
+/// block is scanned, so a crowd standing on one floor builds it once, not once per mob per
+/// tick. Direct-mapped by position; a miss builds it and takes the slot.
+fn moved_block(p: BlockPos, offset: Vec3, shape: &VoxelShape) -> VoxelShape {
+    let slot = (p.x.wrapping_mul(73_856_093)
+        ^ p.y.wrapping_mul(19_349_663)
+        ^ p.z.wrapping_mul(83_492_791)) as u32 as usize
+        % MOVED_BLOCKS;
+    MOVED.with(|cache| {
+        let Ok(mut cache) = cache.try_borrow_mut() else {
+            return shape.moved(offset);
+        };
+        if let Some((at, moved)) = &cache[slot]
+            && *at == p
+        {
+            return moved.clone();
+        }
+        let moved = shape.moved(offset);
+        cache[slot] = Some((p, moved.clone()));
+        moved
+    })
+}
+
 pub struct BlockCollisionScan<'w, 'c, W: BlockCollisionWorld> {
     world: &'w mut W,
     context: CollisionContext<'c>,
@@ -166,6 +197,8 @@ pub struct BlockCollisionScan<'w, 'c, W: BlockCollisionWorld> {
     /// the unit cube (finite bounds always make one).
     entity_shape: Option<VoxelShape>,
     only_suffocating: bool,
+    /// A boolean collision query does not need translated full-cube geometry.
+    presence_only: bool,
     start: BlockPos,
     sizes: [usize; 3],
     index: usize,
@@ -210,6 +243,7 @@ impl<'w, 'c, W: BlockCollisionWorld> BlockCollisionScan<'w, 'c, W> {
             bounds,
             entity_shape: None,
             only_suffocating,
+            presence_only: false,
             start,
             sizes: sizes.map(|s| s as usize),
             index: 0,
@@ -223,6 +257,21 @@ impl<'w, 'c, W: BlockCollisionWorld> BlockCollisionScan<'w, 'c, W> {
             missing_stays,
             failed: false,
         })
+    }
+
+    /// Boolean collision query with the same cursor, budget, and callback order
+    /// as the ordinary iterator. Avoid constructing translated geometry for a
+    /// full collision cube, since the caller only needs to know whether one exists.
+    pub fn any_collision(
+        world: &'w mut W,
+        context: CollisionContext<'c>,
+        bounds: Aabb,
+        only_suffocating: bool,
+        candidate_budget: usize,
+    ) -> Result<bool, CollisionScanError<W::Error>> {
+        let mut scan = Self::new(world, context, bounds, only_suffocating, candidate_budget)?;
+        scan.presence_only = true;
+        Ok(scan.find_next()?.is_some())
     }
 
     /// The cells after the current one (cell `x` of its row, block x `block_x`) that are in the
@@ -360,11 +409,10 @@ impl<'w, 'c, W: BlockCollisionWorld> BlockCollisionScan<'w, 'c, W> {
                     self.cursor[2] += 1;
                 }
             }
-            let kind = relative
-                .into_iter()
-                .zip(self.sizes)
-                .filter(|(p, size)| *p == 0 || *p == size - 1)
-                .count();
+            // How many of the cell's three coordinates lie on the box's outer layer.
+            let kind = usize::from(relative[0] == 0 || relative[0] == width - 1)
+                + usize::from(relative[1] == 0 || relative[1] == height - 1)
+                + usize::from(relative[2] == 0 || relative[2] == depth - 1);
             if kind == 3 {
                 continue;
             }
@@ -438,8 +486,40 @@ impl<'w, 'c, W: BlockCollisionWorld> BlockCollisionScan<'w, 'c, W> {
             if block.empty_shape {
                 continue;
             }
+<<<<<<< HEAD
             let shape = if block.full_block {
                 None
+||||||| 980f0459eb
+            let shape = self
+                .world
+                .context_shape(block, p, &self.context)
+                .map_err(CollisionScanError::World)?;
+            let offset = Vec3::new(f64::from(p.x), f64::from(p.y), f64::from(p.z));
+            let moved = if shape.is_block() {
+                // Native adds one in floating point, including at i32::MAX.
+                let top = Vec3::new(offset.x + 1.0, offset.y + 1.0, offset.z + 1.0);
+                if !self.bounds.intersects_corners(offset, top) {
+                    continue;
+                }
+                shape.moved(offset)
+=======
+            let shape = self
+                .world
+                .context_shape(block, p, &self.context)
+                .map_err(CollisionScanError::World)?;
+            let offset = Vec3::new(f64::from(p.x), f64::from(p.y), f64::from(p.z));
+            let moved = if shape.is_block() {
+                // Native adds one in floating point, including at i32::MAX.
+                let top = Vec3::new(offset.x + 1.0, offset.y + 1.0, offset.z + 1.0);
+                if !self.bounds.intersects_corners(offset, top) {
+                    continue;
+                }
+                if self.presence_only {
+                    VoxelShape::block()
+                } else {
+                    moved_block(p, offset, &shape)
+                }
+>>>>>>> arismoko/main
             } else {
                 let shape = self
                     .world

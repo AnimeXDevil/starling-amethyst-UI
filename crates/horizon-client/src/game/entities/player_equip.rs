@@ -47,7 +47,16 @@ impl Game<'_> {
         new: Option<&ItemStack>,
     ) {
         if !same(old, new) {
-            self.player_equipped(slot, new);
+            if self.transactions.is_empty() {
+                self.player_equipped(slot, new);
+                return;
+            }
+            let uuid = self.native_acting_id();
+            self.after_commit(super::transactions::After::PlayerEquip(
+                uuid,
+                slot.to_owned(),
+                new.cloned(),
+            ));
         }
     }
 
@@ -65,12 +74,13 @@ impl Game<'_> {
             return;
         };
         let at = [at.x, at.y, at.z];
-        let equippable = new
-            .and_then(|s| self.items().get(&s.item))
-            .and_then(|info| {
-                let own = info.equip_slot.as_deref()?;
-                Some((own == slot, info.equip_sound.clone()))
-            });
+        let equippable = new.and_then(|stack| {
+            let equippable = horizon_client::item_sync::equippable(stack, self.items())?;
+            Some((
+                equippable.slot == slot,
+                horizon_client::item_sync::equip_sound(stack, self.items()),
+            ))
+        });
         if let Some((true, sound)) = &equippable {
             let sound = sound
                 .as_deref()

@@ -166,6 +166,10 @@ impl Loading {
             }
         };
         horizon_client::window::settle_created_fullscreen(&window, fullscreen);
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = hwnd(&window) {
+            horizon_threads::system_menu::suppress(hwnd);
+        }
         drop(window_step);
         // The renderer takes seconds to build and winit's window sits white
         // until the first frame presents, so paint the boot screen on it and
@@ -336,7 +340,13 @@ impl Loading {
             .as_ref()
             .map_or_else(Vec::new, |options| pack_finders::data_packs(&options.mods));
         self.menu
+<<<<<<< HEAD
             .set_root(root, gui.source.clone(), &self.settings, additional.into());
+||||||| 980f0459eb
+        self.menu.set_root(root, &self.settings, additional.into());
+=======
+            .set_root(root, &self.settings, additional.into(), &gui.splashes);
+>>>>>>> arismoko/main
         self.gui = Some(gui);
         self.setup.starting = false;
         self.title_drawn = false;
@@ -644,6 +654,7 @@ impl Loading {
                 loaded.renderer_cpu,
                 self.settings.horizon.api,
                 self.settings.horizon.translucent_batching,
+                self.settings.vsync,
                 &self.settings.horizon,
                 shader_packs::picked_pack_shape(&self.settings),
                 self.renderer
@@ -676,6 +687,13 @@ impl Loading {
                 None => Audio::with_device(&loaded.pack.source, &self.settings.sound_device),
             }
         };
+        // The menu read its language from the prepared root alone (`set_root`) and
+        // `load_resources` skips it on this path: read it again with the mods' layers, in the
+        // language picked in the menu.
+        horizon_client::lang::set(horizon_client::lang::Language::load(
+            &[&loaded.pack.source],
+            &horizon_client::lang::code(),
+        ));
         let pack_error = loaded.pack_error.or_else(|| self.pack_error.take());
         // The game borrows its shared resources for the process's lifetime,
         // like the single copy an integrated server would share.
@@ -821,18 +839,35 @@ impl ApplicationHandler for App {
 
 /// Every launch reads the prepared game files (`horizon-prepare`'s output, whose
 /// manifest is `horizon-resources.json`): without them, say where they were
+<<<<<<< HEAD
 /// looked for and how to get them, before a window or a loader starts.
 #[cfg(not(target_os = "android"))]
 pub(super) fn missing_resources(root: &std::path::Path) -> Option<String> {
+||||||| 980f0459eb
+/// looked for and how to get them, before a window or a loader starts.
+pub(super) fn missing_resources(root: &std::path::Path) -> Option<String> {
+=======
+/// looked for and how to get them, before a window or a loader starts. `get` is
+/// the page a hook sends the player to (`horizon_hooks::engine::get_the_game`).
+pub(super) fn missing_resources(
+    root: &std::path::Path,
+    get: Option<horizon_hooks::GetTheGame>,
+) -> Option<String> {
+>>>>>>> arismoko/main
     let shown = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
     if !root.join("horizon-resources.json").is_file() {
+        let launcher = get.map_or(String::new(), |get| {
+            format!(
+                "Horizon is started from its launcher: download it at {} (Download). It needs \
+                 your own Minecraft: Java Edition; the launcher signs you in and prepares the \
+                 game files.\nDevelopers: ",
+                get.address
+            )
+        });
         return Some(format!(
             "Horizon's prepared game files are missing: no horizon-resources.json in {}\n\
-             Horizon is started from its launcher: download it at {} (Download). It needs your \
-             own Minecraft: Java Edition; the launcher signs you in and prepares the game files.\n\
-             Developers: horizon-prepare --prepare, or pass --resources <folder>",
+             {launcher}horizon-prepare --prepare, or pass --resources <folder>",
             shown.display(),
-            horizon_client::no_resources::DOWNLOAD_URL
         ));
     }
     damaged_prepared(root).map(|problem| {

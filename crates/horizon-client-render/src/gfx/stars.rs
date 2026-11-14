@@ -47,7 +47,7 @@ struct Uniform {
     clip_from_sky: [[f32; 4]; 4],
     color: [f32; 4],
     hdr_settings: [f32; 4],
-    hdr_shares: [f32; 4],
+    hdr_gains: [f32; 4],
     hdr_light: [f32; 4],
 }
 
@@ -128,7 +128,11 @@ pub(super) struct Stars {
 }
 
 impl Stars {
-    pub(super) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    /// The stars onto a frame of `format`, holding linear light when `linear`.
+    pub(super) fn new(
+        device: &wgpu::Device,
+        (format, linear): (wgpu::TextureFormat, bool),
+    ) -> Self {
         let triangles = star_triangles();
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Stars vertex buffer"),
@@ -173,11 +177,120 @@ impl Stars {
             bind_group_layouts: &[Some(&layout)],
             ..Default::default()
         });
+<<<<<<< HEAD
         let pipeline = with_descriptor(
             (&pipeline_layout, &shader, format),
             ("Stars", "vs_stars", wgpu::CompareFunction::Always),
             |descriptor| device.create_render_pipeline(descriptor),
         );
+||||||| 980f0459eb
+        let attributes = wgpu::vertex_attr_array![0 => Float32x3];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Stars"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_stars"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_stars"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[(
+                        "HDR_WRITE_LIGHT",
+                        f64::from(u8::from(format == super::LINEAR_FRAME)),
+                    )],
+                    ..Default::default()
+                },
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    // RenderPipelines.STARS: the celestial blend (src alpha, one), with the
+                    // colour premultiplied in fs_stars, so its alpha can carry HDR's mark.
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+=======
+        let attributes = wgpu::vertex_attr_array![0 => Float32x3];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Stars"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_stars"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_stars"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &super::linear_blend::frame_constants(format, linear),
+                    ..Default::default()
+                },
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    // RenderPipelines.STARS: the celestial blend (src alpha, one), with the
+                    // colour premultiplied in fs_stars, so its alpha can carry HDR's mark.
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+>>>>>>> arismoko/main
         Self {
             pipeline,
             layout: pipeline_layout,
@@ -204,12 +317,13 @@ impl Stars {
             clip_from_sky: clip_from_sky.to_cols_array_2d(),
             color: [b; 4],
             hdr_settings: globals.hdr_settings,
-            hdr_shares: globals.hdr_shares,
+            hdr_gains: globals.hdr_gains,
             hdr_light: globals.hdr_light,
         };
         uploads.buffer(encoder, &self.uniform, 0, bytemuck::bytes_of(&uniform));
     }
 
+<<<<<<< HEAD
     /// The stars at the far plane, for the sky drawn after solid terrain (`late_sky`). None
     /// where the device refuses it.
     pub(super) fn late_pipeline(
@@ -228,6 +342,10 @@ impl Stars {
         )
     }
 
+||||||| 980f0459eb
+=======
+    #[horizon_mod_api_macros::replaceable]
+>>>>>>> arismoko/main
     pub(super) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         self.draw_through(pass, &self.pipeline);
     }

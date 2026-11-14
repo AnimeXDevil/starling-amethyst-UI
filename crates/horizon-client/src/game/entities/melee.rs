@@ -177,7 +177,12 @@ impl Game<'_> {
             && self.mob_hit().is_none_or(|m| d < m.1)
             && self.before_block(d)
         {
-            self.break_painting(i, true);
+            // `BlockAttachedEntity.hurtServer` refuses first through `isInvulnerableToBase`.
+            if self.native_player_hit_invulnerable(self.paintings[i].id, "minecraft:painting") {
+                self.attack_ticks = 0;
+            } else {
+                self.break_painting(i, true);
+            }
             return true;
         }
         // A ghast's fireball or a wind charge in front: turned back.
@@ -407,6 +412,7 @@ impl Game<'_> {
         living: bool,
         victim: Option<u32>,
     ) -> (f32, f32, bool, bool) {
+<<<<<<< HEAD
         if self.legacy_rules() {
             return self.legacy_melee_damage(target_kind, living);
         }
@@ -436,5 +442,49 @@ impl Game<'_> {
         // Enchantment damage (sharpness, smite, bane) scaled by the attack strength.
         amount += enchant_bonus * scale;
         (amount, scale, crit, enchant_bonus * scale > 0.0)
+||||||| 980f0459eb
+=======
+        self.melee_damage_with_admission(target_kind, living, victim)
+            .0
+    }
+    /// Player.attack admits its hurt/tail before the item's damage bonus. Keep
+    /// that predicate with the one damage evaluation, including its RNG draws.
+    pub(super) fn melee_damage_with_admission(
+        &mut self,
+        target_kind: &str,
+        living: bool,
+        victim: Option<u32>,
+    ) -> ((f32, f32, bool, bool), bool) {
+        if self.legacy_rules() {
+            let hit = self.legacy_melee_damage(target_kind, living);
+            return (hit, hit.0 > 0.0);
+        }
+        let hand_damage = self.attack_damage();
+        // Riptide's spin replaces the attack damage attribute.
+        let spin = self.player.as_ref().map_or(0.0, |p| p.auto_spin_attack_dmg);
+        let damage = if spin > 0.0 { spin } else { hand_damage };
+        let scale = self.attack_strength_scale();
+        // getEnchantedDamage(target, damage, source) - damage, taken before the
+        // attack strength scales the base damage.
+        let enchant_bonus = self.enchanted_damage(target_kind, damage, victim) - damage;
+        let mut amount = damage * (0.2 + scale * scale * 0.8);
+        // Player.attack decides the critical hit only for a hit with base or
+        // enchantment damage: checked before the mace's smash bonus is added.
+        let damaging = amount > 0.0 || enchant_bonus * scale > 0.0;
+        // Item.getAttackDamageBonus (a mace's smash), before the critical hit.
+        amount += self.smash_damage_bonus(target_kind);
+        let vanilla_crit = living && self.critical_attack(scale);
+        let mut crit = vanilla_crit;
+        let mut multiplier = if vanilla_crit { 1.5 } else { 1.0 };
+        if living && damaging {
+            self.native_critical_hit(target_kind, vanilla_crit, &mut crit, &mut multiplier);
+        }
+        if crit {
+            amount *= multiplier;
+        }
+        // Enchantment damage (sharpness, smite, bane) scaled by the attack strength.
+        amount += enchant_bonus * scale;
+        ((amount, scale, crit, enchant_bonus * scale > 0.0), damaging)
+>>>>>>> arismoko/main
     }
 }

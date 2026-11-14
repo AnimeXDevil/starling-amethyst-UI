@@ -143,6 +143,7 @@ impl Game<'_> {
                     &mut claimed,
                 );
             }
+<<<<<<< HEAD
             if !claimed {
                 self.native_entity_interact(self.hand, id, &kind, stack.as_ref(), &mut claimed);
             }
@@ -150,9 +151,25 @@ impl Game<'_> {
             if !claimed {
                 self.native_interact_entity(id, &kind, stack.as_ref(), &mut claimed);
             }
+||||||| 980f0459eb
+            if !claimed {
+                self.native_entity_interact(self.hand, id, &kind, stack.as_ref(), &mut claimed);
+            }
+=======
+>>>>>>> arismoko/main
             if claimed {
                 self.swing_arm();
                 return Ok(true);
+            }
+            let mut result = None;
+            self.native_entity_interact(self.hand, id, &kind, stack.as_ref(), &mut result);
+            if let Some(answer) = result
+                && !matches!(
+                    answer,
+                    mod_api::InteractionResult::Pass | mod_api::InteractionResult::TryWithEmptyHand
+                )
+            {
+                return Ok(self.interaction_consumed(answer));
             }
         }
         Ok(self.interact_frame(target)
@@ -194,6 +211,13 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|p| p.health.food.food < 20),
             game_master: self.can_use_game_master_blocks(),
+            // RespawnConfig.isSamePosition compares the dimension and the block;
+            // where an anchor cannot set spawn (`canSetSpawn`), a click on it
+            // explodes before that comparison.
+            respawn_point: self
+                .respawn_config
+                .filter(|c| self.anchor_works() && c.dim == self.dim)
+                .map(|c| BlockPos::new(c.pos[0], c.pos[1], c.pos[2])),
         }
     }
 }

@@ -2,10 +2,15 @@
 //! Controls, Key Binds, Mouse Settings, Chat Settings, Accessibility,
 //! Language and Resource Packs, laid out like vanilla's HeaderAndFooter /
 //! OptionsList screens and drawn with the shared widgets.
+mod draw;
+mod pack_drop;
+
 use std::time::Instant;
 
 pub use crate::settings::Opt;
 
+#[path = "options_ui_widgets.rs"]
+mod widgets;
 use crate::{
     gamepad::{self, GlyphStyle},
     hdr_calibration::Picture,
@@ -18,8 +23,19 @@ use crate::{
     text::{self, Style, Text},
     ui,
 };
+pub(crate) use widgets::{button, inactive};
 
+#[path = "options_ui_values.rs"]
+mod values;
+pub(crate) use values::{chat_delay_label, chat_px, generic, on_off, percent};
+
+mod layout;
 mod shell_pages;
+
+use self::layout::OptionsLayout;
+#[path = "options_ui_wheel.rs"]
+mod wheel;
+pub(crate) use wheel::slider_unsnapped;
 
 fn tr(key: &str) -> Text {
     Text::translate(key, &[])
@@ -56,18 +72,6 @@ pub(crate) fn shader_folder_note() -> String {
 pub static HORIZON_EXTRAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 fn horizon_extras() -> bool {
     HORIZON_EXTRAS.load(std::sync::atomic::Ordering::Relaxed)
-}
-fn generic(caption: &str, value: Text) -> Text {
-    Text::translate("options.generic_value", &[tr(caption), value])
-}
-fn percent(caption: &str, value: f32) -> Text {
-    Text::translate(
-        "options.percent_value",
-        &[
-            tr(caption),
-            Text::literal(((f64::from(value) * 100.0) as i32).to_string()),
-        ],
-    )
 }
 /// `text` cut into lines of at most `width` characters, at spaces where it has them.
 fn wrap(text: &str, width: usize) -> Vec<String> {
@@ -119,19 +123,10 @@ fn mod_setting_label(setting: &crate::mod_list::NativeSetting) -> Text {
     };
     Text::option_name_value(tr(&setting.label), value)
 }
-fn on_off(v: bool) -> Text {
-    tr(if v { "options.on" } else { "options.off" })
-}
 /// A music track's name as its row shows it: the file, without its folder
 /// (`minecraft:music/game/calm1` -> `calm1`; the group names the situation).
 fn track_name(id: &str) -> &str {
     id.rsplit('/').next().unwrap_or(id)
-}
-fn chat_px(caption: &str, px: f32) -> Text {
-    Text::translate(
-        "options.pixel_value",
-        &[tr(caption), Text::literal((px as i32).to_string())],
-    )
 }
 pub(crate) enum Kind {
     /// Slider position 0..1.
@@ -454,6 +449,7 @@ impl Opt {
             Opt::ModSetting(i, j) => {
                 Kind::Slider(mod_setting(s, i, j).map_or(0.0, |m| m.value.fraction()))
             }
+            Opt::ChatDelay => values::kind(s.file.double("chatDelay")),
             Opt::FovEffects | Opt::DarknessPulsing => {
                 Kind::Slider(s.file.double(self.file_key().unwrap()).sqrt() as f32)
             }
@@ -470,7 +466,7 @@ impl Opt {
             ),
             Opt::SimulationDistance => unit(s.simulation_distance as f32, 5.0, 32.0),
             Opt::Sensitivity => Kind::Slider(s.sensitivity),
-            Opt::WheelSensitivity => unit(s.mouse_wheel_sensitivity, 0.01, 10.0),
+            Opt::WheelSensitivity => wheel::kind(s.mouse_wheel_sensitivity),
             Opt::Volume(i) => Kind::Slider(if i == 0 {
                 s.master_volume
             } else {
@@ -567,6 +563,7 @@ impl Opt {
     /// The discrete step count for stepped sliders, or `None` if continuous.
     pub fn slider_steps(self) -> Option<u32> {
         match self {
+            Opt::ChatDelay => Some(60),
             Opt::Fov => Some(80),
             Opt::RenderDistance => Some((crate::options_file::MAX_RENDER_DISTANCE - 2) as u32),
             Opt::SimulationDistance => Some(27),
@@ -768,7 +765,7 @@ impl Opt {
         }
 
         match self {
-            Opt::ChatDelay => tr("options.chat.delay_none"),
+            Opt::ChatDelay => chat_delay_label(s),
             Opt::FovEffects
             | Opt::DarknessPulsing
             | Opt::DistortionEffects
@@ -973,7 +970,7 @@ impl Opt {
             } else {
                 "options.narrator.notavailable"
             }),
-            Opt::ChatDelay => tr("options.chat.delay_none"),
+            Opt::ChatDelay => chat_delay_label(s),
             Opt::HideLightningFlashes => on_off(s.file.bool("hideLightningFlashes")),
             Opt::MonochromeLogo => on_off(s.file.bool("darkMojangStudiosBackground")),
             Opt::HideSplashTexts => on_off(s.file.bool("hideSplashTexts")),
@@ -1172,6 +1169,7 @@ impl Opt {
         let v = v.clamp(0.0, 1.0);
         let step = |lo: f32, hi: f32| (lo + v * (hi - lo)).round();
         match self {
+<<<<<<< HEAD
             Opt::TouchCircleSize => s.touch.circle_size = step(16.0, 64.0),
             Opt::TouchDynamicAreaX => s.touch.dynamic_area_x = (v * 100.0).round() / 100.0,
             Opt::TouchDynamicAreaY => s.touch.dynamic_area_y = (v * 100.0).round() / 100.0,
@@ -1184,6 +1182,10 @@ impl Opt {
             Opt::TouchMouseSensitivity => s.touch.virtual_mouse_sensitivity = 0.25 + v * 2.75,
             Opt::TouchButtonScale => s.touch.button_scale = 0.5 + v * 1.5,
 
+||||||| 980f0459eb
+=======
+            Opt::ChatDelay => values::set(s, v),
+>>>>>>> arismoko/main
             Opt::FovEffects | Opt::DarknessPulsing => s.file.set(
                 self.file_key().unwrap(),
                 crate::options_file::V::Double(f64::from(v).powi(2)),
@@ -1203,7 +1205,7 @@ impl Opt {
             }
             Opt::SimulationDistance => s.simulation_distance = step(5.0, 32.0) as i32,
             Opt::Sensitivity => s.sensitivity = v,
-            Opt::WheelSensitivity => s.mouse_wheel_sensitivity = 0.01 + v * 9.99,
+            Opt::WheelSensitivity => s.mouse_wheel_sensitivity = wheel::from_slider(v),
             Opt::Volume(0) => s.master_volume = v,
             Opt::Volume(i) => s.volumes[i] = v,
             Opt::Gamma => s.gamma = v,
@@ -1211,7 +1213,7 @@ impl Opt {
             Opt::CloudRange => s.cloud_range = step(2.0, 128.0) as i32,
             Opt::EntityDistance => s.entity_distance = step(2.0, 20.0) / 4.0,
             Opt::BiomeBlend => s.biome_blend = step(0.0, 7.0) as i32,
-            Opt::Preset => s.graphics_preset = PRESETS[step(0.0, 3.0) as usize].into(),
+            Opt::Preset => s.graphics_preset = PRESETS[preset_from_slider(v)].into(),
             Opt::Mipmaps => s.mipmap_levels = step(0.0, 4.0) as i32,
             Opt::MaxAnisotropy => s.file.set(
                 "maxAnisotropyBit",
@@ -2063,11 +2065,17 @@ pub enum Page {
     Music,
 }
 #[derive(Clone, Debug, PartialEq)]
+<<<<<<< HEAD
 enum Act {
     DiagnosticsExport,
     DiagnosticsOpen,
     DiagnosticsRecord,
     DiagnosticsGpu,
+||||||| 980f0459eb
+enum Act {
+=======
+pub(crate) enum Act {
+>>>>>>> arismoko/main
     None,
     Push(Page),
     Done,
@@ -2153,6 +2161,7 @@ enum Act {
     /// The Music page: turn this track off, or back on.
     MusicTrackOn(String, bool),
 }
+#[derive(Clone, Debug, PartialEq)]
 enum WKind {
     Button {
         label: Text,
@@ -2177,7 +2186,8 @@ enum WKind {
         code: String,
     },
 }
-struct Widget {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Widget {
     x: f32,
     y: f32,
     w: f32,
@@ -2241,10 +2251,16 @@ pub enum CatalogShelf {
 /// What the game must do after an interaction.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
+<<<<<<< HEAD
     DiagnosticsExport,
     DiagnosticsOpen,
     DiagnosticsRecord,
     DiagnosticsGpu,
+||||||| 980f0459eb
+=======
+    /// Dropped resource packs accepted on the confirmation screen.
+    ImportPacks(Vec<std::path::PathBuf>),
+>>>>>>> arismoko/main
     /// The Pack Options page closed with changes: the player's choices of its entries, the
     /// ones that differ from their defaults (the others went back to theirs).
     PackOptions {
@@ -2365,6 +2381,7 @@ pub struct MusicGroup {
     /// The rows, in `sounds.json` order.
     pub tracks: Vec<MusicTrack>,
 }
+<<<<<<< HEAD
 /// What Skin Customization asks of the game (`OptionsUi::take_skin_actions`), apart from
 /// [`Event`]: the menus before the game, which don't show the page, need not know them.
 #[derive(Clone, Debug, PartialEq)]
@@ -2401,7 +2418,28 @@ fn slider_unsnapped(opt: Opt, held: bool, moved: Instant) -> bool {
         held
     }
 }
+||||||| 980f0459eb
+/// `SliderableValueSet.applyValueImmediately`: these apply 600 ms after
+/// the last change (`OptionInstanceSliderButton.delayedApplyAt`).
+fn delays_apply(opt: Opt) -> bool {
+    matches!(
+        opt,
+        Opt::RenderDistance | Opt::SimulationDistance | Opt::BiomeBlend | Opt::WheelSensitivity
+    )
+}
+/// Whether a slider still shows its own position: while held, or for a
+/// delayed one until its value applies (both then `resetValue`).
+fn slider_unsnapped(opt: Opt, held: bool, moved: Instant) -> bool {
+    if delays_apply(opt) {
+        moved.elapsed().as_millis() < 600
+    } else {
+        held
+    }
+}
+=======
+>>>>>>> arismoko/main
 pub struct OptionsUi {
+    frame_draw: Option<draw::FrameDraw>,
     pub stack: Vec<Page>,
     scroll: f32,
     pub(crate) dragging: Option<Opt>,
@@ -2489,9 +2527,9 @@ pub struct OptionsUi {
     radial_pick: shell::Shell<crate::radial_editor::PickScreen>,
     /// Shaders: the shader packs and the picked one's options, on the settings shell.
     shader: shell::Shell<crate::shader_ui::ShaderScreen>,
-    /// The Pack Options page, and the packs' Polytone config entries by pack id (the game
-    /// fills them beside `pack_infos`).
-    pub pack_options: crate::pack_options_ui::PackOptionsUi,
+    /// Pack Options, on the settings shell, and the packs' Polytone config entries by pack id
+    /// (the game fills them beside `pack_infos`).
+    pack_options: shell::Shell<crate::pack_options_ui::PackOptionsScreen>,
     pub pack_configs: std::collections::BTreeMap<String, horizon_polytone::pack::Configs>,
     pub split_profiles: crate::split_profiles::SplitProfiles,
     /// HDR calibration while its page is open.
@@ -2529,6 +2567,7 @@ pub struct OptionsUi {
     /// The PvP & HUD items that take a whole row (`wide_extras`), measured
     /// when the page is drawn.
     wide_extras: Vec<crate::extras::Item>,
+<<<<<<< HEAD
     /// Whether Options opens Skin Customization: the game's options do; the menus before the
     /// game, which can't put a skin on, keep vanilla's greyed button.
     pub skin_page: bool,
@@ -2578,7 +2617,21 @@ impl Default for SkinPage {
             actions: Vec::new(),
         }
     }
+||||||| 980f0459eb
+=======
+    /// The page layout's revision: every change to an input the layout reads
+    /// (the page, the scroll, the search text, a setting's shown value) bumps
+    /// it, so the layout is made again once and not on every draw or click.
+    rev: u64,
+    /// The page's layout at `layout_key`: shared by the drawing, the hit
+    /// tests and the scroll, so all three read the same rectangles.
+    layout_cache: Option<((f32, f32, u64, u32), std::sync::Arc<OptionsLayout>)>,
+    /// How many layouts were made (the caching test).
+    #[cfg(test)]
+    layouts_built: u32,
+>>>>>>> arismoko/main
 }
+
 impl Default for OptionsUi {
     fn default() -> Self {
         let mut search = ui::EditBox::new(0.0, 0.0, 200.0, 15.0);
@@ -2589,6 +2642,7 @@ impl Default for OptionsUi {
         custom_send.max_length = 256;
         custom_send.focused = false;
         Self {
+            frame_draw: None,
             stack: vec![Page::Main],
             scroll: 0.0,
             dragging: None,
@@ -2660,9 +2714,14 @@ impl Default for OptionsUi {
             catalog_buttons: false,
             skin: SkinPage::default(),
             wide_extras: Vec::new(),
+            rev: 0,
+            layout_cache: None,
+            #[cfg(test)]
+            layouts_built: 0,
         }
     }
 }
+<<<<<<< HEAD
 /// The longest line of a Mods page note, in characters: about a button's width.
 const NOTE_CHARS: usize = 52;
 
@@ -2813,6 +2872,30 @@ fn inactive(mut w: Widget) -> Widget {
     }
     w
 }
+||||||| 980f0459eb
+fn button(x: f32, y: f32, w: f32, label: Text, act: Act) -> Widget {
+    Widget {
+        x,
+        y,
+        w,
+        h: 20.0,
+        kind: WKind::Button {
+            label,
+            active: true,
+            act,
+        },
+        list: false,
+        row: 0,
+    }
+}
+fn inactive(mut w: Widget) -> Widget {
+    if let WKind::Button { active, .. } = &mut w.kind {
+        *active = false;
+    }
+    w
+}
+=======
+>>>>>>> arismoko/main
 fn option_widget(s: &Settings, opt: Opt, x: f32, y: f32, w: f32) -> Widget {
     // OptionsSubScreen.addContents: the narrator button is active only while
     // the narrator is (`narratorButton.active = narrator.isActive()`).
@@ -3162,6 +3245,7 @@ impl OptionsUi {
                 Page::Video | Page::Controls | Page::KeyBinds | Page::ModBrowser
             )
     }
+<<<<<<< HEAD
     /// Whether a text field shown now has the focus: the language and settings searches, the
     /// pack search, or Skin Customization's name.
     pub fn text_focused(&self) -> bool {
@@ -3388,6 +3472,26 @@ impl OptionsUi {
         }
         self.pack_infos = infos;
     }
+||||||| 980f0459eb
+    /// Whether the resource pack screen is open (not Create World's data packs on the same
+    /// page).
+    pub fn resource_packs_open(&self) -> bool {
+        self.page() == Page::Packs && self.data_pack_dir.is_none()
+    }
+    /// The packs in `resourcepacks/` changed while the pack screen is open
+    /// (`PackSelectionScreen`'s directory watcher): the screen is made again over
+    /// `infos`, keeping the selection made on it so far.
+    pub fn update_pack_infos(&mut self, infos: Vec<crate::pack_screen::PackInfo>) {
+        if let Some(p) = self.pack_screen.take()
+            && p.changed
+        {
+            self.pack_selection = p.commit();
+            self.pack_reselected = true;
+        }
+        self.pack_infos = infos;
+    }
+=======
+>>>>>>> arismoko/main
     pub fn page(&self) -> Page {
         *self.stack.last().unwrap_or(&Page::Main)
     }
@@ -3494,6 +3598,7 @@ impl OptionsUi {
     }
     /// Open a page whose Done/Escape returns directly to the calling screen.
     pub fn open_at(&mut self, in_world: bool, page: Page) {
+<<<<<<< HEAD
         // Starling: the Mods buttons open its Mods page (the switches and Compile: a phone has no
         // launcher to choose the mods); upstream's Mods screen is that page's Details.
         let page = if page == Page::Mods {
@@ -3501,6 +3606,10 @@ impl OptionsUi {
         } else {
             page
         };
+||||||| 980f0459eb
+=======
+        self.discard_draw();
+>>>>>>> arismoko/main
         self.stack.clear();
         self.data_pack_dir = None;
         self.focus = None;
@@ -3512,6 +3621,7 @@ impl OptionsUi {
         self.pending_mod_key = None;
     }
     fn push(&mut self, page: Page) {
+        self.relayout();
         self.stack.push(page);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
@@ -4628,6 +4738,7 @@ impl OptionsUi {
         });
         *y += padding + 18.0;
     }
+<<<<<<< HEAD
     /// Build every widget of the current page.
     fn layout(&mut self, s: &Settings, w: f32, h: f32) -> (Vec<Widget>, f32, f32, f32) {
         let mut out = Vec::new();
@@ -5410,6 +5521,601 @@ impl OptionsUi {
             .collect();
         (out, top, bottom, content)
     }
+||||||| 980f0459eb
+    /// Build every widget of the current page.
+    fn layout(&mut self, s: &Settings, w: f32, h: f32) -> (Vec<Widget>, f32, f32, f32) {
+        let mut out = Vec::new();
+        let mut rows = ListRows::default();
+        let page = self.page();
+        let cx = (w / 2.0).floor();
+        if matches!(
+            page,
+            Page::Video | Page::Controls | Page::KeyBinds | Page::ModBrowser
+        ) {
+            self.settings_search.x = cx - 100.0;
+            self.settings_search.y = 17.0;
+        }
+        let done = |y: f32| button(cx - 100.0, y, 200.0, tr("gui.done"), Act::Done);
+        // (list top, list bottom, content height)
+        let (mut top, mut bottom, mut content) = (33.0, h - 33.0, 0.0);
+        match page {
+            Page::Main => {
+                out.push(Widget {
+                    x: 0.0,
+                    y: 12.0,
+                    w,
+                    h: 9.0,
+                    kind: WKind::Text {
+                        text: tr("options.title"),
+                        color: u32::MAX,
+                        centered: true,
+                    },
+                    list: false,
+                    row: 0,
+                });
+                out.push(option_widget(s, Opt::Fov, cx - 154.0, 29.0, 150.0));
+                out.push(button(
+                    cx + 4.0,
+                    29.0,
+                    150.0,
+                    tr("options.online"),
+                    Act::Push(Page::Online),
+                ));
+                let entries = [
+                    ("options.skinCustomisation", Some(Page::Skin)),
+                    ("options.sounds", Some(Page::Sound)),
+                    // Video Settings... opens Horizon's graphics screen, which holds every
+                    // video option, as Sodium's replaces vanilla's.
+                    ("options.video", Some(Page::Graphics)),
+                    ("options.controls", Some(Page::Controls)),
+                    (
+                        "options.language",
+                        (!self.split_guest).then_some(Page::Language),
+                    ),
+                    ("options.chat", Some(Page::Chat)),
+                    (
+                        "options.resourcepack",
+                        (!self.split_guest).then_some(Page::Packs),
+                    ),
+                    ("options.accessibility", Some(Page::Accessibility)),
+                    // Vanilla's Telemetry Data and Credits slots: Horizon's
+                    // settings and its mods, as a mod adds its button here.
+                    // Credits & Attribution (WinScreen's credits) follows them.
+                    ("horizon.pages.open.horizon_settings", Some(Page::Horizon)),
+                    ("horizon.pages.open.mods", Some(Page::Mods)),
+                    ("options.credits_and_attribution", Some(Page::Credits)),
+                ];
+                // horizon-extras: without it, vanilla's last row instead of Horizon Settings and
+                // Mods: Telemetry Data (greyed: nothing is sent) and Credits & Attribution.
+                let plain;
+                let entries: &[_] = if horizon_extras() {
+                    &entries
+                } else {
+                    plain = [
+                        &entries[..entries.len() - 3],
+                        &[
+                            ("options.telemetry", None),
+                            ("options.credits_and_attribution", Some(Page::Credits)),
+                        ],
+                    ]
+                    .concat();
+                    &plain
+                };
+                let rows = entries.len().div_ceil(2) as f32;
+                let gy = (61.0 + 30.0f32).min(h - 33.0 - rows * 24.0);
+                for (i, (key, page)) in entries.iter().enumerate() {
+                    let x = cx - 158.0 + 4.0 + (i % 2) as f32 * 158.0;
+                    let y = gy + (i / 2) as f32 * 24.0;
+                    let b = button(x, y, 150.0, tr(key), page.map_or(Act::None, Act::Push));
+                    out.push(if page.is_some() { b } else { inactive(b) });
+                }
+                out.push(done(h - 27.0));
+                top = 0.0;
+                bottom = 0.0;
+            }
+            Page::Credits => {
+                // CreditsAndAttributionScreen: the title header, three 210-wide
+                // buttons 8 apart (HeaderAndFooterLayout: 30 below the header
+                // unless the footer is closer), Done.
+                out.push(Widget {
+                    x: 0.0,
+                    y: 12.0,
+                    w,
+                    h: 9.0,
+                    kind: WKind::Text {
+                        text: tr(Self::title(page)),
+                        color: u32::MAX,
+                        centered: true,
+                    },
+                    list: false,
+                    row: 0,
+                });
+                let y = (33.0 + 30.0f32).min(h - 33.0 - 76.0);
+                let x = cx - 105.0;
+                out.push(button(
+                    x,
+                    y,
+                    210.0,
+                    tr("credits_and_attribution.button.credits"),
+                    Act::Credits,
+                ));
+                // ConfirmLinkScreen to minecraft.net: Horizon opens no links.
+                for (i, key) in [
+                    "credits_and_attribution.button.attribution",
+                    "credits_and_attribution.button.licenses",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let y = y + 28.0 * (i + 1) as f32;
+                    out.push(inactive(button(x, y, 210.0, tr(key), Act::None)));
+                }
+                // horizon-extras: a build without them says where the official one is.
+                if !horizon_extras() {
+                    out.push(Widget {
+                        x: 0.0,
+                        y: (y + 92.0).min(h - 42.0),
+                        w,
+                        h: 9.0,
+                        kind: WKind::Text {
+                            text: tr("horizon.plain.official"),
+                            color: 0xFFA0A0A0,
+                            centered: true,
+                        },
+                        list: false,
+                        row: 0,
+                    });
+                }
+                out.push(done(h - 27.0));
+                top = 0.0;
+                bottom = 0.0;
+            }
+            Page::KeyBinds => {
+                top = 38.0;
+                out.push(Widget {
+                    x: 0.0,
+                    y: 4.0,
+                    w,
+                    h: 9.0,
+                    kind: WKind::Text {
+                        text: tr(Self::title(page)),
+                        color: u32::MAX,
+                        centered: true,
+                    },
+                    list: false,
+                    row: 0,
+                });
+                let mut mappings: Vec<(&str, &str)> =
+                    MAPPINGS.iter().map(|(n, _, c)| (*n, *c)).collect();
+                let query = self.settings_search.value.to_lowercase();
+                mappings.retain(|(name, _)| {
+                    query.is_empty() || lang::get(name).to_lowercase().contains(&query)
+                });
+                mappings.sort_by(|a, b| {
+                    let ca = CATEGORIES.iter().position(|c| *c == a.1).unwrap_or(99);
+                    let cb = CATEGORIES.iter().position(|c| *c == b.1).unwrap_or(99);
+                    ca.cmp(&cb)
+                        .then_with(|| lang::get(a.0).cmp(&lang::get(b.0)))
+                });
+                let row_left = cx - 170.0;
+                let scrollbar_x = row_left + 340.0 + 6.0 + 2.0;
+                // VideoSettingsScreen.addTitle: a changed graphics API needs a restart.
+                if page == Page::Video && s.horizon.api != s.startup_api {
+                    out.push(Widget {
+                        x: 0.0,
+                        y: 15.0,
+                        w,
+                        h: 9.0,
+                        kind: WKind::Text {
+                            text: tr("options.restartRequired"),
+                            color: rgba(223, 80, 80, 255),
+                            centered: true,
+                        },
+                        list: false,
+                        row: 0,
+                    });
+                }
+                let list_start = out.len();
+                let mut y = top + 2.0 - self.scroll;
+                let mut last_category = "";
+                for (name, category) in mappings {
+                    if category != last_category {
+                        last_category = category;
+                        rows.begin(&out, y);
+                        let label =
+                            Text::translate(&format!("key.category.minecraft.{category}"), &[])
+                                .with_style(&Style {
+                                    bold: Some(true),
+                                    underlined: Some(true),
+                                    ..Style::default()
+                                });
+                        out.push(Widget {
+                            x: 0.0,
+                            y: y + 7.0,
+                            w,
+                            h: 9.0,
+                            kind: WKind::Text {
+                                text: label,
+                                color: u32::MAX,
+                                centered: true,
+                            },
+                            list: false,
+                            row: 0,
+                        });
+                        y += 20.0;
+                        rows.end(&mut out, y);
+                    }
+                    rows.begin(&out, y);
+                    out.push(Widget {
+                        x: row_left + 2.0,
+                        y: y + 6.0,
+                        w: 200.0,
+                        h: 9.0,
+                        kind: WKind::Text {
+                            text: tr(name),
+                            color: u32::MAX,
+                            centered: false,
+                        },
+                        list: false,
+                        row: 0,
+                    });
+                    let key = s.keys.get(name).to_owned();
+                    let mut message = keybinds::display_name(&key);
+                    let conflicts = key_conflicts(
+                        s,
+                        "",
+                        name,
+                        s.keys.get(name),
+                        0,
+                        crate::mod_list::KeyConflictContext::Universal,
+                        s.keys.is_default(name),
+                    );
+                    if !conflicts.is_empty() {
+                        message = Text::literal("[ ")
+                            .append(message.with_color(text::WHITE))
+                            .append(" ]")
+                            .with_color(text::YELLOW);
+                    }
+                    if self.selected_key == Some(name) {
+                        message = Text::literal("> ")
+                            .append(message.with_style(&Style {
+                                color: Some(text::WHITE),
+                                underlined: Some(true),
+                                ..Style::default()
+                            }))
+                            .append(" <")
+                            .with_color(text::YELLOW);
+                    }
+                    let reset_x = scrollbar_x - 50.0 - 10.0;
+                    let change_x = reset_x - 5.0 - 75.0;
+                    let name_static = MAPPINGS.iter().find(|m| m.0 == name).map_or("", |m| m.0);
+                    out.push(button(change_x, y, 75.0, message, Act::Key(name_static)));
+                    if !conflicts.is_empty() {
+                        out.push(Widget {
+                            x: change_x - 6.0,
+                            y: y + 1.0,
+                            w: 3.0,
+                            h: 18.0,
+                            kind: WKind::Text {
+                                text: Text::empty(),
+                                color: rgba(255, 255, 0, 255),
+                                centered: false,
+                            },
+                            list: false,
+                            row: 0,
+                        });
+                    }
+                    let reset = button(
+                        reset_x,
+                        y,
+                        50.0,
+                        tr("controls.reset"),
+                        Act::ResetKey(name_static),
+                    );
+                    out.push(if s.keys.is_default(name) {
+                        inactive(reset)
+                    } else {
+                        reset
+                    });
+                    y += 20.0;
+                    rows.end(&mut out, y);
+                }
+                // Each native mod's registered keys, under the mod's title and their categories.
+                for (i, m) in s.mods.installed.iter().enumerate() {
+                    let Some(page) = m.native.as_ref().filter(|p| !p.mappings.is_empty()) else {
+                        continue;
+                    };
+                    rows.begin(&out, y);
+                    out.push(section_title(Text::literal(m.title.clone()), y, w));
+                    y += 20.0;
+                    rows.end(&mut out, y);
+                    let mut last_category = "";
+                    for (k, mapping) in page.mappings.iter().enumerate() {
+                        if !query.is_empty()
+                            && !lang::get(&mapping.label).to_lowercase().contains(&query)
+                            && !lang::get(&mapping.category).to_lowercase().contains(&query)
+                        {
+                            continue;
+                        }
+                        let category = mapping.category.as_str();
+                        if !category.is_empty() && category != last_category {
+                            last_category = category;
+                            rows.begin(&out, y);
+                            out.push(section_title(tr(&mapping.category), y, w));
+                            y += 20.0;
+                            rows.end(&mut out, y);
+                        }
+                        let (key, modifiers) = s.mods.binding(
+                            &m.id,
+                            &mapping.id,
+                            (mapping.key.as_str(), mapping.modifiers),
+                        );
+                        let at_default = key == mapping.key && modifiers == mapping.modifiers;
+                        let mut message = binding_text(&key, modifiers);
+                        if !key_conflicts(
+                            s,
+                            &m.id,
+                            &mapping.id,
+                            &key,
+                            modifiers,
+                            mapping.context,
+                            at_default,
+                        )
+                        .is_empty()
+                        {
+                            message = Text::literal("[ ")
+                                .append(message.with_color(text::WHITE))
+                                .append(" ]")
+                                .with_color(text::YELLOW);
+                        }
+                        if self.selected_mod_key == Some((i, k)) {
+                            message = Text::literal("> ")
+                                .append(message.with_style(&Style {
+                                    color: Some(text::WHITE),
+                                    underlined: Some(true),
+                                    ..Style::default()
+                                }))
+                                .append(" <")
+                                .with_color(text::YELLOW);
+                        }
+                        rows.begin(&out, y);
+                        out.push(Widget {
+                            x: row_left + 2.0,
+                            y: y + 6.0,
+                            w: 200.0,
+                            h: 9.0,
+                            kind: WKind::Text {
+                                text: tr(&mapping.label),
+                                color: u32::MAX,
+                                centered: false,
+                            },
+                            list: false,
+                            row: 0,
+                        });
+                        let reset_x = scrollbar_x - 50.0 - 10.0;
+                        let change_x = reset_x - 5.0 - 75.0;
+                        out.push(button(change_x, y, 75.0, message, Act::ModKey(i, k)));
+                        let reset = button(
+                            reset_x,
+                            y,
+                            50.0,
+                            tr("controls.reset"),
+                            Act::ResetModKey(i, k),
+                        );
+                        out.push(if at_default { inactive(reset) } else { reset });
+                        y += 20.0;
+                        rows.end(&mut out, y);
+                    }
+                }
+                content = y + self.scroll - top + 2.0;
+                out[list_start..].iter_mut().for_each(|w| w.list = true);
+                out.push(button(
+                    cx - 154.0,
+                    h - 27.0,
+                    150.0,
+                    tr("controls.resetAll"),
+                    Act::ResetKeys,
+                ));
+                out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
+            }
+            Page::Language => {
+                top = 36.0;
+                bottom = h - 53.0;
+                out.push(Widget {
+                    x: 0.0,
+                    y: 4.0,
+                    w,
+                    h: 9.0,
+                    kind: WKind::Text {
+                        text: tr(Self::title(page)),
+                        color: u32::MAX,
+                        centered: true,
+                    },
+                    list: false,
+                    row: 0,
+                });
+                self.language_search.x = cx - 100.0;
+                self.language_search.y = 17.0;
+                let query = self.language_search.value.to_lowercase();
+                let current = self
+                    .language_choice
+                    .clone()
+                    .unwrap_or_else(|| s.language.clone());
+                if std::mem::take(&mut self.center_language)
+                    && let Some(i) = self.languages.iter().position(|l| l.code == current)
+                {
+                    // AbstractSelectionList.centerScrollOn.
+                    self.scroll = (i as f32 * 18.0 + 9.0 - (bottom - top) / 2.0).max(0.0);
+                }
+                let list_start = out.len();
+                let mut y = top + 2.0 - self.scroll;
+                for l in &self.languages {
+                    if !query.is_empty()
+                        && !l.label().to_lowercase().contains(&query)
+                        && !l.code.contains(&query)
+                    {
+                        continue;
+                    }
+                    rows.begin(&out, y);
+                    out.push(Widget {
+                        x: cx - 110.0,
+                        y,
+                        w: 220.0,
+                        h: 18.0,
+                        kind: WKind::LanguageRow {
+                            label: Text::literal(l.label()),
+                            selected: l.code == current,
+                            code: l.code.clone(),
+                        },
+                        list: false,
+                        row: 0,
+                    });
+                    y += 18.0;
+                    rows.end(&mut out, y);
+                }
+                content = y + self.scroll - top + 2.0;
+                out[list_start..].iter_mut().for_each(|w| w.list = true);
+                out.push(Widget {
+                    x: 0.0,
+                    y: h - 45.0,
+                    w,
+                    h: 9.0,
+                    kind: WKind::Text {
+                        text: tr("options.languageAccuracyWarning"),
+                        color: rgba(0xBA, 0xBA, 0xBA, 255),
+                        centered: true,
+                    },
+                    list: false,
+                    row: 0,
+                });
+                out.push(button(
+                    cx - 154.0,
+                    h - 28.0,
+                    150.0,
+                    tr("options.font"),
+                    Act::Push(Page::Font),
+                ));
+                out.push(button(cx + 4.0, h - 28.0, 150.0, tr("gui.done"), Act::Done));
+            }
+            // Drawn by `pack_screen` and `mods_screen`.
+            Page::Packs | Page::Mods => {}
+            _ => {
+                if matches!(page, Page::Video | Page::Controls | Page::ModBrowser) {
+                    top = 38.0;
+                }
+                out.push(Widget {
+                    x: 0.0,
+                    y: if matches!(page, Page::Video | Page::Controls | Page::ModBrowser) {
+                        4.0
+                    } else {
+                        12.0
+                    },
+                    w,
+                    h: 9.0,
+                    kind: WKind::Text {
+                        text: tr(Self::title(page)),
+                        color: u32::MAX,
+                        centered: true,
+                    },
+                    list: false,
+                    row: 0,
+                });
+                let list_start = out.len();
+                let mut y = top + 2.0 - self.scroll;
+                for row in self.list_rows(s) {
+                    rows.begin(&out, y);
+                    match row {
+                        Row::Header(key) => {
+                            let label = tr(key);
+                            self.heading_row(&mut out, label, &mut y, w, top);
+                        }
+                        Row::Heading(key) => {
+                            let label = tr(&key);
+                            self.heading_row(&mut out, label, &mut y, w, top);
+                        }
+                        Row::Note(text) => {
+                            out.push(Widget {
+                                x: 0.0,
+                                y: y + 4.0,
+                                w,
+                                h: 9.0,
+                                kind: WKind::Text {
+                                    text: Text::literal(text),
+                                    color: 0xFFA0A0A0,
+                                    centered: true,
+                                },
+                                list: false,
+                                row: 0,
+                            });
+                            y += 16.0;
+                        }
+                        Row::Big(opt) => {
+                            out.push(option_widget(s, opt, cx - 155.0, y + 2.0, 310.0));
+                            y += 25.0;
+                        }
+                        Row::Pair(a, b) => {
+                            out.push(option_widget(s, a, cx - 155.0, y + 2.0, 150.0));
+                            if let Some(b) = b {
+                                out.push(option_widget(s, b, cx + 5.0, y + 2.0, 150.0));
+                            }
+                            y += 25.0;
+                        }
+                        Row::Buttons(mut a, b) => {
+                            a.x = cx - 155.0;
+                            a.y = y + 2.0;
+                            out.push(a);
+                            if let Some(mut b) = b {
+                                b.x = cx + 5.0;
+                                b.y = y + 2.0;
+                                out.push(b);
+                            }
+                            y += 25.0;
+                        }
+                    }
+                    rows.end(&mut out, y);
+                }
+                content = y + self.scroll - top + 2.0;
+                out[list_start..].iter_mut().for_each(|w| w.list = true);
+                let folder = match page {
+                    Page::Accessibility => {
+                        Some(("options.accessibility.link", Act::AccessibilityHelp))
+                    }
+                    _ => None,
+                };
+                if let Some((label, act)) = folder {
+                    out.push(button(cx - 154.0, h - 27.0, 150.0, tr(label), act));
+                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
+                } else {
+                    out.push(done(h - 27.0));
+                }
+            }
+        }
+        // Layout may change the offset (language centering), or the list may
+        // shrink after a resize/search. Correct the rows in this same frame.
+        let previous_scroll = self.scroll;
+        self.clamp_scroll(top, bottom, content);
+        for widget in &mut out {
+            if widget.list {
+                widget.y += previous_scroll - self.scroll;
+            }
+            if let WKind::Button {
+                act: Act::Cycle(Opt::RotateWithMinecarts),
+                active,
+                ..
+            } = &mut widget.kind
+            {
+                *active = self.in_world && self.minecart_improvements;
+            }
+        }
+        self.row_bands = rows
+            .bands
+            .into_iter()
+            .map(|band| band.map(|y| y + previous_scroll - self.scroll))
+            .collect();
+        (out, top, bottom, content)
+    }
+=======
+>>>>>>> arismoko/main
     fn clamp_scroll(&mut self, top: f32, bottom: f32, content: f32) {
         let max = (content - (bottom - top)).max(0.0);
         self.scroll = self.scroll.clamp(0.0, max);
@@ -5478,6 +6184,7 @@ impl OptionsUi {
             Narratable::container_list(self.row_bands.len(), hovered_row, rect).key(key)
         });
     }
+<<<<<<< HEAD
     /// The finger lifted from a touch screen: the widget it tapped keeps no focus, so neither its
     /// highlight nor its tooltip stays there. A keyboard's or a controller's focus stays.
     pub fn drop_pointer_focus(&mut self) {
@@ -5888,8 +6595,389 @@ impl OptionsUi {
             }
         }
     }
+||||||| 980f0459eb
+    /// `output`: that of the renderer the options are drawn for, each draw, so the graphics
+    /// screen's rows and calibration read its offer and report as they are now, not another
+    /// window's, and not one from before the page opened.
+    pub fn draw(
+        &mut self,
+        s: &Settings,
+        output: crate::gfx::EffectiveOutput,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        cursor: (f32, f32),
+    ) {
+        self.output = output;
+        let (w, h) = (batch.width, batch.height);
+        if let Some(error) = &self.resource_error {
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
+            let title = tr("resourcePack.load_fail");
+            // An alert: its title and its message.
+            crate::widgets::begin_screen(|| {
+                crate::widgets::ScreenInfo::new(
+                    "options/resource_error",
+                    crate::widgets::join_for_narration(&[&title.plain(), error]),
+                )
+            });
+            batch.text_styled(
+                atlas,
+                &title,
+                ((w - atlas.font.width_text(&title)) / 2.0).floor(),
+                30.0,
+                u32::MAX,
+                true,
+            );
+            let lines = atlas.font.split(&Text::literal(error), (w - 50.0).max(1.0));
+            let limit = ((h - 110.0) / 9.0).max(1.0) as usize;
+            for (i, line) in lines.iter().take(limit).enumerate() {
+                batch.text_styled(
+                    atlas,
+                    line,
+                    ((w - atlas.font.width_text(line)) / 2.0).floor(),
+                    60.0 + i as f32 * 9.0,
+                    u32::MAX,
+                    true,
+                );
+            }
+            ui::action_button(
+                batch,
+                atlas,
+                crate::widgets::Action::Done,
+                w / 2.0 - 100.0,
+                h - 28.0,
+                200.0,
+                20.0,
+                &tr("gui.done"),
+                true,
+                ui::hovered(cursor, w / 2.0 - 100.0, h - 28.0, 200.0, 20.0),
+            );
+            return;
+        }
+        // The page is its own screen (OptionsScreen, VideoSettingsScreen...).
+        let page = self.page();
+        crate::widgets::begin_screen(|| {
+            crate::widgets::ScreenInfo::new(
+                format!("options/{page:?}"),
+                tr(Self::title(page)).plain(),
+            )
+        });
+        if self.page() == Page::HdrCalibration
+            && let Some(c) = &self.calibration
+        {
+            c.draw(batch, atlas, cursor);
+            return;
+        }
+        if self.page() == Page::PackOptions {
+            self.pack_options.draw(batch, atlas, cursor, self.in_world);
+            return;
+        }
+        let waiting = self.waiting();
+        let in_world = self.in_world;
+        if self.draw_radial_name(batch, atlas, cursor, in_world) {
+            return;
+        }
+        if let Some(shell) = self.shell_mut() {
+            shell.draw(s, batch, atlas, cursor, in_world, waiting);
+            // The keys lay the screen out at the size it was drawn at.
+            self.size = (batch.width, batch.height);
+            return;
+        }
+        if self.page() == Page::SplitSetup {
+            self.split_setup.on = s.extras.splitscreen;
+            // The controller picks a tile up between presses: the screen's size from the draw.
+            self.split_setup.size = (batch.width, batch.height);
+            self.split_setup.draw(batch, atlas, cursor, self.in_world);
+            return;
+        }
+        if self.page() == Page::SplitProfiles {
+            self.split_profiles
+                .draw(batch, atlas, cursor, self.in_world, self.pad_glyphs);
+            return;
+        }
+        if self.page() == Page::Studio {
+            self.studio.draw(batch, atlas, cursor, self.in_world);
+            return;
+        }
+        if self.page() == Page::Mods {
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
+            let blink = self.pack_focus.elapsed().as_millis() as u64;
+            let m = crate::screen_draw::Measure(&atlas.font);
+            let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
+            let screen = self.mods_page(s, (w, h));
+            let mut draws = screen.draw(&m, mouse, blink, crate::hud_overlays::now_ms());
+            screen.bind_icons(&mut draws, atlas, &mut batch.patches);
+            crate::screen_draw::paint(batch, atlas, &draws);
+            return;
+        }
+        if self.page() == Page::Packs {
+            self.watch_data_packs(atlas, (w, h));
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
+            let blink = self.pack_focus.elapsed().as_millis() as u64;
+            let m = crate::screen_draw::Measure(&atlas.font);
+            let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
+            let packs = self.packs(atlas, (w, h));
+            let mut draws = packs.draw(&m, mouse, blink, crate::hud_overlays::now_ms());
+            packs.bind_icons(&mut draws, atlas, &mut batch.patches);
+            crate::screen_draw::paint(batch, atlas, &draws);
+            return;
+        }
+        if self.page() == Page::Pvp {
+            self.wide_extras = wide_extras(s, |t| atlas.font.width(t));
+        }
+        let (widgets, top, bottom, content) = self.layout(s, w, h);
+        self.size = (w, h);
+        let in_world = self.in_world;
+        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
+        let list = bottom > top;
+        if list {
+            ui::list_background(batch, atlas, top, bottom, in_world);
+        }
+        let visible = |wd: &Widget| !wd.list || (wd.y < bottom && wd.y + wd.h > top);
+        // The list's narration: the language list is an ObjectSelectionList,
+        // the others ContainerObjectSelectionLists whose rows' widgets are
+        // recorded as they are drawn.
+        let list_key = crate::widgets::key_of(&format!("options/{page:?}/list"));
+        let framebuffer = [(w * batch.scale) as i32, (h * batch.scale) as i32];
+        if list {
+            self.narrate_list(&widgets, list_key, (top, bottom), w, cursor);
+        }
+        let mut tooltip = None;
+        // The widget a keyboard-focused tooltip belongs to: `MenuTooltipPositioner`
+        // keeps it against that widget, not at the pointer.
+        let mut tooltip_rect: Option<[f32; 4]> = None;
+        for (wd_idx, wd) in widgets.iter().enumerate() {
+            if !visible(wd) {
+                continue;
+            }
+            let is_focused = self
+                .focus
+                .as_ref()
+                .is_some_and(|fid| matches_focus(fid, wd_idx, wd));
+            let start = batch.vertices.len();
+            let pointer_over = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            let hover = pointer_over || is_focused;
+            // The tooltip is the pointer's (`setTooltip`, drawn while hovered);
+            // a keyboard-focused widget keeps it against the widget
+            // (`MenuTooltipPositioner`). Focus a mouse click leaves behind
+            // does not: the description goes when the mouse leaves, like
+            // vanilla's.
+            let tip_hover = pointer_over || (is_focused && self.focus_from_keyboard);
+            if tip_hover && let Some(tip) = tooltip_text(s, wd) {
+                tooltip = Some(match &wd.kind {
+                    // The duplicate keybinds tooltip keeps its own lines.
+                    WKind::Button {
+                        act: Act::Key(_), ..
+                    } => tip
+                        .plain()
+                        .split('\n')
+                        .map(|l| Text::literal(l.to_owned()))
+                        .collect::<Vec<_>>(),
+                    _ => atlas.font.split(&tip, 170.0),
+                });
+                tooltip_rect =
+                    (!pointer_over || self.pad_driving).then_some([wd.x, wd.y, wd.w, wd.h]);
+            }
+            match &wd.kind {
+                WKind::Button { label, active, act } => {
+                    ui::focused_button(
+                        batch,
+                        atlas,
+                        [wd.x, wd.y, wd.w, wd.h],
+                        label,
+                        *active,
+                        pointer_over,
+                        is_focused,
+                        matches!(act, Act::Done).then_some(crate::widgets::Action::Done),
+                    );
+                    crate::widgets::last_narratable(|n| {
+                        narrate_widget(n, s, wd, hover, list_key, framebuffer);
+                    });
+                }
+                WKind::Slider { label, value, opt } => {
+                    let dragging = self.dragging == Some(*opt);
+                    let shown = self.slider_shown(*opt, *value);
+                    ui::slider_ext(
+                        batch,
+                        atlas,
+                        wd.x,
+                        wd.y,
+                        wd.w,
+                        label,
+                        shown,
+                        hover || dragging,
+                        is_focused,
+                        self.can_change_value && is_focused,
+                        true,
+                        dragging,
+                    );
+                    crate::widgets::last_narratable(|n| {
+                        narrate_widget(n, s, wd, hover, list_key, framebuffer);
+                    });
+                }
+                WKind::Text {
+                    text,
+                    color,
+                    centered,
+                } => {
+                    if text.is_empty() {
+                        batch.fill(atlas, wd.x, wd.y, wd.w, wd.h, *color);
+                    } else if *centered {
+                        let tw = atlas.font.width_text(text);
+                        // A list's header row (OptionsList.HeaderEntry,
+                        // KeyBindsList.CategoryEntry): a FocusableTextWidget
+                        // narrating its text, 4 pixels of padding round it.
+                        if wd.list && *color == u32::MAX {
+                            crate::widgets::narratable(|| {
+                                let x = wd.x + ((wd.w - tw) / 2.0).floor();
+                                crate::widgets::Narratable::text(
+                                    text.plain(),
+                                    [x - 4.0, wd.y - 4.0, tw + 8.0, 17.0],
+                                )
+                                .key(crate::widgets::key_of(&(list_key, wd.row)))
+                                .child_of(list_key, wd.row)
+                            });
+                        }
+                        batch.text_styled(
+                            atlas,
+                            text,
+                            wd.x + ((wd.w - tw) / 2.0).floor(),
+                            wd.y,
+                            *color,
+                            true,
+                        );
+                    } else {
+                        batch.text_styled(atlas, text, wd.x, wd.y, *color, true);
+                    }
+                }
+                WKind::LanguageRow {
+                    label, selected, ..
+                } => {
+                    let rect = [wd.x, wd.y, wd.w, wd.h];
+                    crate::widgets::record_as(
+                        &label.plain(),
+                        rect,
+                        true,
+                        crate::widgets::Kind::Row,
+                    );
+                    crate::widgets::target_as(rect, crate::widgets::Kind::Row);
+                    if *selected || is_focused {
+                        batch.fill(atlas, wd.x, wd.y, wd.w, wd.h, u32::MAX);
+                        batch.fill(
+                            atlas,
+                            wd.x + 1.0,
+                            wd.y + 1.0,
+                            wd.w - 2.0,
+                            wd.h - 2.0,
+                            rgba(0, 0, 0, 255),
+                        );
+                    }
+                    let tw = atlas.font.width_text(label);
+                    batch.text_styled(
+                        atlas,
+                        label,
+                        wd.x + ((wd.w - tw) / 2.0).floor(),
+                        wd.y + 2.0 + 7.0 - 4.0,
+                        u32::MAX,
+                        true,
+                    );
+                }
+            }
+            if wd.list && (wd.y < top || wd.y + wd.h > bottom) {
+                batch.clip_since(start, 0.0, top, w, bottom);
+            }
+        }
+        if list {
+            ui::separators(batch, atlas, top, bottom, in_world);
+            let sx = self.scrollbar_x(w);
+            ui::scrollbar(batch, atlas, sx, top, bottom, content, self.scroll);
+        }
+        if self.page() == Page::Language {
+            let mut search = self.language_search.clone();
+            if self.focus == Some(FocusId::Search) {
+                search.focused = true;
+            }
+            search.draw(batch, atlas, None);
+            // LanguageSelectScreen's header search box (no message), added
+            // before the list.
+            crate::widgets::last_narratable(|n| n.order = -1);
+            if search.value.is_empty() && !search.focused {
+                batch.text_styled(
+                    atlas,
+                    &tr("gui.language.search").with_color(text::GRAY).italic(),
+                    search.text_x(),
+                    search.text_y(),
+                    u32::MAX,
+                    true,
+                );
+            }
+            self.language_search = search;
+        }
+        if matches!(
+            self.page(),
+            Page::Video | Page::Controls | Page::KeyBinds | Page::ModBrowser
+        ) {
+            let mut search = self.settings_search.clone();
+            if self.focus == Some(FocusId::Search) {
+                search.focused = true;
+            }
+            search.draw(batch, atlas, None);
+            let hint = match self.page() {
+                Page::ModBrowser => "horizon.mods.browse.search",
+                _ => "horizon.options.search",
+            };
+            // Horizon's search box sits in the header, before the list.
+            crate::widgets::last_narratable(|n| {
+                n.order = -1;
+                if let crate::widgets::What::EditBox { message, .. } = &mut n.what {
+                    *message = tr(hint).plain();
+                }
+            });
+            if search.value.is_empty() && !search.focused {
+                batch.text_styled(
+                    atlas,
+                    &tr(hint).with_color(text::GRAY).italic(),
+                    search.text_x(),
+                    search.text_y(),
+                    u32::MAX,
+                    true,
+                );
+            }
+            self.settings_search = search;
+        }
+        if let Some(lines) = tooltip {
+            match tooltip_rect {
+                Some(rect) if self.pad_driving => ui::tooltip_under(batch, atlas, &lines, rect),
+                Some(rect) => ui::tooltip_menu(batch, atlas, &lines, cursor, rect),
+                None => ui::tooltip(batch, atlas, &lines, cursor),
+            }
+        }
+    }
+=======
+>>>>>>> arismoko/main
     /// Mouse press/drag. Returns events for the game.
     pub fn click(
+        &mut self,
+        s: &mut Settings,
+        atlas: &HudAtlas,
+        x: f32,
+        y: f32,
+        size: (f32, f32),
+        framebuffer: [i32; 2],
+        drag: bool,
+        right: bool,
+    ) -> Vec<Event> {
+        let events = self.click_unrevised(s, atlas, x, y, size, framebuffer, drag, right);
+        // A click that changed nothing the layout reads (an empty spot, a
+        // focus move) keeps the built layout.
+        if !events.is_empty() {
+            self.relayout();
+        }
+        events
+    }
+    /// `click` without the layout revision: the events it answered with say
+    /// whether the layout's inputs moved.
+    fn click_unrevised(
         &mut self,
         s: &mut Settings,
         atlas: &HudAtlas,
@@ -6031,20 +7119,6 @@ impl OptionsUi {
             }
             return events;
         }
-        if self.page() == Page::PackOptions {
-            let mut events = Vec::new();
-            for action in self
-                .pack_options
-                .click((x, y), size, drag, right || self.shift)
-            {
-                match action {
-                    crate::pack_options_ui::Action::ButtonClick => events.push(Event::ButtonClick),
-                    crate::pack_options_ui::Action::SliderDrag => {}
-                    crate::pack_options_ui::Action::Done => events.extend(self.back(s)),
-                }
-            }
-            return events;
-        }
         if self.page() == Page::Packs {
             let mut events = Vec::new();
             if drag {
@@ -6065,6 +7139,7 @@ impl OptionsUi {
                 self.pack_focus = Instant::now();
             }
             match action {
+                crate::pack_screen::Action::Import(paths) => events.push(Event::ImportPacks(paths)),
                 crate::pack_screen::Action::OpenFolder => events.push(match &self.data_pack_dir {
                     Some(dir) => Event::OpenDataPackFolder(dir.clone()),
                     None => Event::OpenPackFolder,
@@ -6073,6 +7148,7 @@ impl OptionsUi {
                 crate::pack_screen::Action::BrowsePick(i) => {
                     events.push(Event::DownloadPack(i));
                 }
+<<<<<<< HEAD
                 crate::pack_screen::Action::Catalog => {
                     events.push(Event::OpenCatalog(CatalogShelf::ResourcePacks));
                 }
@@ -6084,11 +7160,24 @@ impl OptionsUi {
                     self.pack_options = crate::pack_options_ui::PackOptionsUi::open(configs);
                     self.push(Page::PackOptions);
                 }
+||||||| 980f0459eb
+                crate::pack_screen::Action::Options(id) => {
+                    let mut configs = horizon_polytone::pack::Configs::default();
+                    if let Some(own) = self.pack_configs.get(&id) {
+                        configs.merge(own);
+                    }
+                    self.pack_options = crate::pack_options_ui::PackOptionsUi::open(configs);
+                    self.push(Page::PackOptions);
+                }
+=======
+                crate::pack_screen::Action::Options(id) => self.open_pack_options(&id),
+>>>>>>> arismoko/main
                 crate::pack_screen::Action::None => {}
             }
             return events;
         }
-        let (widgets, top, bottom, content) = self.layout(s, size.0, size.1);
+        let layout = self.built_layout(s, size.0, size.1);
+        let (widgets, top, bottom, content) = layout.parts();
         self.size = size;
         self.framebuffer = framebuffer;
         let mut events = Vec::new();
@@ -6212,7 +7301,7 @@ impl OptionsUi {
             self.scrollbar_drag_y = Some(y);
             return events;
         }
-        for (wd_idx, wd) in widgets.into_iter().enumerate() {
+        for (wd_idx, wd) in widgets.iter().enumerate() {
             if !ui::hovered((x, y), wd.x, wd.y, wd.w, wd.h) {
                 continue;
             }
@@ -6221,14 +7310,14 @@ impl OptionsUi {
             }
             // AbstractWidget.mouseClicked rejects inactive buttons before the
             // container can focus them.
-            if matches!(wd.kind, WKind::Button { active: false, .. }) {
+            if matches!(&wd.kind, WKind::Button { active: false, .. }) {
                 return events;
             }
             // A click focuses the widget for its highlight only: vanilla's wheel
             // steps a keyboard-focused widget from anywhere, not a clicked one.
-            self.focus = Some(focus_id(wd_idx, &wd));
+            self.focus = Some(focus_id(wd_idx, wd));
             self.focus_from_keyboard = false;
-            match wd.kind {
+            match &wd.kind {
                 WKind::Button {
                     active: true, act, ..
                 } => {
@@ -6236,27 +7325,33 @@ impl OptionsUi {
                     events.push(Event::ButtonClick);
                     match act {
                         Act::Push(p) => {
-                            if p == Page::ShaderPacks {
+                            if *p == Page::ShaderPacks {
                                 // The pack list, and the picked pack's own settings with it.
                                 events.push(Event::ListShaderPacks);
                                 self.refresh_shader_profiles(s);
                                 s.shader_options = None;
                                 events.push(Event::OpenShaderOptions);
                             }
+<<<<<<< HEAD
                             if p == Page::Mods || p == Page::NativeGame {
                                 events.push(Event::ListMods);
                             }
                             if p == Page::Music {
+||||||| 980f0459eb
+                            if p == Page::Music {
+=======
+                            if *p == Page::Music {
+>>>>>>> arismoko/main
                                 events.push(Event::ListMusicTracks);
                             }
-                            if p == Page::ModBrowser {
+                            if *p == Page::ModBrowser {
                                 events.push(Event::BrowseMods);
                             }
-                            self.push(p)
+                            self.push(*p)
                         }
                         Act::Done => events.extend(self.back(s)),
                         Act::Cycle(opt) => {
-                            events.extend(self.cycle_option(s, opt, self.shift, framebuffer));
+                            events.extend(self.cycle_option(s, *opt, self.shift, framebuffer));
                         }
                         Act::Extra(item) => {
                             if let Some(name) = item.key_name() {
@@ -6267,17 +7362,18 @@ impl OptionsUi {
                             }
                         }
                         Act::PlayMusicTrack(event, track) => {
-                            events.push(Event::PlayMusicTrack(event, track));
+                            events.push(Event::PlayMusicTrack(event.clone(), track.clone()));
                         }
                         Act::MusicTrackOn(track, was_on) => {
                             s.extras
                                 .music_off
                                 .retain(|off| off.as_str() != track.as_str());
-                            if was_on {
-                                s.extras.music_off.push(track);
+                            if *was_on {
+                                s.extras.music_off.push(track.clone());
                             }
                             events.push(Event::Changed);
                         }
+<<<<<<< HEAD
                         Act::Key(name) => self.selected_key = Some(name),
                         Act::KeyboardProfile => {
                             s.keypad.enabled ^= true;
@@ -6285,6 +7381,11 @@ impl OptionsUi {
                             self.scroll = 0.;
                             events.push(Event::Changed);
                         }
+||||||| 980f0459eb
+                        Act::Key(name) => self.selected_key = Some(name),
+=======
+                        Act::Key(name) => self.selected_key = Some(*name),
+>>>>>>> arismoko/main
                         Act::ResetKey(name) => {
                             if name.starts_with("key.keypad.") {
                                 s.keypad.bindings.remove(name);
@@ -6314,32 +7415,32 @@ impl OptionsUi {
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
                         Act::ModKey(i, k) => {
                             self.selected_key = Some(MOD_KEY);
-                            self.selected_mod_key = Some((i, k));
+                            self.selected_mod_key = Some((*i, *k));
                             self.pending_mod_key = None;
                         }
                         Act::ResetModKey(i, k) => {
-                            if let Some((id, mapping)) = mod_mapping(s, i, k) {
+                            if let Some((id, mapping)) = mod_mapping(s, *i, *k) {
                                 s.mods.reset_binding(&id, &mapping);
                                 events.push(Event::Changed);
                             }
                         }
-                        Act::PageRow(p, r) => events.extend(self.page_act(p, r, self.shift)),
+                        Act::PageRow(p, r) => events.extend(self.page_act(*p, *r, self.shift)),
                         Act::NativeSetting(i, j) => {
                             let setting = s
                                 .mods
                                 .installed
-                                .get_mut(i)
+                                .get_mut(*i)
                                 .and_then(|m| m.native.as_mut())
-                                .and_then(|page| page.settings.get_mut(j));
+                                .and_then(|page| page.settings.get_mut(*j));
                             if let Some(setting) = setting {
                                 setting.value.click();
-                                events.push(Event::NativeSetting(i, j));
+                                events.push(Event::NativeSetting(*i, *j));
                             }
                         }
                         Act::NativeGame(act) => events.push(Event::NativeGame(act)),
                         Act::OpenCatalog(shelf) => events.push(Event::OpenCatalog(shelf)),
                         Act::ModProject(i) => {
-                            if let Some(listing) = self.mod_browser.listings.get(i) {
+                            if let Some(listing) = self.mod_browser.listings.get(*i) {
                                 self.mod_project = listing.id.clone();
                                 self.push(Page::ModProject);
                             }
@@ -6483,17 +7584,18 @@ impl OptionsUi {
                 }
                 WKind::Slider { opt, .. } => {
                     self.can_change_value = true;
-                    self.dragging = Some(opt);
+                    self.dragging = Some(*opt);
                     let v = ui::slider_value(wd.x, wd.w, x);
-                    self.slider_value = Some((opt, v, Instant::now()));
-                    drag_slider(opt, s, v, &mut events);
+                    self.slider_value = Some((*opt, v, Instant::now()));
+                    drag_slider(*opt, s, v, &mut events);
                 }
                 WKind::LanguageRow { code, .. } => {
                     self.can_change_value = false;
                     if self.language_choice.as_deref() == Some(code.as_str()) {
                         events.extend(self.back(s));
                     } else {
-                        self.language_choice = Some(code);
+                        self.language_choice = Some(code.clone());
+                        self.relayout();
                     }
                 }
                 _ => {}
@@ -6522,7 +7624,6 @@ impl OptionsUi {
         // release, even if the pointer has left the widget or its value stayed.
         let slider = self.dragging.take().is_some();
         let shell_slider = self.shell_mut().and_then(|shell| shell.release());
-        self.pack_options.release();
         let calibration_slider = self.calibration.as_mut().is_some_and(|c| c.release());
         let split_drop = self.split_setup.release();
         if slider || shell_slider.is_some() || calibration_slider {
@@ -6542,9 +7643,11 @@ impl OptionsUi {
         }
     }
     pub fn scroll(&mut self, s: &Settings, size: (f32, f32), amount: f32) {
-        let (_, top, bottom, content) = self.layout(s, size.0, size.1);
+        let layout = self.built_layout(s, size.0, size.1);
+        let (_, top, bottom, content) = layout.parts();
         self.scroll -= amount * 18.0;
         self.clamp_scroll(top, bottom, content);
+        self.relayout();
     }
     /// `CycleButton.cycleValue` on an option, then what the option changes:
     /// the preset's values, High Contrast's built-in pack.
@@ -6605,6 +7708,22 @@ impl OptionsUi {
         framebuffer: [i32; 2],
         amount: f32,
     ) -> Vec<Event> {
+        let events = self.wheel_unrevised(s, size, cursor, framebuffer, amount);
+        if !events.is_empty() {
+            self.relayout();
+        }
+        events
+    }
+    /// `wheel` without the layout revision: a scroll bumps it in `scroll`, and
+    /// the events of a setting's step say whether its label moved.
+    fn wheel_unrevised(
+        &mut self,
+        s: &mut Settings,
+        size: (f32, f32),
+        cursor: (f32, f32),
+        framebuffer: [i32; 2],
+        amount: f32,
+    ) -> Vec<Event> {
         self.size = size;
         self.framebuffer = framebuffer;
         if self.resource_error.is_some() {
@@ -6617,10 +7736,6 @@ impl OptionsUi {
         }
         if self.page() == Page::Studio {
             self.studio.wheel(amount);
-            return Vec::new();
-        }
-        if self.page() == Page::PackOptions {
-            self.pack_options.scroll(size, amount);
             return Vec::new();
         }
         let plain = self.resource_error.is_none()
@@ -6637,7 +7752,8 @@ impl OptionsUi {
         // it would toggle the clicked option from anywhere on the screen and the
         // list would never scroll.
         if extra && amount != 0.0 && self.focus_from_keyboard {
-            let (widgets, _, _, _) = self.layout(s, size.0, size.1);
+            let layout = self.built_layout(s, size.0, size.1);
+            let (widgets, _, _, _) = layout.parts();
             match &self.focus {
                 Some(FocusId::Slider(opt)) => {
                     let opt = *opt;
@@ -6660,7 +7776,8 @@ impl OptionsUi {
             Cycle(Opt),
             Extra(crate::extras::Item),
         }
-        let (widgets, top, bottom, _) = self.layout(s, size.0, size.1);
+        let layout = self.built_layout(s, size.0, size.1);
+        let (widgets, top, bottom, _) = layout.parts();
         // A list's row takes the wheel only with the extra on.
         let takes_wheel = |wd: &Widget| {
             ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
@@ -6711,10 +7828,6 @@ impl OptionsUi {
             if let Some(p) = &mut self.mods_screen {
                 p.scroll(cursor.0 as f64, cursor.1 as f64, amount as f64);
             }
-            return;
-        }
-        if self.page() == Page::PackOptions {
-            self.pack_options.scroll(size, amount);
             return;
         }
         match &mut self.pack_screen {
@@ -6785,6 +7898,7 @@ impl OptionsUi {
         }
         s.gui_scale = new as u32;
         self.scroll = 0.0;
+        self.relayout();
         vec![Event::Changed]
     }
     /// The Mods screen at this GUI size, made on first use from the installed mods.
@@ -6885,6 +7999,7 @@ impl OptionsUi {
         }
     }
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
+        self.relayout();
         let mut events = Vec::new();
         // A pack's screen goes back to the one that opened it.
         if self.page() == Page::ShaderOptions
@@ -6909,14 +8024,8 @@ impl OptionsUi {
         self.can_change_value = false;
         match page {
             Page::PackOptions => {
-                let ui = std::mem::take(&mut self.pack_options);
-                if ui.changed {
-                    let entries = ui.configs.entries().keys().cloned().collect();
-                    events.push(Event::PackOptions {
-                        entries,
-                        chosen: ui.configs.chosen(),
-                    });
-                }
+                let screen = std::mem::take(&mut self.pack_options.screen);
+                events.extend(screen.finished());
             }
             Page::ShaderOptions | Page::ShaderPacks => {
                 if s.shader_options.as_ref().is_some_and(|o| o.changed) {
@@ -7063,6 +8172,7 @@ impl OptionsUi {
         if self.page() == Page::Language {
             self.language_search.insert_text(text);
             self.scroll = 0.0;
+            self.relayout();
         } else if self.page() == Page::SplitProfiles {
             self.split_profiles.type_text(text);
         } else if self.page() == Page::ControllerRadialName {
@@ -7074,11 +8184,16 @@ impl OptionsUi {
         } else if self.settings_search_active() {
             self.settings_search.insert_text(text);
             self.scroll = 0.0;
+<<<<<<< HEAD
         } else if self.page() == Page::Skin && self.profile_name.is_none() && self.skin.name.focused
         {
             self.skin.name.insert_text(text);
         } else if matches!(self.page(), Page::CustomButton(_)) && self.custom_send.focused {
             self.custom_send.insert_text(text);
+||||||| 980f0459eb
+=======
+            self.relayout();
+>>>>>>> arismoko/main
         }
     }
     /// Ctrl+A/C/V/X in the language or pack search box; false when neither
@@ -7108,6 +8223,8 @@ impl OptionsUi {
             if self.language_search.shortcut(shortcut, clipboard) {
                 self.scroll = 0.0;
             }
+            // Select all, copy, paste and cut: the box's text is a layout input.
+            self.relayout();
             return true;
         }
         if self.page() == Page::SplitProfiles {
@@ -7123,6 +8240,7 @@ impl OptionsUi {
             if self.settings_search.shortcut(shortcut, clipboard) {
                 self.scroll = 0.0;
             }
+            self.relayout();
             return true;
         }
         if self.page() == Page::Skin && self.profile_name.is_none() && self.skin.name.focused {
@@ -7136,6 +8254,8 @@ impl OptionsUi {
         false
     }
     fn bind_key(&mut self, s: &mut Settings, value: String) -> Vec<Event> {
+        // The waiting marker and the binding are both layout inputs.
+        self.relayout();
         self.pending_mod_key = None;
         let Some(name) = self.selected_key.take() else {
             return Vec::new();
@@ -7206,6 +8326,23 @@ impl OptionsUi {
 
     /// Keys while the options are open, including Shift modifier state.
     pub fn key_modifiers(
+        &mut self,
+        s: &mut Settings,
+        atlas: &HudAtlas,
+        key: winit::keyboard::KeyCode,
+        text: Option<&str>,
+        shift: bool,
+    ) -> Vec<Event> {
+        let events = self.key_modifiers_unrevised(s, atlas, key, text, shift);
+        if !events.is_empty() {
+            self.relayout();
+        }
+        events
+    }
+    /// `key_modifiers` without the layout revision: search text and the keys
+    /// that change a setting bump it themselves, and the events of the rest
+    /// say whether the layout's inputs moved.
+    fn key_modifiers_unrevised(
         &mut self,
         s: &mut Settings,
         atlas: &HudAtlas,
@@ -7335,6 +8472,7 @@ impl OptionsUi {
                     }
                 }
                 self.scroll = 0.0;
+                self.relayout();
                 return Vec::new();
             }
         } else if self.page() == Page::Language && self.focus.is_none() {
@@ -7347,6 +8485,7 @@ impl OptionsUi {
                 }
             }
             self.scroll = 0.0;
+            self.relayout();
         } else if self.settings_search_active() && self.focus.is_none() {
             if !self.settings_search.key(key, false, shift)
                 && let Some(t) = text
@@ -7357,6 +8496,7 @@ impl OptionsUi {
                 }
             }
             self.scroll = 0.0;
+<<<<<<< HEAD
         } else if self.page() == Page::Skin && self.profile_name.is_none() && self.skin.name.focused
         {
             // Enter (the on-screen keyboard's Done) keeps the name.
@@ -7390,10 +8530,15 @@ impl OptionsUi {
                 }
             }
             field.reset_blink();
+||||||| 980f0459eb
+=======
+            self.relayout();
+>>>>>>> arismoko/main
         }
 
         // Gather focusables on the current page
-        let (widgets, top, bottom, content) = self.layout(s, self.size.0, self.size.1);
+        let layout = self.built_layout(s, self.size.0, self.size.1);
+        let (widgets, top, bottom, content) = layout.parts();
         let has_search = (self.page() == Page::Language) || self.settings_search_active();
         let mut focusables: Vec<(FocusId, [f32; 4], bool)> = Vec::new();
         if has_search {
@@ -7409,7 +8554,7 @@ impl OptionsUi {
             ));
         }
         for (i, wd) in widgets.iter().enumerate() {
-            match wd.kind {
+            match &wd.kind {
                 WKind::Button { active: true, .. }
                 | WKind::Slider { .. }
                 | WKind::LanguageRow { .. } => {
@@ -7601,14 +8746,14 @@ impl OptionsUi {
                             }
                         }
                         Act::PlayMusicTrack(event, track) => {
-                            events.push(Event::PlayMusicTrack(event, track));
+                            events.push(Event::PlayMusicTrack(event, track.clone()));
                         }
                         Act::MusicTrackOn(track, was_on) => {
                             s.extras
                                 .music_off
                                 .retain(|off| off.as_str() != track.as_str());
                             if was_on {
-                                s.extras.music_off.push(track);
+                                s.extras.music_off.push(track.clone());
                             }
                             events.push(Event::Changed);
                         }
@@ -7754,6 +8899,36 @@ mod tests {
     /// A renderer whose destination offers nothing and whose display reports nothing.
     const NONE: EffectiveOutput = EffectiveOutput::NONE;
 
+    #[test]
+    fn pack_options_leave_with_a_change_and_with_nothing_after_its_undo() {
+        use crate::settings_shell::Screen as _;
+        let mut s = Settings::default();
+        let atlas = HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("/nonexistent/horizon-test-assets"),
+        ));
+        let atlas = atlas.unwrap();
+        let mut ui = OptionsUi::default();
+        let mut configs = horizon_polytone::pack::Configs::default();
+        let birds = serde_json::json!({"default_value": true});
+        configs.add_entry("p:birds".into(), &birds);
+        ui.pack_configs.insert("pack".into(), configs);
+        for undone in [false, true] {
+            ui.open_pack_options("pack");
+            assert!(ui.shell().is_some(), "Pack Options is on the shell");
+            let birds = crate::pack_options_ui::Item::Entry(0);
+            ui.pack_options.screen.press(&mut s, birds, false);
+            if undone {
+                let before = s.clone();
+                ui.pack_options.screen.undo(&mut s, &before);
+            }
+            let events = ui.key(&mut s, &atlas, winit::keyboard::KeyCode::Escape, None);
+            let sent = events
+                .iter()
+                .any(|e| matches!(e, Event::PackOptions { .. }));
+            assert_eq!(sent, !undone, "undone: {undone}");
+        }
+    }
+
     /// The window allows the input method only while `typing` says a search
     /// box has the focus (`Game::text_field_focused`), so a page without one
     /// must not claim the keys: the movement and menu keys keep working there.
@@ -7770,6 +8945,215 @@ mod tests {
         ui.settings_search.focused = false;
         ui.show(Page::Packs);
         assert!(!ui.typing(), "the pack screen's search is not open yet");
+    }
+
+    /// The page layout is made once per size and revision, not per frame,
+    /// draw, hit test or scroll that changed nothing it reads.
+    #[test]
+    fn the_page_layout_is_built_once_per_size_and_revision() {
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        let size = (427.0, 240.0);
+        let first = ui.built_layout(&s, size.0, size.1);
+        assert_eq!(ui.layouts_built, 1);
+        // Frames and hit tests read the built one.
+        for _ in 0..3 {
+            assert!(std::sync::Arc::ptr_eq(
+                &first,
+                &ui.built_layout(&s, size.0, size.1)
+            ));
+        }
+        assert_eq!(ui.layouts_built, 1);
+        // A click on empty space changed nothing the layout reads.
+        let events = ui.click(&mut s, &atlas(), 2.0, 2.0, size, [854, 480], false, false);
+        assert!(events.is_empty());
+        assert_eq!(ui.layouts_built, 1);
+        // A scroll is a revision: one rebuild, then quiet again.
+        ui.scroll(&s, size, 1.0);
+        ui.built_layout(&s, size.0, size.1);
+        assert_eq!(ui.layouts_built, 2);
+        ui.built_layout(&s, size.0, size.1);
+        assert_eq!(ui.layouts_built, 2);
+        // A page change is a revision too.
+        ui.show(Page::Video);
+        ui.built_layout(&s, size.0, size.1);
+        assert_eq!(ui.layouts_built, 3);
+        // A resize makes the layout once at the new size.
+        ui.built_layout(&s, 854.0, 480.0);
+        assert_eq!(ui.layouts_built, 4);
+        ui.built_layout(&s, 854.0, 480.0);
+        assert_eq!(ui.layouts_built, 4);
+        // Search text changes the video page's rows.
+        ui.settings_search.focused = true;
+        ui.type_text(&atlas(), "abc");
+        ui.built_layout(&s, 854.0, 480.0);
+        assert_eq!(ui.layouts_built, 5);
+    }
+
+    /// Every operation that changes an input the page layout reads must show
+    /// in the cached layout: after each step it equals one built fresh from
+    /// the same state. Covers the wheel and a scrollbar drag, Tab and arrow
+    /// focus movement that scrolls the list, search typing, clipboard paste
+    /// and cut, a modifier-only key bind and the Agent page's status.
+    #[test]
+    fn the_cached_layout_follows_every_input() {
+        use crate::clipboard::{EditShortcut, MemoryClipboard};
+        use winit::keyboard::KeyCode as K;
+
+        let atlas = atlas();
+        let mut s = Settings::default();
+        s.mods.installed.push(crate::mod_list::Installed {
+            id: "sample".into(),
+            title: "Sample".into(),
+            description: String::new(),
+            problem: None,
+            dev: false,
+            native: Some(crate::mod_list::NativePage {
+                mappings: vec![crate::mod_list::KeyMapping {
+                    id: "zoom".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+        });
+        let mut ui = OptionsUi::default();
+        ui.open_at(false, Page::Main);
+        ui.size = (427.0, 240.0);
+        fn fresh(ui: &mut OptionsUi, s: &Settings, step: &str, stale: &mut Vec<String>) {
+            let size = ui.size;
+            let built = ui.built_layout(s, size.0, size.1);
+            let now = ui.layout_now(s, size.0, size.1);
+            if *built != now {
+                stale.push(step.to_owned());
+            }
+        }
+        let mut stale = Vec::new();
+
+        fresh(&mut ui, &s, "open", &mut stale);
+        ui.size = (854.0, 480.0);
+        fresh(&mut ui, &s, "resize", &mut stale);
+
+        // A long page: the wheel, a scrollbar drag, Tab and the arrows all
+        // move the list under the drawing.
+        ui.show(Page::KeyBinds);
+        fresh(&mut ui, &s, "Key Binds", &mut stale);
+        ui.wheel(&mut s, ui.size, (200.0, 200.0), [1708, 960], -3.0);
+        fresh(&mut ui, &s, "wheel scroll", &mut stale);
+        let sx = ui.scrollbar_x(ui.size.0);
+        ui.scrollbar_drag_y = Some(100.0);
+        ui.click(
+            &mut s,
+            &atlas,
+            sx + 1.0,
+            120.0,
+            ui.size,
+            [1708, 960],
+            true,
+            false,
+        );
+        fresh(&mut ui, &s, "scrollbar drag", &mut stale);
+        for step in 0..60 {
+            ui.key(&mut s, &atlas, K::Tab, None);
+            fresh(&mut ui, &s, &format!("Tab {step}"), &mut stale);
+        }
+        for step in 0..40 {
+            ui.key(&mut s, &atlas, K::ArrowDown, None);
+            fresh(&mut ui, &s, &format!("arrow down {step}"), &mut stale);
+        }
+
+        // Search typing, then the clipboard shortcuts in the same box.
+        ui.show(Page::Video);
+        ui.settings_search.focused = true;
+        for (step, c) in ["a", "b", "c"].iter().enumerate() {
+            ui.key(&mut s, &atlas, K::KeyA, Some(c));
+            fresh(&mut ui, &s, &format!("typing {step}"), &mut stale);
+        }
+        // A query that matches options: the rows change with the text.
+        let mut clipboard = MemoryClipboard("render".into());
+        ui.shortcut(&atlas, EditShortcut::SelectAll, &mut clipboard);
+        fresh(&mut ui, &s, "select all", &mut stale);
+        ui.shortcut(&atlas, EditShortcut::Paste, &mut clipboard);
+        assert_eq!(
+            ui.settings_search.value, "render",
+            "the clipboard went into the box"
+        );
+        fresh(&mut ui, &s, "paste", &mut stale);
+        ui.shortcut(&atlas, EditShortcut::SelectAll, &mut clipboard);
+        ui.shortcut(&atlas, EditShortcut::Cut, &mut clipboard);
+        assert!(ui.settings_search.value.is_empty());
+        fresh(&mut ui, &s, "cut", &mut stale);
+
+        ui.languages = languages();
+        ui.show(Page::Language);
+        fresh(&mut ui, &s, "language open", &mut stale);
+        let (widgets, top, bottom, _) = ui.layout(&s, ui.size.0, ui.size.1);
+        let row = widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    &w.kind,
+                    WKind::LanguageRow {
+                        selected: false,
+                        ..
+                    }
+                ) && w.y >= top
+                    && w.y + w.h <= bottom
+            })
+            .unwrap();
+        let WKind::LanguageRow { code, .. } = &row.kind else {
+            unreachable!()
+        };
+        let code = code.clone();
+        ui.click(
+            &mut s,
+            &atlas,
+            row.x + 1.0,
+            row.y + 1.0,
+            ui.size,
+            [1708, 960],
+            false,
+            false,
+        );
+        fresh(&mut ui, &s, "language selection", &mut stale);
+        assert!(ui.built_layout(&s, ui.size.0, ui.size.1).parts().0.iter().any(|w|
+            matches!(&w.kind, WKind::LanguageRow { code: selected, selected: true, .. } if selected == &code)));
+
+        // A modifier-only key bind takes the waiting selection away.
+        ui.show(Page::KeyBinds);
+        ui.selected_key = Some(MOD_KEY);
+        ui.selected_mod_key = Some((0, 0));
+        ui.pending_mod_key = Some(K::ShiftLeft);
+        fresh(&mut ui, &s, "waiting for a mod key", &mut stale);
+        ui.key_released(&mut s, K::ShiftLeft);
+        fresh(&mut ui, &s, "modifier-only bind", &mut stale);
+
+        // The Agent page's status and recording, as the game's poll sets them.
+        ui.show(Page::Agent);
+        fresh(&mut ui, &s, "agent page", &mut stale);
+        ui.set_agent_status(vec!["Running.".into()], true);
+        fresh(&mut ui, &s, "agent status", &mut stale);
+
+        // The language page's search click moves the list back to the top.
+        ui.show(Page::Language);
+        ui.wheel(&mut s, ui.size, (200.0, 200.0), [1708, 960], -3.0);
+        fresh(&mut ui, &s, "language wheel", &mut stale);
+        let (x, y) = (ui.language_search.x, ui.language_search.y);
+        ui.click(
+            &mut s,
+            &atlas,
+            x + 5.0,
+            y + 5.0,
+            ui.size,
+            [1708, 960],
+            false,
+            false,
+        );
+        fresh(&mut ui, &s, "language search click", &mut stale);
+
+        assert!(
+            stale.is_empty(),
+            "the cached layout is stale after: {stale:?}"
+        );
     }
 
     #[test]
@@ -8624,6 +10008,54 @@ mod tests {
     }
 
     #[test]
+    fn each_options_renderer_emits_one_phase_pair_around_contents() {
+        use crate::screen_draw::RenderPhase::{Background, Foreground};
+        let atlas = atlas();
+        let settings = Settings::default();
+        for page in [
+            Page::Main,
+            Page::Video,
+            Page::Language,
+            Page::Graphics,
+            Page::Controller,
+            Page::ControllerRadial,
+            Page::Extras,
+            Page::ShaderOptions,
+            Page::PackOptions,
+            Page::Mods,
+            Page::Packs,
+            Page::SplitSetup,
+            Page::SplitProfiles,
+            Page::Studio,
+        ] {
+            let mut ui = OptionsUi::default();
+            ui.show(page);
+            let mut batch = HudBatch::scratch([854, 480]);
+            let mut calls = Vec::new();
+            // A cancelled frame must release the hosted shell's prepared view too.
+            ui.draw_background(&settings, NONE, &mut batch, &atlas);
+            ui.discard_draw();
+            batch = HudBatch::scratch([854, 480]);
+            ui.draw_test_frame(
+                &settings,
+                NONE,
+                &mut batch,
+                &atlas,
+                (-1.0, -1.0),
+                &mut |phase, batch| calls.push((phase, batch.vertices.len())),
+            );
+            assert_eq!(
+                calls.iter().map(|(phase, _)| *phase).collect::<Vec<_>>(),
+                [Background, Foreground],
+                "{page:?}",
+            );
+            assert!(calls[0].1 > 0, "{page:?}: background painted first");
+            assert!(calls[1].1 > calls[0].1, "{page:?}: contents between phases");
+            assert_eq!(calls[1].1, batch.vertices.len(), "{page:?}: no tooltip");
+        }
+    }
+
+    #[test]
     fn mod_key_capture_waits_for_a_chord_or_modifier_release() {
         use winit::keyboard::KeyCode as K;
         let atlas = atlas();
@@ -9162,7 +10594,7 @@ mod tests {
         );
         assert!(!ui.focus_from_keyboard);
         let _ = take_cursor();
-        ui.draw(
+        ui.draw_test_frame(
             &s,
             NONE,
             &mut HudBatch::new(
@@ -9174,9 +10606,10 @@ mod tests {
             ),
             &atlas,
             over,
+            &mut |_, _| {},
         );
         assert_eq!(take_cursor(), Cursor::PointingHand);
-        ui.draw(
+        ui.draw_test_frame(
             &s,
             NONE,
             &mut HudBatch::new(
@@ -9188,6 +10621,7 @@ mod tests {
             ),
             &atlas,
             (-10.0, -10.0),
+            &mut |_, _| {},
         );
         assert_eq!(take_cursor(), Cursor::Arrow, "focus is not mouse hover");
         assert!(
@@ -9195,7 +10629,7 @@ mod tests {
             "moving the pointer does not clear focus"
         );
         ui.focus_from_keyboard = true;
-        ui.draw(
+        ui.draw_test_frame(
             &s,
             NONE,
             &mut HudBatch::new(
@@ -9207,6 +10641,7 @@ mod tests {
             ),
             &atlas,
             (-10.0, -10.0),
+            &mut |_, _| {},
         );
         assert_eq!(
             take_cursor(),
@@ -9233,7 +10668,7 @@ mod tests {
             .expect("visible disabled button");
         let over = (button.x + 1.0, button.y + 1.0);
         let _ = take_cursor();
-        ui.draw(
+        ui.draw_test_frame(
             &s,
             NONE,
             &mut HudBatch::new(
@@ -9245,6 +10680,7 @@ mod tests {
             ),
             &atlas,
             over,
+            &mut |_, _| {},
         );
         assert_eq!(take_cursor(), Cursor::NotAllowed);
         assert!(
@@ -9264,7 +10700,7 @@ mod tests {
             ui.focus.is_none(),
             "an inactive widget rejects the click before focus"
         );
-        ui.draw(
+        ui.draw_test_frame(
             &s,
             NONE,
             &mut HudBatch::new(
@@ -9276,6 +10712,7 @@ mod tests {
             ),
             &atlas,
             (-10.0, -10.0),
+            &mut |_, _| {},
         );
         assert_eq!(take_cursor(), Cursor::Arrow);
     }
@@ -9312,12 +10749,13 @@ mod tests {
         // The pointer is still on the clicked widget: it carries the
         // description (`setTooltip`, drawn while hovered).
         let mut on = HudBatch::scratch([480, 480]);
-        ui.draw(
+        ui.draw_test_frame(
             &s,
             NONE,
             &mut on,
             &atlas,
             (extra.x + extra.w / 2.0, extra.y + extra.h / 2.0),
+            &mut |_, _| {},
         );
         // The pointer moved off: the description goes with it. A mouse
         // focus a click left behind (the look-up keeps the click's widget,
@@ -9325,12 +10763,13 @@ mod tests {
         // the widget, like vanilla's `MenuTooltipPositioner` does for a
         // keyboard focus.
         let mut off = HudBatch::scratch([480, 480]);
-        ui.draw(
+        ui.draw_test_frame(
             &s,
             NONE,
             &mut off,
             &atlas,
             (extra.x + extra.w + 40.0, extra.y + extra.h + 40.0),
+            &mut |_, _| {},
         );
         assert!(
             off.vertices.len() < on.vertices.len(),
@@ -9575,7 +11014,19 @@ mod tests {
                     .unwrap();
                 let cursor = (option.x + 1.0, option.y + 1.0);
                 let mut actual = HudBatch::scratch([480, 480]);
-                ui.draw(&s, NONE, &mut actual, &atlas, cursor);
+                let mut foreground_end = None;
+                ui.draw_test_frame(
+                    &s,
+                    NONE,
+                    &mut actual,
+                    &atlas,
+                    cursor,
+                    &mut |phase, batch| {
+                        if phase == crate::screen_draw::RenderPhase::Foreground {
+                            foreground_end = Some(batch.vertices.len());
+                        }
+                    },
+                );
                 let key = format!("options.inactivityFpsLimit.{mode}.tooltip");
                 assert!(lang::has(&key));
                 let mut expected = HudBatch::scratch([480, 480]);
@@ -9586,6 +11037,11 @@ mod tests {
                     cursor,
                 );
                 assert!(!expected.vertices.is_empty());
+                assert_eq!(
+                    foreground_end,
+                    Some(actual.vertices.len() - expected.vertices.len()),
+                    "foreground precedes the tooltip",
+                );
                 let tail = &actual.vertices[actual.vertices.len() - expected.vertices.len()..];
                 assert_eq!(
                     bytemuck::cast_slice::<_, u8>(tail),
@@ -10207,7 +11663,14 @@ mod tests {
         ui.show(Page::Language);
         let draw_hint = |ui: &mut OptionsUi| {
             let mut batch = HudBatch::scratch([960, 640]);
-            ui.draw(&settings, NONE, &mut batch, &atlas, (-1.0, -1.0));
+            ui.draw_test_frame(
+                &settings,
+                NONE,
+                &mut batch,
+                &atlas,
+                (-1.0, -1.0),
+                &mut |_, _| {},
+            );
             let search = &ui.language_search;
             batch.vertices.iter().any(|v| {
                 v.color == rgba(170, 170, 170, 255)
@@ -10313,7 +11776,7 @@ mod tests {
             let row_y = if above { top - 5.0 } else { bottom - 16.0 };
             ui.scroll = row.y - row_y;
             let (x, width, height) = (row.x, row.w, row.h);
-            ui.draw(&s, NONE, &mut batch, &atlas, (-1.0, -1.0));
+            ui.draw_test_frame(&s, NONE, &mut batch, &atlas, (-1.0, -1.0), &mut |_, _| {});
             let vertices: Vec<_> = batch
                 .vertices
                 .iter()
@@ -12124,6 +13587,10 @@ mod tests {
     }
 }
 
+fn preset_from_slider(v: f32) -> usize {
+    let v = if v >= 1.0 { 0.99999 } else { v };
+    ((v * 4.0).floor() as usize).min(3)
+}
 #[cfg(test)]
 #[path = "options_ui_graphics_tests.rs"]
 mod graphics_tests;

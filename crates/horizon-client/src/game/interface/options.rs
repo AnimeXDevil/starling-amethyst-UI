@@ -211,6 +211,8 @@ impl Game<'_> {
         self.set_screen(Screen::Options);
         self.options_from_title = from_title;
         let minecart_improvements = self.minecart_improvements();
+        // Restore fullbright when leaving another server.
+        self.hold_fullbright();
         let ui = &mut self.ui.options;
         // The game puts the skin on (game/own_skin.rs).
         ui.skin_page = true;
@@ -268,18 +270,44 @@ impl Game<'_> {
         self.watch_pack_folder();
         self.poll_diagnostics();
         let context = self.controller_settings_context();
+<<<<<<< HEAD
         self.show_skin_cloud();
         let mut ui = std::mem::take(&mut self.ui.options);
         if ui.controller_open() {
             ui.set_controller_context(context);
+||||||| 980f0459eb
+        let mut ui = std::mem::take(&mut self.ui.options);
+        if ui.controller_open() {
+            ui.set_controller_context(context);
+=======
+        if self.ui.options.controller_open() {
+            self.ui.options.set_controller_context(context);
+>>>>>>> arismoko/main
         }
         let cursor = self.options_pointer(&mut ui);
         let output = self
             .renderer
             .as_ref()
             .map_or(Default::default(), |r| r.output());
+<<<<<<< HEAD
         ui.draw(&self.settings, output, batch, &self.gui.atlas, cursor);
         self.ui.options = ui;
+||||||| 980f0459eb
+        ui.draw(&self.settings, output, batch, &self.gui.atlas, self.cursor);
+        self.ui.options = ui;
+=======
+        self.ui
+            .options
+            .draw_background(&self.settings, output, batch, &self.gui.atlas);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
+        self.ui
+            .options
+            .draw_contents(&self.settings, batch, &self.gui.atlas, self.cursor);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
+        self.ui
+            .options
+            .draw_overlays(batch, &self.gui.atlas, self.cursor);
+>>>>>>> arismoko/main
         self.show_calibration((batch.width, batch.height));
     }
     /// Whose controller settings these are and what this game sees (`controller_ui`): the
@@ -534,6 +562,17 @@ impl Game<'_> {
                 Event::OpenModFolder => {
                     self.open_game_folder(&Self::game_dir().join(horizon_client::mod_list::DIR))
                 }
+                Event::ImportPacks(paths) => {
+                    let additional = self.discover_mod_packs(mod_api::PackType::ClientResources);
+                    let vanilla = self.vanilla_root();
+                    super::packs::import_resource_packs(
+                        &mut self.ui.options,
+                        &vanilla,
+                        &self.server_packs.active,
+                        &paths,
+                        &additional,
+                    );
+                }
                 // Horizon's own Add button: the screen picked a hit, the game
                 // owns the folder it lands in.
                 Event::DownloadPack(i) => {
@@ -693,7 +732,12 @@ impl Game<'_> {
     }
     /// Settings that Horizon applies beyond render distance, volume and GUI scale.
     pub(super) fn apply_ui_settings(&mut self) {
+<<<<<<< HEAD
         let scale = self.world_scale();
+||||||| 980f0459eb
+=======
+        horizon_client::parallel::set_setting(self.settings.horizon.parallel_tick);
+>>>>>>> arismoko/main
         if horizon_client_render::mipmap::set_dither_cutouts(
             self.settings.horizon.dither_cutout_mips,
         ) {
@@ -708,10 +752,10 @@ impl Game<'_> {
         {
             self.settings.horizon.save(dir);
         }
+        self.hold_fullbright();
         let s = &self.settings;
         if let Some(r) = self.renderer.as_mut() {
             r.gamma = s.gamma;
-            r.fullbright = s.extras.fullbright;
             r.improved_transparency = s.improved_transparency;
             r.set_present_mode(s.vsync, s.horizon.present_mode);
             r.animated_textures = s.horizon.animated_textures;
@@ -721,6 +765,7 @@ impl Game<'_> {
                 s.file.int("textureFiltering"),
                 s.file.int("maxAnisotropyBit"),
             );
+<<<<<<< HEAD
             r.set_world_post(
                 scale,
                 s.horizon.fxaa,
@@ -728,6 +773,22 @@ impl Game<'_> {
                 s.horizon.upscaling.ratio(),
                 s.horizon.upscaling_sharpness as f32 / 100.0,
             );
+||||||| 980f0459eb
+            r.set_world_post(
+                s.horizon.resolution_scale as f32 / 100.0,
+                s.horizon.fxaa,
+                s.horizon.taa,
+                s.horizon.upscaling.ratio(),
+                s.horizon.upscaling_sharpness as f32 / 100.0,
+            );
+=======
+            // Dynamic Resolution's scale where it is on; turned off, it starts over at the floor.
+            if !s.horizon.dynamic_resolution {
+                self.dynamic_resolution.reset();
+            }
+            let scale = super::frame_autotune::world_scale(&s.horizon, &self.dynamic_resolution);
+            super::frame_autotune::apply_world_post(r, &s.horizon, scale);
+>>>>>>> arismoko/main
             r.set_frame_generation(
                 s.horizon.frame_generation != horizon_client::graphics::FrameGeneration::Off,
             );
@@ -924,6 +985,30 @@ impl Game<'_> {
     }
 }
 
+impl Game<'_> {
+    /// Fullbright as this window may draw it (`fullbright_held`): the renderer's flag and the
+    /// graphics screen's row. Each tick (`tick_frame_visuals`) and when settings apply, so
+    /// joining or leaving a server needs no call of its own.
+    pub(super) fn hold_fullbright(&mut self) {
+        let held = fullbright_held(
+            self.remote.as_ref().map(|_| self.integrated.is_some()),
+            self.replay.playing(),
+        );
+        self.settings.fullbright_held = held;
+        if let Some(r) = self.renderer.as_mut() {
+            r.fullbright = self.settings.extras.fullbright && !held;
+        }
+    }
+}
+
+/// Fullbright is held off on another's server, where it would light what the server shows
+/// dark: a connection without this window's integrated server, as a multiplayer server
+/// or a LAN guest has. Single player, a LAN host and Replay Studio keep it.
+/// `connection`: none, or whether it plays on this window's integrated server.
+fn fullbright_held(connection: Option<bool>, studio: bool) -> bool {
+    connection == Some(false) && !studio
+}
+
 /// The named device can be a connected pad that has not driven the game yet.
 fn detected_controller_style(
     device: Option<&horizon_client::controller_ui::Device>,
@@ -982,7 +1067,8 @@ mod resize_state_tests {
         ) {
             return;
         }
-        use mod_api::{ClientHost, Hooks, ModEntry, WindowResizeEvent, testing::with_mods};
+        use mod_api::{ClientHost, Hooks, ModEntry, WindowResizeEvent};
+        use mod_platform::testing::with_mods;
         use std::sync::{Arc, Mutex};
         struct Listener(Arc<Mutex<Vec<(u32, u32, u32, u32)>>>);
         #[mod_api::__subscriptions]
@@ -1086,6 +1172,23 @@ mod resize_state_tests {
             gui_size: horizon_client::window::GuiSize::new([1280, 960], 100, false).size,
         };
         assert!(!larger_limit.differs_from(&mut last));
+    }
+}
+
+#[cfg(test)]
+mod fullbright_tests {
+    use super::fullbright_held;
+
+    #[test]
+    fn fullbright_is_held_only_on_another_servers_world() {
+        // The title screen, with no connection.
+        assert!(!fullbright_held(None, false));
+        // Single player and a LAN host play their own save; so does a splitscreen seat in P1's.
+        assert!(!fullbright_held(Some(true), false));
+        // A multiplayer server, or another player's world opened to LAN.
+        assert!(fullbright_held(Some(false), false));
+        // Replay Studio plays a recording, not a server.
+        assert!(!fullbright_held(Some(false), true));
     }
 }
 

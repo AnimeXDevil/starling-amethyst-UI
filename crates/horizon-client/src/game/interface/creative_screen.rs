@@ -103,8 +103,12 @@ impl Game<'_> {
     /// `itemGroup.<mod>.<name>`, else its `title` as a lang key (a mod's own
     /// `itemGroup.<mod>`), else `title` as English text.
     pub(super) fn creative_tab_title(&self, tab: &horizon_client::creative::Tab) -> String {
-        if let Some((name, _)) = &tab.name {
-            return name.clone();
+        if let Some((name, _, translate)) = &tab.name {
+            return if *translate {
+                self.translate(name).unwrap_or_else(|| name.clone())
+            } else {
+                name.clone()
+            };
         }
         match horizon_client::creative::item_group_key(&tab.id) {
             Some(key) => self.translate_with_fallback(key, &tab.title),
@@ -244,6 +248,7 @@ impl Game<'_> {
                 }
             }
         }
+<<<<<<< HEAD
         if panel {
             // The crafting grid the window lacks, and the result's slot, as the game's windows
             // draw a slot.
@@ -265,6 +270,16 @@ impl Game<'_> {
             .iter()
             .filter(|t| !panel && self.creative_screen.on_page(t))
         {
+||||||| 980f0459eb
+        let (tx, ty) = Creative::tab_position(tab);
+        batch.sprite(&self.gui.atlas, &tab_sprite(tab, true), ox + tx, oy + ty);
+        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
+=======
+        let (tx, ty) = Creative::tab_position(tab);
+        batch.sprite(&self.gui.atlas, &tab_sprite(tab, true), ox + tx, oy + ty);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Background);
+        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
+>>>>>>> arismoko/main
             let (tx, ty) = Creative::tab_position(t);
             let stack = ItemStack {
                 item: Arc::from(t.icon.as_str()),
@@ -386,6 +401,7 @@ impl Game<'_> {
                 oy + Creative::SCROLL_Y + self.creative_screen.scroller_offset(),
             );
         }
+<<<<<<< HEAD
         if !panel {
             // Past both windows, when there are two.
             let width = if CREATIVE_SHIFT.get() == 0.0 {
@@ -409,6 +425,17 @@ impl Game<'_> {
             .iter()
             .filter(|t| self.bedrock_items.is_none() && self.creative_screen.on_page(t))
         {
+||||||| 980f0459eb
+        let effect_tip = self.draw_inventory_effects(batch, (ox, oy), Creative::WIDTH as i32);
+        self.draw_creative_pages(batch, ox, oy);
+        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
+=======
+        let effect_tip = self.draw_inventory_effects(batch, (ox, oy), Creative::WIDTH as i32);
+        self.draw_creative_pages(batch, ox, oy);
+        let browser_tip = self.draw_mod_browser(batch);
+        self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
+        for t in tabs.iter().filter(|t| self.creative_screen.on_page(t)) {
+>>>>>>> arismoko/main
             let (tx, ty) = Creative::tab_position(t);
             if self.cursor.0 >= ox + tx
                 && self.cursor.0 < ox + tx + 26.0
@@ -452,6 +479,16 @@ impl Game<'_> {
         }
         if let Some(lines) = effect_tip {
             self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+        }
+        // CreativeModeInventoryScreen.checkTabHovering: a tab says its name.
+        if let Some(i) = Creative::hovered_tab(&tabs, (ox, oy), self.cursor)
+            && let Some(t) = tabs.get(i)
+        {
+            let title = self.creative_tab_title(t);
+            self.tooltip(batch, &title, self.cursor.0, self.cursor.1);
+        }
+        if let Some(tooltip) = browser_tip {
+            self.draw_mod_browser_tooltip(batch, tooltip);
         }
     }
     pub(super) fn creative_trash_hovered(batch: &HudBatch, cursor: (f32, f32)) -> bool {

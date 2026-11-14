@@ -512,6 +512,14 @@ impl Game<'_> {
                     )],
                 );
             }
+            // Dynamic Resolution's scale, which moves on its own.
+            if self.settings.horizon.dynamic_resolution {
+                let scale = super::frame_autotune::world_scale(
+                    &self.settings.horizon,
+                    &self.dynamic_resolution,
+                );
+                d.group("system", [format!("Resolution Scale: {scale}% (dynamic)")]);
+            }
             let kind = match info.device_type {
                 wgpu::DeviceType::IntegratedGpu => " (iGPU)",
                 wgpu::DeviceType::DiscreteGpu => " (dGPU)",
@@ -726,7 +734,7 @@ impl Game<'_> {
             DebugAction::CopyLocation if player => {
                 self.debug_translated("debug.copy_location.message");
                 if let Some(p) = &self.player {
-                    use horizon_client::java_text::format_fixed2 as f2;
+                    use horizon_core::java_number::format_fixed2 as f2;
                     let command = format!(
                         "/execute in {} run tp @s {} {} {} {} {}",
                         self.dim.id(),
@@ -936,7 +944,8 @@ impl Game<'_> {
     pub(super) fn block_entity_tag(&self, pos: [i32; 3]) -> Option<Tag> {
         let e = self.world.block_entities.get(&(pos[0], pos[1], pos[2]))?;
         let name = self.data_block_name(pos);
-        let mut tag = horizon_client::save::encode_block_entity((pos[0], pos[1], pos[2]), e, &name);
+        let mut tag =
+            horizon_client::save::block_entity_encode::encode((pos[0], pos[1], pos[2]), e, &name);
         if let Tag::Compound(c) = &mut tag {
             for key in ["id", "x", "y", "z", "keepPacked"] {
                 c.remove(&key.into());
@@ -992,7 +1001,7 @@ impl Game<'_> {
     /// `KeyboardHandler.copyCreateEntityCommand`: the data without its UUID
     /// or position.
     fn copy_create_entity_command(&mut self, kind: &str, pos: Vec3, tag: Option<Tag>) {
-        use horizon_client::java_text::format_fixed2 as f2;
+        use horizon_core::java_number::format_fixed2 as f2;
         let mut command = format!("/summon {kind} {} {} {}", f2(pos.x), f2(pos.y), f2(pos.z));
         if let Some(mut tag) = tag {
             if let Tag::Compound(c) = &mut tag {
