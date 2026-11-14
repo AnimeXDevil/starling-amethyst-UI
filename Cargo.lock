@@ -1930,13 +1930,9 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "horizon-client-core",
-<<<<<<< HEAD
  "horizon-dualsense",
-||||||| 980f0459eb
-=======
  "horizon-engine-slots",
  "horizon-mod-api-macros",
->>>>>>> arismoko/main
  "horizon-theme",
  "log",
  "png",
@@ -1982,13 +1978,9 @@ dependencies = [
  "horizon-mod-wasm",
  "horizon-narrator",
  "horizon-optifine",
-<<<<<<< HEAD
  "horizon-prepare",
-||||||| 980f0459eb
-=======
  "horizon-perf",
  "horizon-perf-format",
->>>>>>> arismoko/main
  "horizon-protocol",
  "horizon-server-files",
  "horizon-shader-api",
@@ -2013,12 +2005,8 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
-<<<<<<< HEAD
  "starling-account",
-||||||| 980f0459eb
-=======
  "tempfile",
->>>>>>> arismoko/main
  "unicode-bidi",
  "ureq",
  "wgpu",
@@ -3620,7 +3608,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3629,13 +3616,12 @@ dependencies = [
  "num-traits",
  "pxfm",
 ]
-||||||| 980f0459eb
-=======
+
+[[package]]
 name = "multimap"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
->>>>>>> arismoko/main
 
 [[package]]
 name = "multiversion_no_op"

@@ -16,15 +16,11 @@ horizon-game-discovery = { path = "../horizon-game-discovery" }
 path = "../horizon-client/src/client_lib.rs"
 
 [dependencies]
-<<<<<<< HEAD
 # The design system's palette and type scale (android_control_theme.rs).
 horizon-theme = { path = "../horizon-theme" }
-||||||| 980f0459eb
-=======
 horizon-guest-stack = { path = "../horizon-guest-stack" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-engine-slots = { path = "../horizon-engine-slots" }
->>>>>>> arismoko/main
 horizon-hooks = { path = "../horizon-hooks" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 mod_api = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab" }
@@ -159,21 +155,11 @@ windows-segment-heap = []
 workspace = true
 
 [dev-dependencies]
-<<<<<<< HEAD
-horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
-||||||| 980f0459eb
-horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
-# ui_theme's unit tests draw text in the design system's fonts.
-horizon-theme = { path = "../horizon-theme" }
-=======
 horizon-threads = { path = "../horizon-threads", features = ["test-allocation-probe"] }
 horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 tempfile = "3"
 mod_platform = { package = "horizon-mod-api", path = "../horizon-mod-api", features = ["testing"] }
 mod_api = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab", features = ["testing"] }
-# ui_theme's unit tests draw text in the design system's fonts.
-horizon-theme = { path = "../horizon-theme" }
->>>>>>> arismoko/main
 horizon-client-render = { path = "../horizon-client-render", features = ["test-support"] }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }
 # Reads back the captures the server_perf tests write.

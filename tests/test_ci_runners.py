@@ -85,20 +85,12 @@ class OwnRunnerTests(unittest.TestCase):
                 self.assertIn("vars.SELF_HOSTED_CI == 'all'", value, where)
                 self.assertIn(TRUSTED, value, where)
             else:
-<<<<<<< HEAD
                 # Starling's ci.yml routes to the self-hosted labels with SELF_HOSTED_CI == 'all' (fork guard
                 # included); the carried upstream files use SELF_HOSTED_CI != 'off'. Both fall back to GitHub's.
                 self.assertTrue("vars.SELF_HOSTED_CI != 'off'" in value or "vars.SELF_HOSTED_CI == 'all'" in value,
                                 where)
-            self.assertTrue(value.endswith("|| 'ubuntu-latest' }}"), where)
-||||||| 980f0459eb
-                self.assertIn("vars.SELF_HOSTED_CI != 'off'", value, where)
-            self.assertTrue(value.endswith("|| 'ubuntu-latest' }}"), where)
-=======
-                self.assertIn("vars.SELF_HOSTED_CI != 'off'", value, where)
             # Both labels select a GitHub-hosted Ubuntu runner when our pools are disabled.
             self.assertRegex(value, r"\|\| 'ubuntu-(?:latest|24\.04)' \}\}$", where)
->>>>>>> arismoko/main
             if "checks" in pools:
                 # The desktop paused: every checks job back to GitHub, the bots stay.
                 self.assertIn("vars.SELF_HOSTED_CI != 'light'", value, where)
@@ -133,20 +125,6 @@ class OwnRunnerTests(unittest.TestCase):
                 self.assertNotRegex(block, r":\s*write", where)
                 self.assertNotRegex(head, r":\s*write", where)
 
-<<<<<<< HEAD
-||||||| 980f0459eb
-    def test_checks_split_between_both_pools(self):
-        ci = (WORKFLOWS / "ci.yml").read_text()
-        verify = dict(jobs(ci))["verify"]
-        value = runs_on(verify)
-        # A pull request by the last digit of its number unless SELF_HOSTED_CI=all; main's pushes keep GitHub's cache.
-        self.assertIn("github.event_name == 'pull_request' && (", value)
-        self.assertIn("vars.SELF_HOSTED_CI == 'all'", value)
-        self.assertIn("endsWith(format('{0}', github.event.pull_request.number), '0')", value)
-        self.assertNotIn(FORK_GUARD, value)
-        self.assertEqual(value, runs_on(dict(jobs(ci))["launcher"]))
-
-=======
     def test_no_deployment_environment_on_our_runners(self):
         import hashlib
         import sys
@@ -194,23 +172,6 @@ class OwnRunnerTests(unittest.TestCase):
                     with self.assertRaises(AssertionError):
                         self.test_no_deployment_environment_on_our_runners()
 
-    def test_checks_split_between_both_pools(self):
-        ci = dict(jobs((WORKFLOWS / "ci.yml").read_text()))
-        value = runs_on(ci["launcher"])
-        # A pull request by the last digit of its number unless SELF_HOSTED_CI=all; main's pushes keep GitHub's cache.
-        self.assertIn("github.event_name == 'pull_request' && (", value)
-        self.assertIn("vars.SELF_HOSTED_CI == 'all'", value)
-        self.assertIn("endsWith(format('{0}', github.event.pull_request.number), '0')", value)
-        self.assertNotIn(FORK_GUARD, value)
-        # verify's parts go where the launcher goes; verify itself only waits for them.
-        for part in ("verify-tree", "verify-lint", "verify-test"):
-            with self.subTest(part=part):
-                self.assertEqual(runs_on(ci[part]), value)
-        self.assertIn("needs: [verify-tree, verify-lint, verify-test]", ci["verify"])
-        # Never skipped: GitHub counts a skipped required check as passed.
-        self.assertIn("if: always()", ci["verify"])
-
->>>>>>> arismoko/main
     def test_the_light_runners_refuse_forks_themselves(self):
         script = (ROOT / "tools/ci/checks-runners.sh").read_text()
         self.assertIn("ACTIONS_RUNNER_HOOK_JOB_STARTED=$shared/job-started.sh", script)

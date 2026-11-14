@@ -242,14 +242,8 @@ class PruneBuildsTests(unittest.TestCase):
         self.assertIn('"dist/horizon-source.tar.gz#Source of this Nightly', publish)
         self.assertIn('nightly.py keep-source "$SHA" "$DATE"', publish)
 
-<<<<<<< HEAD
     @HORIZON_RELEASES
-    def test_the_workflow_prunes_on_schedule_only(self):
-||||||| 980f0459eb
-    def test_the_workflow_prunes_on_schedule_only(self):
-=======
     def test_the_workflow_prunes_on_real_runs_only(self):
->>>>>>> arismoko/main
         build = (WORKFLOWS / "nightly-build.yml").read_text()
         step = build.split("Old nightly/build-* branches deleted", 1)[1].split("- uses:", 1)[0]
         self.assertIn("if: steps.mode.outputs.dry_run != 'true'", step)

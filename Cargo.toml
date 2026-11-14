@@ -1,12 +1,8 @@
 [workspace]
 exclude = ["crates/horizon-telemetry-server", "launcher", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "third_party/winit", "tools/fixtures/paper-trace-mod"]
 members = [
-<<<<<<< HEAD
     "crates/starling-catalog",
-||||||| 980f0459eb
-=======
     "crates/horizon-guest-stack",
->>>>>>> arismoko/main
     "crates/horizon-mod-vocab",
     "crates/horizon-game-discovery",
     "crates/horizon-cosmetics",
@@ -28,13 +24,9 @@ members = [
     "crates/horizon-hdr",
     "crates/horizon-world",
     "crates/horizon-client",
-<<<<<<< HEAD
     # Starling: the game as a NativeActivity library; empty on other targets.
     "crates/horizon-android",
-||||||| 980f0459eb
-=======
     "crates/horizon-engine-slots",
->>>>>>> arismoko/main
     "crates/horizon-mod-points",
     "crates/horizon-internals",
     "crates/horizon-client-lib",

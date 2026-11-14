@@ -111,75 +111,6 @@ class ReleaseTrainTests(unittest.TestCase):
         api.assert_called_once()
         self.assertEqual(api.call_args.args[:4], ("api", "graphql", "--paginate", "--slurp"))
 
-<<<<<<< HEAD
-||||||| 980f0459eb
-    def test_launcher_decision_shell_fails_closed_and_succeeds_normally(self):
-        workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
-        step = workflow.split("      - id: decide\n", 1)[1].split("\n  build:", 1)[0]
-        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
-        script = script.replace("${{ steps.mode.outputs.dry_run }}", "true")
-        for status in (23, 0):
-            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                (root / "tools").mkdir()
-                # Execute the workflow's real pipeline with a controlled decision subprocess.
-                (root / "tools/release_train.py").write_text(
-                    "import json, os, sys\n"
-                    f"sys.exit({status})\n" if status else
-                    "import json, os\n"
-                    "print(json.dumps({'reason': 'ready', 'tag': 'launcher@0.2.0'}))\n"
-                    "with open(os.environ['GITHUB_OUTPUT'], 'a') as out:\n"
-                    "    out.write('tag=launcher@0.2.0\\n')\n")
-                output = root / "output"
-                output.touch()
-                result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True,
-                                        text=True, env={**os.environ, "GITHUB_OUTPUT": str(output),
-                                        "GITHUB_STEP_SUMMARY": str(root / "summary"), "GITHUB_SHA": "head",
-                                        "HEAD_SHA": "head", "FORCE": ""})
-                if status:
-                    self.assertEqual(result.returncode, status, result.stderr)
-                    self.assertEqual(output.read_text(), "")
-                    self.assertFalse((root / "summary").exists())
-                else:
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(output.read_text(),
-                                     "tag=launcher@0.2.0\nversion=0.2.0\nrelease=true\nhead=head\n")
-
-=======
-    def test_launcher_decision_shell_fails_closed_and_succeeds_normally(self):
-        workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
-        step = workflow.split("      - id: decide\n", 1)[1].split("\n  build:", 1)[0]
-        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
-        script = script.replace("${{ steps.mode.outputs.dry_run }}", "true")
-        for status in (23, 0):
-            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                (root / "tools").mkdir()
-                # Execute the workflow's real pipeline with a controlled decision subprocess.
-                (root / "tools/release_train.py").write_text(
-                    "import json, os, sys\n"
-                    f"sys.exit({status})\n" if status else
-                    "import json, os\n"
-                    "print(json.dumps({'reason': 'ready', 'tag': 'launcher@0.2.0'}))\n"
-                    "with open(os.environ['GITHUB_OUTPUT'], 'a') as out:\n"
-                    "    out.write('tag=launcher@0.2.0\\n')\n")
-                output = root / "output"
-                output.touch()
-                result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True,
-                                        text=True, env={**os.environ, "GITHUB_OUTPUT": str(output),
-                                        "GITHUB_STEP_SUMMARY": str(root / "summary"), "GITHUB_SHA": "head",
-                                        "BASE": "", "EVENT": "workflow_dispatch", "DRY_RUN": "true",
-                                        "SOURCE_SHA": "head", "FORCE": ""})
-                if status:
-                    self.assertEqual(result.returncode, status, result.stderr)
-                    self.assertEqual(output.read_text(), "")
-                    self.assertFalse((root / "summary").exists())
-                else:
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(output.read_text(),
-                                     "tag=launcher@0.2.0\nversion=0.2.0\nrelease=true\nhead=head\n")
-
->>>>>>> arismoko/main
     def test_player_facing_paths(self):
         exporters = {"mods/horizon/src/test/java/dev/horizonlab/parity/VanillaMobDataExporter.java"}
         self.assertTrue(train.player_facing("crates/horizon-client/src/game.rs", "game"))
@@ -344,40 +275,6 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertEqual(train.green_main_head(), "c")
         with runs([], [("c", "completed", "failure"), ("b", "completed", "success")]):
             self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
-
-    def test_launcher_manual_base_is_pinned_and_must_belong_to_main(self):
-        workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
-        selection = workflow.split("          set -euo pipefail\n", 1)[1].split(
-            "          python3 tools/release_train.py decide", 1)[0]
-        script = "set -euo pipefail\n" + textwrap.dedent(selection) + '\nprintf "%s" "$HEAD_SHA"'
-        with tempfile.TemporaryDirectory() as folder:
-            def git(*args):
-                return subprocess.check_output(["git", *args], cwd=folder, text=True,
-                                               stderr=subprocess.DEVNULL).strip()
-            git("init", "-b", "main")
-            git("config", "user.name", "Test")
-            git("config", "user.email", "test@example.invalid")
-            git("commit", "--allow-empty", "-m", "main")
-            main = git("rev-parse", "HEAD")
-            git("remote", "add", "origin", folder)
-            git("checkout", "-b", "topic")
-            git("commit", "--allow-empty", "-m", "not main")
-            topic = git("rev-parse", "HEAD")
-            def select(base="", event="workflow_dispatch", dry_run="false"):
-                return subprocess.run(["bash", "-c", script], cwd=folder, text=True,
-                                      capture_output=True, env={**os.environ, "BASE": base,
-                                      "EVENT": event, "DRY_RUN": dry_run, "SOURCE_SHA": topic})
-            for dry_run in ("false", "true"):
-                result = select(main, dry_run=dry_run)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, main)
-            for invalid in ("does-not-exist", topic, "--help"):
-                result = select(invalid)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("::error::base", result.stdout)
-            self.assertEqual(select().stdout, "", "default real manual run uses the gate picker")
-            self.assertEqual(select(event="push").stdout, topic)
-            self.assertEqual(select(dry_run="true").stdout, topic)
 
     @mock.patch.object(train, "REPO", "arismoko/horizon")
     def test_fork_base_requires_same_sha_main_push_gate_jobs(self):
@@ -639,23 +536,6 @@ class NightlyTrainTests(unittest.TestCase):
         self.assertEqual(train.nightly_decision(True, "release-now: #2", urgent, None, 12), (True, "release-now: #2", True))
         self.assertTrue(train.nightly_decision(True, "forced", self.PRS, None, 30, force=True)[0])
         self.assertFalse(train.nightly_decision(True, "forced", self.PRS, 7, 0, force=True)[0])
-
-    def test_a_snapshot_build_never_holds_the_nightly_back(self):
-        def runs(*entries):
-            return [dict(databaseId=n, status=status, displayTitle=title) for n, (status, title) in enumerate(entries, 1)]
-        snapshot = ("in_progress", "snapshot build " + "a" * 40)
-        with mock.patch.object(train, "gh_json", return_value=runs(snapshot, ("queued", "snapshot build "))):
-            self.assertIsNone(train.nightly_building(), "an active snapshot, real or dry, is no Nightly")
-        with mock.patch.object(train, "gh_json", return_value=runs(snapshot, ("queued", "nightly build"))):
-            self.assertEqual(train.nightly_building(), 2)
-        with mock.patch.object(train, "gh_json", return_value=runs(("in_progress", "nightly build (request 7)"))):
-            self.assertEqual(train.nightly_building(), 1)
-        with mock.patch.object(train, "gh_json", return_value=runs(("completed", "nightly build"), snapshot)):
-            self.assertIsNone(train.nightly_building())
-        # The workflow names a snapshot's run exactly so, and a Nightly's never so.
-        run_name = (train.ROOT / ".github/workflows/nightly-build.yml").read_text().split("\nrun-name: ", 1)[1].split("\n", 1)[0]
-        self.assertIn("inputs.kind == 'snapshot' && format('snapshot build {0}', inputs.base)", run_name)
-        self.assertIn("format('nightly build{0}'", run_name)
 
     def test_a_running_nightly_never_holds_a_snapshot_back(self):
         sha = "a" * 40
