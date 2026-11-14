@@ -148,6 +148,11 @@ pub struct UiResources {
     pub panorama: Arc<horizon_client::gfx::panorama::Faces>,
     /// The title screen's splashes (`horizon_client::splashes::pool`).
     pub splashes: Arc<str>,
+    /// Starling: what it was read from, the packs over the game's own, whose sprites' nine-slice
+    /// metadata and translations the title takes with it (`StartupMenu::set_root`). The loader
+    /// names only the game's own folder, and a 20 x 20 pack button nine-sliced as vanilla's
+    /// 200 x 20 one stretched its ends tenfold. None where it was read from no source.
+    pub source: Option<horizon_assets::resource_source::ResourceSource>,
 }
 
 impl Game<'_> {
@@ -179,12 +184,8 @@ impl UiResources {
             Ok(Self {
                 atlas: atlas?,
                 panorama: Arc::new(panorama),
-<<<<<<< HEAD
                 source: Some(root.clone()),
-||||||| 980f0459eb
-=======
                 splashes: Arc::from(""),
->>>>>>> arismoko/main
             })
         })
     }
@@ -204,12 +205,8 @@ impl UiResources {
         Ok(Self {
             atlas: HudAtlas::fonts(root)?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([0; 4])),
-<<<<<<< HEAD
             source: Some(root.clone()),
-||||||| 980f0459eb
-=======
             splashes: Arc::from(""),
->>>>>>> arismoko/main
         })
     }
 }

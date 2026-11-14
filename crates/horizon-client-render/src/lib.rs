@@ -208,10 +208,7 @@ pub use horizon_items::item_data;
 pub use horizon_items::items;
 pub use horizon_items::random_sequences;
 
-<<<<<<< HEAD
 pub mod android_controls;
-||||||| 980f0459eb
-=======
 pub mod render_geometry;
 pub mod render_slots;
 
@@ -219,4 +216,3 @@ pub mod render_views;
 
 #[cfg(test)]
 mod test_log;
->>>>>>> arismoko/main

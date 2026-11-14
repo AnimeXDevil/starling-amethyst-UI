@@ -16,7 +16,6 @@ pub struct PositionSender {
 }
 
 impl PositionSender {
-<<<<<<< HEAD
     /// The position the server was last told (the baseline of the next move).
     pub fn last_sent(&self) -> [f64; 3] {
         self.position
@@ -32,10 +31,7 @@ impl PositionSender {
     pub fn told_rotation(&mut self, rotation: (f32, f32)) {
         self.told = Some(rotation);
     }
-||||||| 980f0459eb
-=======
     #[horizon_mod_api_macros::replaceable]
->>>>>>> arismoko/main
     pub fn update(
         &mut self,
         position: [f64; 3],

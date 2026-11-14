@@ -56,7 +56,6 @@ pub fn prepare() -> Startup {
     }
 }
 
-<<<<<<< HEAD
 /// Runs once the log is open (Android's start-up notes, its platform set-up that logs); set before [`start`].
 static AFTER_LOG: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>> = std::sync::Mutex::new(None);
 
@@ -67,12 +66,6 @@ pub fn set_after_log(hook: impl FnOnce() + Send + 'static) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(hook));
 }
 
-/// A native function slot, checked against its place's exact type before erasure.
-pub use mod_points::__private::SlotListener as NativeSlot;
-||||||| 980f0459eb
-/// A native function slot, checked against its place's exact type before erasure.
-pub use mod_points::__private::SlotListener as NativeSlot;
-=======
 /// Refuse startup if any merged copy could not be installed, before loading any mod.
 /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
 /// start is how we ensure none of a refused mod's rows run.
@@ -85,7 +78,6 @@ pub fn installed(patched: &[(&str, &[&str], bool)]) {
         std::process::exit(game::exit_code::ERROR);
     }
 }
->>>>>>> arismoko/main
 
 fn installation_refusals(patched: &[(&str, &[&str], bool)]) -> Vec<String> {
     patched.iter().filter(|(_, _, installed)| !installed).map(|(target, mods, _)| {

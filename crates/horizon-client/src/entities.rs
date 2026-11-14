@@ -88,13 +88,9 @@ mod item_fall;
 mod item_merge;
 mod item_move;
 mod item_no_physics;
-<<<<<<< HEAD
 pub use fluids::flow_vector;
-||||||| 980f0459eb
-=======
 pub mod nameplate;
 mod obstacles;
->>>>>>> arismoko/main
 pub use fluids::{fall_reset_hit, fluid_flow, update_entity_fluids, water_clip};
 pub use item_merge::{ItemCells, merge_with_neighbours};
 pub use obstacles::ObstacleGrid;

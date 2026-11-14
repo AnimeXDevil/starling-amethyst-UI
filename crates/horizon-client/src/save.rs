@@ -2978,36 +2978,12 @@ impl SaveDir {
     }
 }
 
-<<<<<<< HEAD
-impl Drop for SaveDir {
-    /// Finish queued writes before the world is let go.
-    fn drop(&mut self) {
-        if let Some(writer) = self.writer.get_mut().ok().and_then(Option::take) {
-            drop(writer.send);
-            let _ = writer.thread.join();
-        }
-    }
-}
-
 /// `LevelStorageSource.readLevelDataTagFixed`: `world`'s level.dat, else the `level.dat_old`
 /// its last write kept: a write stopped between its two renames leaves only that one.
 pub fn read_level_dat(world: &Path) -> Option<Tag> {
     read_dat(&world.join("level.dat")).or_else(|| read_dat(&world.join("level.dat_old")))
 }
 
-||||||| 980f0459eb
-impl Drop for SaveDir {
-    /// Finish queued writes before the world is let go.
-    fn drop(&mut self) {
-        if let Some(writer) = self.writer.get_mut().ok().and_then(Option::take) {
-            drop(writer.send);
-            let _ = writer.thread.join();
-        }
-    }
-}
-
-=======
->>>>>>> arismoko/main
 pub fn read_dat(path: &Path) -> Option<Tag> {
     try_read_dat(path).ok()
 }

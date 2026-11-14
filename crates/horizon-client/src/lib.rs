@@ -19,11 +19,7 @@ pub mod entry;
 #[global_allocator]
 static ALLOCATOR: horizon_threads::GameAllocator = horizon_threads::GAME_ALLOCATOR;
 pub mod game;
-<<<<<<< HEAD
 
 pub mod diagnostics;
 pub mod performance;
-||||||| 980f0459eb
-=======
 pub mod orb_limits;
->>>>>>> arismoko/main

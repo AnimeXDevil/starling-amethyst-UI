@@ -372,12 +372,8 @@ mod cull;
 mod dx12_compiler;
 mod end_sky;
 pub mod entity_skin;
-<<<<<<< HEAD
 mod entity_source;
-||||||| 980f0459eb
-=======
 pub mod external;
->>>>>>> arismoko/main
 mod flat;
 mod frame_gen;
 mod frustum;
@@ -387,24 +383,16 @@ mod hdr_icc;
 mod hdr_start;
 mod hdr_stats;
 pub(crate) mod hud_coverage;
-<<<<<<< HEAD
 mod terrain_source;
-||||||| 980f0459eb
-=======
 mod in_flight;
->>>>>>> arismoko/main
 pub use hdr::{Calibration as HdrCalibration, Output as HdrOutput};
 pub use output::{DisplayReading, EffectiveOutput, FrameConfiguration, FrameRequest};
 
 pub mod block_light;
 mod custom_sky;
 mod displace;
-<<<<<<< HEAD
 mod late_sky;
-||||||| 980f0459eb
-=======
 mod frame_policy;
->>>>>>> arismoko/main
 pub mod lightning;
 mod linear_blend;
 #[cfg(test)]
@@ -7710,57 +7698,11 @@ impl Renderer {
                 .terrain_inputs(self.pack_terrain_flat),
         )
     }
-<<<<<<< HEAD
     /// No shader pack, and none loaded or being made for any dimension: the next frame loads
     /// the chosen one.
     pub fn forget_shader_pack(&mut self) {
         let _ = self.set_shader_pack(0, None, &[]);
         self.pack_post = None;
-    }
-    /// Times the shader pack's passes on the GPU while `on` (the F3 overlay is open), or always
-    /// with `HORIZON_SHADER_PACK_TIMING`.
-    pub fn set_pass_timing(&mut self, on: bool) {
-        self.pass_timing = on || pack_timing::PassTiming::logging();
-    }
-    /// Times a frame at most once per `gap` while passes are timed (the F3 overlay needs far fewer
-    /// samples than a measurement). `HORIZON_SHADER_PACK_TIMING` keeps every sample.
-    pub fn set_pass_timing_gap(&mut self, gap: std::time::Duration) {
-        self.pass_timing_gap = if pack_timing::PassTiming::logging() {
-            std::time::Duration::ZERO
-        } else {
-            gap
-        };
-    }
-    /// The running shader pack's timer, of either kind.
-    fn pass_timer<'a>(
-        pack: &'a mut Option<(i32, Option<pack_post::PackPost>)>,
-        native: &'a mut Option<native_pack::NativePack>,
-    ) -> Option<&'a mut Option<pack_timing::PassTiming>> {
-        match (pack, native) {
-            (Some((_, Some(post))), _) => Some(&mut post.timing),
-            (_, Some(native)) => Some(&mut native.timing),
-            _ => None,
-        }
-    }
-    /// Each pass of the running shader pack with its median GPU time in milliseconds, while
-    /// they are timed (`set_pass_timing`).
-    pub fn shader_pass_times(&self) -> Vec<(String, f32)> {
-        let timer = match (&self.pack_post, &self.native) {
-            (Some((_, Some(post))), _) => post.timing.as_ref(),
-            (_, Some(native)) => native.timing.as_ref(),
-            _ => None,
-        };
-        timer
-            .map(pack_timing::PassTiming::medians)
-            .unwrap_or_default()
-    }
-    /// Each of Horizon's own passes with its median GPU time in milliseconds, while they are
-    /// timed (`set_pass_timing`).
-    pub fn own_pass_times(&self) -> Vec<(String, f32)> {
-        self.own_timing
-            .as_ref()
-            .map(pack_timing::PassTiming::medians)
-            .unwrap_or_default()
     }
     /// Diagnostic distributions from the existing pass timers, without another profiler.
     pub fn diagnostic_pass_times(&self) -> serde_json::Value {
@@ -7772,54 +7714,6 @@ impl Renderer {
         serde_json::json!({"world":self.own_timing.as_ref().map(pack_timing::PassTiming::distributions),
             "shader":shader.map(pack_timing::PassTiming::distributions)})
     }
-||||||| 980f0459eb
-    /// Times the shader pack's passes on the GPU while `on` (the F3 overlay is open), or always
-    /// with `HORIZON_SHADER_PACK_TIMING`.
-    pub fn set_pass_timing(&mut self, on: bool) {
-        self.pass_timing = on || pack_timing::PassTiming::logging();
-    }
-    /// Times a frame at most once per `gap` while passes are timed (the F3 overlay needs far fewer
-    /// samples than a measurement). `HORIZON_SHADER_PACK_TIMING` keeps every sample.
-    pub fn set_pass_timing_gap(&mut self, gap: std::time::Duration) {
-        self.pass_timing_gap = if pack_timing::PassTiming::logging() {
-            std::time::Duration::ZERO
-        } else {
-            gap
-        };
-    }
-    /// The running shader pack's timer, of either kind.
-    fn pass_timer<'a>(
-        pack: &'a mut Option<(i32, Option<pack_post::PackPost>)>,
-        native: &'a mut Option<native_pack::NativePack>,
-    ) -> Option<&'a mut Option<pack_timing::PassTiming>> {
-        match (pack, native) {
-            (Some((_, Some(post))), _) => Some(&mut post.timing),
-            (_, Some(native)) => Some(&mut native.timing),
-            _ => None,
-        }
-    }
-    /// Each pass of the running shader pack with its median GPU time in milliseconds, while
-    /// they are timed (`set_pass_timing`).
-    pub fn shader_pass_times(&self) -> Vec<(String, f32)> {
-        let timer = match (&self.pack_post, &self.native) {
-            (Some((_, Some(post))), _) => post.timing.as_ref(),
-            (_, Some(native)) => native.timing.as_ref(),
-            _ => None,
-        };
-        timer
-            .map(pack_timing::PassTiming::medians)
-            .unwrap_or_default()
-    }
-    /// Each of Horizon's own passes with its median GPU time in milliseconds, while they are
-    /// timed (`set_pass_timing`).
-    pub fn own_pass_times(&self) -> Vec<(String, f32)> {
-        self.own_timing
-            .as_ref()
-            .map(pack_timing::PassTiming::medians)
-            .unwrap_or_default()
-    }
-=======
->>>>>>> arismoko/main
     /// The macros this renderer gives shader packs: the GL extensions this device has
     /// (subgroups, when it has them), and the vendor, renderer and mipmap levels
     /// (`Macros::define_renderer`).

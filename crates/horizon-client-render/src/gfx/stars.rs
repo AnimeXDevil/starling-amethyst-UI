@@ -323,7 +323,6 @@ impl Stars {
         uploads.buffer(encoder, &self.uniform, 0, bytemuck::bytes_of(&uniform));
     }
 
-<<<<<<< HEAD
     /// The stars at the far plane, for the sky drawn after solid terrain (`late_sky`). None
     /// where the device refuses it.
     pub(super) fn late_pipeline(
@@ -342,10 +341,7 @@ impl Stars {
         )
     }
 
-||||||| 980f0459eb
-=======
     #[horizon_mod_api_macros::replaceable]
->>>>>>> arismoko/main
     pub(super) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         self.draw_through(pass, &self.pipeline);
     }

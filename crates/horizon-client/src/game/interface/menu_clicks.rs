@@ -18,6 +18,9 @@ impl Game<'_> {
         button: i32,
         input: horizon_client::menu::Input,
     ) -> bool {
+        if let Some(slot) = slot {
+            self.bedrock_for_slot(slot);
+        }
         if let Some(slot) = slot
             && slot >= Creative::DISPLAY
             && self.creative_tab_open()

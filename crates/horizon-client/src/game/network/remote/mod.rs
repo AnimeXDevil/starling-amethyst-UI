@@ -28,12 +28,8 @@ use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
 use crate::game::api_values::TryIntoApi;
 use horizon_client::actions::Action;
 use horizon_client::first_person::{Hand, SwingAnimation};
-<<<<<<< HEAD
 use horizon_client::gamepad::ServerStick;
-||||||| 980f0459eb
-=======
 use horizon_client::input_queue::InputQueue;
->>>>>>> arismoko/main
 use horizon_client::{
     Result,
     blocks::Fluid,

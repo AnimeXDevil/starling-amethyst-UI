@@ -9,12 +9,8 @@ pub mod gamepad;
 pub mod gameplay_guide;
 pub mod held;
 pub mod input;
-<<<<<<< HEAD
 pub mod input_mode;
-||||||| 980f0459eb
-=======
 pub mod input_queue;
->>>>>>> arismoko/main
 pub mod input_source;
 pub mod interaction_input;
 pub mod key_names;

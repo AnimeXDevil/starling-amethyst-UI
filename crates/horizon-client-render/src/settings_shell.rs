@@ -2315,7 +2315,6 @@ impl<S: Screen + Default> Hosted for Shell<S> {
     fn open(&mut self) {
         *self = Self::default();
     }
-<<<<<<< HEAD
     fn pressable_at(&mut self, s: &Settings, size: (f32, f32), at: (f32, f32)) -> bool {
         let view = self.view(s, size);
         self.row_at(&view, at).is_some_and(|(row, _)| {
@@ -2330,15 +2329,10 @@ impl<S: Screen + Default> Hosted for Shell<S> {
         self.row_at(&view, at)
             .is_some_and(|(row, _)| matches!(row.value, Value::Slider { .. }))
     }
-    fn draw(
-||||||| 980f0459eb
-    fn draw(
-=======
     fn discard_draw(&mut self) {
         self.frame_draw = None;
     }
     fn draw_background(
->>>>>>> arismoko/main
         &mut self,
         s: &Settings,
         batch: &mut HudBatch,

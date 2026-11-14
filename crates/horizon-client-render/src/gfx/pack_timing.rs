@@ -631,7 +631,6 @@ impl PassTiming {
         }
     }
 
-<<<<<<< HEAD
     /// Bounded distributions of the same completed queries used by the overlay.
     /// Reuses the existing 15-sample window; adds no GPU queries or waits.
     pub fn distributions(&self) -> serde_json::Value {
@@ -650,12 +649,6 @@ impl PassTiming {
             .collect::<Vec<_>>()
             .into()
     }
-    /// Each pass's median time in milliseconds over its last timed frames, in the order the
-    /// passes first ran.
-||||||| 980f0459eb
-    /// Each pass's median time in milliseconds over its last timed frames, in the order the
-    /// passes first ran.
-=======
     /// Files the counters of the counters frame just read (`words` are the whole readback).
     fn collect_counters(&mut self, words: &[u64]) {
         let first = (TIMESTAMP_BYTES / 8) as usize;
@@ -743,7 +736,6 @@ impl PassTiming {
     }
 
     /// Each top-level pass's median ms over its last timed frames, in first-run order.
->>>>>>> arismoko/main
     pub fn medians(&self) -> Vec<(String, f32)> {
         self.samples
             .iter()

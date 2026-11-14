@@ -2,15 +2,11 @@
 //! bindings between the validated simulation pieces and the game loop.
 #![forbid(unsafe_code)]
 extern crate self as horizon_client;
-<<<<<<< HEAD
 pub mod accounts;
-||||||| 980f0459eb
-=======
 #[cfg(test)]
 #[global_allocator]
 static TEST_ALLOCATOR: horizon_threads::allocation_probe::Allocator =
     horizon_threads::allocation_probe::Allocator;
->>>>>>> arismoko/main
 pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;
@@ -150,12 +146,8 @@ pub mod item_render;
 pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
-<<<<<<< HEAD
 pub mod kinetics;
-||||||| 980f0459eb
-=======
 pub mod move_gate;
->>>>>>> arismoko/main
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use horizon_core::json_nbt;
 pub mod lan;
@@ -272,12 +264,8 @@ pub use horizon_client_input::gamepad;
 pub use horizon_client_input::gameplay_guide;
 pub use horizon_client_input::held;
 pub use horizon_client_input::input;
-<<<<<<< HEAD
 pub use horizon_client_input::input_mode;
-||||||| 980f0459eb
-=======
 pub use horizon_client_input::input_queue;
->>>>>>> arismoko/main
 pub use horizon_client_input::input_source;
 pub use horizon_client_input::interaction_input;
 pub use horizon_client_input::key_names;
