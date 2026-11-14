@@ -773,14 +773,7 @@ impl Mob {
         let on_ground = self.on_ground;
         let moved = parts::time(6, || {
             crate::move_gate::scene_resolve_in_border_with(
-                gate,
-                scene,
-                bounds,
-                wanted,
-                step,
-                on_ground,
-                border,
-                &entities,
+                gate, scene, bounds, wanted, step, on_ground, border, &entities,
             )
             .unwrap_or(Vec3::ZERO)
         });

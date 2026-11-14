@@ -383,16 +383,16 @@ mod hdr_icc;
 mod hdr_start;
 mod hdr_stats;
 pub(crate) mod hud_coverage;
-mod terrain_source;
 mod in_flight;
+mod terrain_source;
 pub use hdr::{Calibration as HdrCalibration, Output as HdrOutput};
 pub use output::{DisplayReading, EffectiveOutput, FrameConfiguration, FrameRequest};
 
 pub mod block_light;
 mod custom_sky;
 mod displace;
-mod late_sky;
 mod frame_policy;
+mod late_sky;
 pub mod lightning;
 mod linear_blend;
 #[cfg(test)]

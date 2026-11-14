@@ -21,5 +21,5 @@ static ALLOCATOR: horizon_threads::GameAllocator = horizon_threads::GAME_ALLOCAT
 pub mod game;
 
 pub mod diagnostics;
-pub mod performance;
 pub mod orb_limits;
+pub mod performance;

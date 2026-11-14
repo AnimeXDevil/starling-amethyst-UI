@@ -2098,12 +2098,8 @@ impl HudAtlas {
         )
         .or_else(|error| -> Result<_> {
             let models = reducible_model_sprites(root, &images, &bordered);
-            let layout = Self::layout_reducing_models(
-                &mut images,
-                &mut gui_sizes,
-                &models,
-                MAX_ATLAS_SIZE,
-            )?;
+            let layout =
+                Self::layout_reducing_models(&mut images, &mut gui_sizes, &models, MAX_ATLAS_SIZE)?;
             log::warn!("reduced HUD model texture resolution to keep the resource pack: {error}");
             Ok(layout)
         })?;

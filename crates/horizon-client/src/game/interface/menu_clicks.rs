@@ -676,7 +676,7 @@ impl Game<'_> {
                 s.selected = usize::try_from(menu.data[0]).ok();
                 s.stone = std::mem::take(&mut menu.stone);
                 if input_changed {
-                s.stonecutter_changed();
+                    s.stonecutter_changed();
                 }
             }
             for sound in sounds.into_iter().filter(|_| !predicting) {

@@ -9093,7 +9093,10 @@ impl Game<'_> {
                 let capture_gpu = self.profile.gpu();
                 let recording = capture_gpu != GpuSwitch::Off;
                 renderer.set_pass_timing(
-                    debug_passes || self.gpu_passes || recording || crate::performance::gpu_profile(),
+                    debug_passes
+                        || self.gpu_passes
+                        || recording
+                        || crate::performance::gpu_profile(),
                 );
                 renderer.set_keep_timed_frames(recording);
                 renderer.set_pass_detail(self.gpu_pass_detail || capture_gpu == GpuSwitch::Detail);

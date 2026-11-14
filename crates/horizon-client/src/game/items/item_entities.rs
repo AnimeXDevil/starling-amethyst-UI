@@ -82,9 +82,9 @@ impl Game<'_> {
                     item,
                     escape_speed,
                     &nearby,
-                false,
-                &mut |splash| entered.push(splash),
-            );
+                    false,
+                    &mut |splash| entered.push(splash),
+                );
                 (no_physics, alive, discarded, entered)
             };
             let (no_physics, alive, discarded, entered) = match moves.take(i, item, &mut at_turn) {

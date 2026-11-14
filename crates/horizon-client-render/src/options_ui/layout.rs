@@ -398,13 +398,13 @@ impl OptionsUi {
                             .collect()
                     } else {
                         key_conflicts(
-                        s,
-                        "",
-                        name,
-                        s.keys.get(name),
-                        0,
-                        crate::mod_list::KeyConflictContext::Universal,
-                        s.keys.is_default(name),
+                            s,
+                            "",
+                            name,
+                            s.keys.get(name),
+                            0,
+                            crate::mod_list::KeyConflictContext::Universal,
+                            s.keys.is_default(name),
                         )
                     };
                     if !conflicts.is_empty() {
@@ -460,9 +460,9 @@ impl OptionsUi {
                         if (keypad && !s.keypad.bindings.contains_key(name))
                             || (!keypad && s.keys.is_default(name))
                         {
-                        inactive(reset)
-                    } else {
-                        reset
+                            inactive(reset)
+                        } else {
+                            reset
                         },
                     );
                     y += 20.0;

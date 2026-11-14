@@ -366,14 +366,14 @@ impl OptionsUi {
                             ui::sprite_sized(batch, atlas, icon, wd.x, wd.y, wd.w, wd.h, u32::MAX)
                         }
                         None => ui::focused_button(
-                        batch,
-                        atlas,
-                        [wd.x, wd.y, wd.w, wd.h],
-                        label,
-                        *active,
-                        pointer_over,
-                        is_focused,
-                        matches!(act, Act::Done).then_some(crate::widgets::Action::Done),
+                            batch,
+                            atlas,
+                            [wd.x, wd.y, wd.w, wd.h],
+                            label,
+                            *active,
+                            pointer_over,
+                            is_focused,
+                            matches!(act, Act::Done).then_some(crate::widgets::Action::Done),
                         ),
                     }
                     crate::widgets::last_narratable(|n| {

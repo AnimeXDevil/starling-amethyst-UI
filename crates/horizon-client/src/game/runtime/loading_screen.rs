@@ -339,8 +339,13 @@ impl Loading {
             .options
             .as_ref()
             .map_or_else(Vec::new, |options| pack_finders::data_packs(&options.mods));
-        self.menu
-            .set_root(root, gui.source.clone(), &self.settings, additional.into(), &gui.splashes);
+        self.menu.set_root(
+            root,
+            gui.source.clone(),
+            &self.settings,
+            additional.into(),
+            &gui.splashes,
+        );
         self.gui = Some(gui);
         self.setup.starting = false;
         self.title_drawn = false;

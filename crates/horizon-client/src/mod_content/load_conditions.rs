@@ -553,7 +553,15 @@ pub fn resource_root_with_conditions(
     inventory: &horizon_mod_package::enabled::EnabledMods,
     conditions: &horizon_world::conditions::LoadConditions,
 ) -> Result<PathBuf> {
-    resource_root_noting_build(base, jar_store, mods, cache, inventory, conditions, &mut || {})
+    resource_root_noting_build(
+        base,
+        jar_store,
+        mods,
+        cache,
+        inventory,
+        conditions,
+        &mut || {},
+    )
 }
 
 /// [`resource_root_with_conditions`], calling `on_build` before a build (none when the root is
