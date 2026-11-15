@@ -29,6 +29,12 @@ pub(super) struct MobileControls {
     was_in_menu: Option<bool>,
 }
 
+/// Whether the touch controls draw: their menu state `drawn` is this frame's `now` (not one
+/// from before the screen changed), and they are either the menu's or a world's (`in_world`).
+fn controls_drawn(now: bool, drawn: bool, in_world: bool) -> bool {
+    now == drawn && (now || in_world)
+}
+
 impl Game<'_> {
     pub(in crate::game) fn mobile_keypad_key(
         &mut self,
@@ -355,7 +361,16 @@ impl Game<'_> {
         // would add Horizon's own editor (Done, Grid, Add buttons...) under its canvas, seen
         // through it but never reached by a touch.
         if tc.editor.is_none() {
-            tc.draw(b, &self.gui.atlas);
+            // Not before `mobile_frame` has set the controls' menu state for this screen, and
+            // not off a world: the handoff from the loading screen to the title has no screen
+            // and no player for a few frames, and drew the in-world controls over it.
+            if controls_drawn(
+                self.pad_in_menu(),
+                tc.in_menu,
+                self.screen == Screen::Playing && self.player.is_some(),
+            ) {
+                tc.draw(b, &self.gui.atlas);
+            }
             ui::draw_goy_hud(
                 tc,
                 b,
@@ -2142,5 +2157,25 @@ impl Game<'_> {
             | Class::Lectern => true,
             _ => false,
         })
+    }
+}
+
+#[cfg(test)]
+mod controls_drawn_tests {
+    use super::controls_drawn;
+
+    #[test]
+    fn the_in_world_controls_do_not_draw_outside_a_world() {
+        // The loading screen's handoff: no menu yet, no player.
+        assert!(!controls_drawn(false, false, false));
+        // A frame before the controls learned the title is a menu.
+        assert!(!controls_drawn(true, false, false));
+        assert!(!controls_drawn(false, true, true));
+    }
+
+    #[test]
+    fn the_controls_draw_in_a_world_and_in_a_menu() {
+        assert!(controls_drawn(false, false, true));
+        assert!(controls_drawn(true, true, false));
     }
 }
