@@ -1,5 +1,9 @@
 //! Gson's HTML-safe string escaping and lenient JSON reader.
 
+// Starling: the Java number formatting lived here until the fork moved it to horizon-core; the website's native
+// mods, made for Horizon's API, still name it `horizon_client::java_text::format_fixed` and so on.
+pub use horizon_core::java_number::{double_to_string, float_to_string, format_fixed, format_fixed2};
+
 /// Gson's default (HTML-safe) JSON string literal.
 pub fn gson_string(value: &str) -> String {
     let mut out = String::from("\"");

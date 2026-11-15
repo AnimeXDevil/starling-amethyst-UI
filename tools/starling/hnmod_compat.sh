@@ -61,8 +61,8 @@ CARGO_TARGET_DIR=$work/materialize-target cargo run --quiet --locked --offline \
   --manifest-path "$work/source/Cargo.toml" -p horizon-mod-api-gen --bin horizon-materialize \
   -- "$work/source" > "$out/logs/_materialize.log" 2>&1 \
   || { tail -20 "$out/logs/_materialize.log"; fail "horizon-materialize failed"; }
-python3 "$work/source/packaging/android/native_parent_paths.py" "$work/source" > "$out/logs/_parent_paths.log" 2>&1 \
-  || { cat "$out/logs/_parent_paths.log"; fail "native_parent_paths.py failed"; }
+python3 "$work/source/packaging/android/native_mixins_source.py" "$work/source" > "$out/logs/_mixins_source.log" 2>&1 \
+  || { cat "$out/logs/_mixins_source.log"; fail "native_mixins_source.py failed"; }
 
 errors() { grep -E '^[^ ]*: *error|^error' "$1" | grep -vE 'could not compile|aborting due to' | cut -c1-200 | head -n 3 | paste -sd'|'; }
 why() {  # horizon-mixins' first diagnostics, else the log's end

@@ -82,9 +82,10 @@ cargo fetch --locked --manifest-path "$work/source/Cargo.toml" > /dev/null
 CARGO_TARGET_DIR=$cache/materialize-target cargo run --quiet --locked --offline \
   --manifest-path "$work/source/Cargo.toml" -p horizon-mod-api-gen --bin horizon-materialize \
   -- "$work/source"
-# horizon-mixins refuses a module named through a parent folder (`#[path = "../x.rs"]`): those files move next
-# to the module that names them, in this copy (native_parent_paths.py).
-python3 "$source/packaging/android/native_parent_paths.py" "$work/source"
+# What horizon-mixins refuses in the fork's source, made readable in this copy (native_mixins_source.py): modules
+# named through a parent folder (`#[path = "../x.rs"]`) move next to their module, and the prebuilt game's
+# `#[replaceable]` markers (an attribute macro that changes nothing) go.
+python3 "$source/packaging/android/native_mixins_source.py" "$work/source"
 
 # The bundles, each pinned to the commit built here when it pins one (Starling's commits are not
 # Horizon's; a mod that calls what Starling changed fails in the compiler).
