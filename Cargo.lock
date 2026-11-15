@@ -1780,6 +1780,10 @@ name = "horizon-android"
 version = "0.1.0"
 dependencies = [
  "horizon-client",
+ "horizon-engine-slots",
+ "horizon-mod-api",
+ "horizon-mod-points",
+ "horizon-mod-render",
  "jni 0.21.1",
  "winit",
 ]

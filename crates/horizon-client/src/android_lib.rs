@@ -26,7 +26,33 @@ pub unsafe extern "C" fn starling_on_create(
 /// android-activity's entry point calls it on the game's thread.
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
-    horizon_client::android::main(app);
+    horizon_client::android::main(app, install_platform);
+}
+
+/// What the desktop's mod host installs before the engine starts (horizon-mod-host's `main_with`,
+/// crates/horizon-mod-host/src/loading.rs), in its order: the engine's seal, the mods'
+/// instrumentation, the engine platform socket (packages, registration data, parts, profiler) and
+/// the render points. The phone starts the engine from here instead of through that host, which
+/// also loads wasm mods (a phone has none); without these the game stops at its first mod guard
+/// ("engine platform socket is not installed").
+fn install_platform() -> Result<(), String> {
+    horizon_engine_slots::install_seal(mod_points::__private::seal)
+        .map_err(|error| format!("engine seal: {error}"))?;
+    mod_platform::__private::initialize()
+        .map_err(|error| format!("mod instrumentation is unavailable: {error}"))?;
+    horizon_engine_slots::install_platform(horizon_engine_slots::Platform {
+        install_packages: mod_platform::__private::install_packages,
+        install_registration_data: mod_platform::__private::install_registration_data,
+        install_parts: mod_platform::__private::install_parts,
+        profiler_is_enabled: mod_platform::__private::profiler::is_enabled,
+        profiler_start: mod_platform::__private::profiler::start,
+        profiler_stop: mod_platform::__private::profiler::stop,
+        profiler_summary: mod_platform::__private::profiler::summary,
+        profiler_firefox_profile: mod_platform::__private::profiler::firefox_profile,
+    })
+    .map_err(|error| error.to_string())?;
+    mod_render::render::install();
+    Ok(())
 }
 
 /// `StarlingActivity.onStorage`, called on the UI thread before the game's thread starts.

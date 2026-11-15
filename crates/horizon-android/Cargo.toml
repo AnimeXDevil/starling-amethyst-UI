@@ -18,6 +18,11 @@ path = "../horizon-client/src/android_lib.rs"
 # `horizon-extras`, as the desktop's default: Options' Horizon Settings and Mods, Play with Friends
 # and the cosmetics, which 0.8.0 had before Horizon put them behind the feature.
 horizon-client = { path = "../horizon-client", default-features = false, features = ["horizon-extras"] }
+# What the desktop's mod host installs before the engine starts (android_lib.rs `install_platform`).
+horizon-engine-slots = { path = "../horizon-engine-slots" }
+mod_platform = { package = "horizon-mod-api", path = "../horizon-mod-api" }
+mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
+mod_render = { package = "horizon-mod-render", path = "../horizon-mod-render" }
 # The NativeActivity glue (android-activity): `android_main` gets the app.
 winit = { version = "0.30.13", features = ["android-native-activity"] }
 jni = "0.21.1"

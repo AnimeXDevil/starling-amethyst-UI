@@ -1235,7 +1235,8 @@ static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// The process's start-up, from the cdylib's `android_main`: the game folder, the environment
 /// (`HORIZON_HOME`, `HORIZON_PRIVATE`, `horizon-args.txt`'s), the platform hooks, then the game as
 /// the desktop binary starts it (`entry::start`), and the activity's end.
-pub fn main(app: AndroidApp) {
+/// `platform` installs what the engine needs from the platform before it starts (android_lib.rs).
+pub fn main(app: AndroidApp, platform: fn() -> Result<(), String>) {
     // winit's event loop is made once a process. Android can start a new activity in a process
     // the game is ending (a restart into a world with other mods did: "EventLoop can't be
     // recreated", reported as a crash): end it at once, and the activity's next start is fresh.
@@ -1322,6 +1323,10 @@ pub fn main(app: AndroidApp) {
         crate::accounts::resume();
         winit::platform::android::set_input_hook(input::hook);
     });
+    // The engine's seal, the mods' instrumentation and platform socket, before anything registers.
+    if let Err(error) = platform() {
+        panic!("Horizon: {error}");
+    }
     // No code mods on a phone: the native set is empty and nothing registers.
     crate::entry::start(
         Default::default(),
