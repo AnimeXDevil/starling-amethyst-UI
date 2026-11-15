@@ -1400,6 +1400,8 @@ pub struct Renderer {
     solid_settled_single: Option<wgpu::RenderPipeline>,
     settled_single_on: bool,
     pub settled_single_active: bool,
+    solid_paths_sdr: Option<solid_paths::SolidPaths>,
+    pub cutout_sdr_on: bool,
     translucent: wgpu::RenderPipeline,
     translucent_mark: wgpu::RenderPipeline,
     /// Flat section draws (`flat`), where multi-draw is emulated.
@@ -5357,24 +5359,29 @@ impl Renderer {
         if let (Some(flat), Some(arena)) = (&mut flat, &translucent_arena) {
             flat.set_translucent_page_vertices(arena.page_vertices());
         }
-        let solid_paths = adreno::adreno_vulkan(&adapter.get_info())
-            .then(|| {
-                solid_paths::SolidPaths::new(
-                    &adreno::TerrainModule {
-                        kept: &kept,
-                        shader: &shader,
-                        format: frame_format,
-                        constants: &sprite_constants,
-                    },
-                    &bindings,
-                    &layout,
-                    flat.as_ref().map(|flat| &flat.draw_layout),
-                    &terrain_buffers,
-                    // With flat draws the solid draws read the pages, as `solid_opaque` above.
-                    flat.is_some(),
-                )
-            })
-            .flatten();
+        let make_solid_paths = |constants: &[(&str, f64)], cutout_fragment: &str| {
+            adreno::adreno_vulkan(&adapter.get_info())
+                .then(|| {
+                    solid_paths::SolidPaths::new(
+                        &adreno::TerrainModule {
+                            kept: &kept,
+                            shader: &shader,
+                            format: frame_format,
+                            constants,
+                        },
+                        cutout_fragment,
+                        &bindings,
+                        &layout,
+                        flat.as_ref().map(|flat| &flat.draw_layout),
+                        &terrain_buffers,
+                        // With flat draws the solid draws read the pages, as `solid_opaque` above.
+                        flat.is_some(),
+                    )
+                })
+                .flatten()
+        };
+        let solid_paths = make_solid_paths(&sprite_constants, "fs_cutout_static");
+        let solid_paths_sdr = make_solid_paths(&plain_constants, "fs_cutout_static_sdr");
         let solid_settled_single = (cfg!(target_os = "android")
             && info.backend == wgpu::Backend::Vulkan
             && info.vendor == 0x13b5
@@ -5546,6 +5553,8 @@ impl Renderer {
             solid_settled_single,
             settled_single_on: true,
             settled_single_active: false,
+            solid_paths_sdr,
+            cutout_sdr_on: true,
             translucent,
             translucent_mark,
             flat_on: flat.is_some(),
@@ -6161,6 +6170,9 @@ impl Renderer {
             None if on => return Err("the cheaper terrain shaders are off on this device".into()),
             None => {}
         }
+        if let Some(paths) = &mut self.solid_paths_sdr {
+            paths.static_cutout_on = on;
+        }
         Ok(())
     }
     /// Whether frames that may take it draw whole sections through less work (`solid_paths`).
@@ -6177,6 +6189,9 @@ impl Renderer {
             Some(paths) => paths.settled_on = on,
             None if on => return Err("the cheaper terrain shaders are off on this device".into()),
             None => {}
+        }
+        if let Some(paths) = &mut self.solid_paths_sdr {
+            paths.settled_on = on;
         }
         Ok(())
     }
@@ -11211,9 +11226,11 @@ impl Renderer {
         // Elsewhere the second pass would double the solid draw calls and vertex work.
         let split_solid = splits_solid(&self.info);
         // What this frame's instances allow its two solid passes (`solid_paths`).
-        let solid_passes = self
-            .solid_paths
-            .as_ref()
+        let sdr_paths = (self.cutout_sdr_on && !hdr)
+            .then_some(self.solid_paths_sdr.as_ref())
+            .flatten();
+        let solid_passes = sdr_paths
+            .or(self.solid_paths.as_ref())
             .filter(|_| split_solid && self.native.is_none() && self.pack_post.is_none())
             .filter(|_| cull.is_none())
             .map_or_else(Default::default, |paths| {

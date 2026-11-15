@@ -469,6 +469,16 @@ impl Game<'_> {
                 }
                 Ok(Some(json!({ "enabled": renderer.flat_quad_cache_on })))
             }
+            "cutout-sdr" => {
+                let renderer = self.renderer.as_mut().ok_or("no renderer")?;
+                match words.get(1).copied() {
+                    None => {}
+                    Some("on") => renderer.cutout_sdr_on = true,
+                    Some("off") => renderer.cutout_sdr_on = false,
+                    Some(_) => return Err("cutout-sdr [on|off]".into()),
+                }
+                Ok(Some(json!({ "enabled": renderer.cutout_sdr_on })))
+            }
             "section-cull" => {
                 let r = self.renderer.as_mut().ok_or("no renderer")?;
                 match words.get(1).copied() {

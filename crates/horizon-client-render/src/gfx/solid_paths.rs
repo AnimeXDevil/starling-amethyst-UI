@@ -106,6 +106,7 @@ impl SolidPaths {
     /// Otherwise they take `buffers`, the vertices and the origins (`vs_terrain*`).
     pub fn new(
         terrain: &TerrainModule<'_>,
+        cutout_fragment: &str,
         bindings: &wgpu::BindGroupLayout,
         layout: &wgpu::PipelineLayout,
         flat_bindings: Option<&wgpu::BindGroupLayout>,
@@ -157,7 +158,7 @@ impl SolidPaths {
             &source,
             ("Settled terrain cutout", "Settled terrain cutout (flat)"),
             "cutout",
-            "fs_cutout_static",
+            cutout_fragment,
         );
         Some(Self {
             settled: settled_opaque.zip(settled_cutout).map(<[Pass; 2]>::from),
@@ -170,7 +171,7 @@ impl SolidPaths {
                     "Terrain cutout without fades (flat)",
                 ),
                 "cutout",
-                "fs_cutout_static",
+                cutout_fragment,
             )?,
             static_cutout_on: true,
         })
