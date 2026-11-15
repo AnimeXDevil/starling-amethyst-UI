@@ -414,19 +414,29 @@ pub enum FrameGeneration {
     Off,
     /// AMD FidelityFX Super Resolution 3.1's frame interpolation, ported to WGSL.
     Fsr31,
+    /// One pass that moves the two real frames halfway along the camera's and the
+    /// entities' motion (`gfx/frame_gen/reproject.wgsl`): for phones, where FSR 3.1's
+    /// passes cost more than the frame.
+    Fast,
 }
 impl FrameGeneration {
-    pub const ALL: [FrameGeneration; 2] = [FrameGeneration::Off, FrameGeneration::Fsr31];
+    pub const ALL: [FrameGeneration; 3] = [
+        FrameGeneration::Off,
+        FrameGeneration::Fast,
+        FrameGeneration::Fsr31,
+    ];
     pub fn name(self) -> &'static str {
         match self {
             FrameGeneration::Off => "off",
             FrameGeneration::Fsr31 => "fsr3.1",
+            FrameGeneration::Fast => "fast",
         }
     }
     pub fn label(self) -> &'static str {
         match self {
             FrameGeneration::Off => "Off",
             FrameGeneration::Fsr31 => "FSR 3.1",
+            FrameGeneration::Fast => "Fast",
         }
     }
     fn parse(s: &str) -> Self {

@@ -7166,12 +7166,16 @@ impl Renderer {
     pub fn frame_generation_share(&self) -> Option<f32> {
         self.frame_gen.made_share
     }
-    /// Frame generation on or off (FSR 3.1's frame interpolation).
-    pub fn set_frame_generation(&mut self, on: bool) {
-        if !on {
+    /// Frame generation off, FSR 3.1's frame interpolation, or the fast reprojection.
+    pub fn set_frame_generation(&mut self, mode: crate::graphics::FrameGeneration) {
+        use crate::graphics::FrameGeneration;
+        let on = mode != FrameGeneration::Off;
+        let fast = mode == FrameGeneration::Fast;
+        if !on || fast != self.frame_gen.fast {
             self.frame_gen.stop();
         }
         self.frame_gen.on = on;
+        self.frame_gen.fast = fast;
     }
     /// `upscale`: output pixels per rendered pixel, for TAA to rebuild (1: native).
     /// `sharpness`: how much TAA's upscaled picture is sharpened, 0..=1.

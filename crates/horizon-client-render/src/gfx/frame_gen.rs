@@ -10,6 +10,7 @@
 mod interpolation;
 mod motion;
 mod optical_flow;
+mod reproject;
 
 use glam::{DMat4, DVec3, Mat4};
 use std::{
@@ -45,6 +46,9 @@ fn debug() -> Option<&'static str> {
 
 pub struct FrameGen {
     pub on: bool,
+    /// The made frame comes from one reprojection pass (`FrameGeneration::Fast`), not
+    /// FSR 3.1's optical flow and interpolation.
+    pub fast: bool,
     /// The present thread failed to show a frame (or died): until the renderer has
     /// acquired a frame itself, the normal path runs and handles the surface.
     pub paused: bool,
@@ -71,11 +75,31 @@ pub struct FrameGen {
     pub made_share: Option<f32>,
 }
 
+/// What makes the frame between two real ones.
+enum Made {
+    /// FSR 3.1: optical flow, then its interpolation.
+    Fsr {
+        flow: optical_flow::OpticalFlow,
+        interpolation: interpolation::Interpolation,
+    },
+    /// One reprojection pass.
+    Fast(reproject::Reproject),
+}
+
+impl Made {
+    fn output(&self) -> &wgpu::TextureView {
+        match self {
+            Made::Fsr { interpolation, .. } => interpolation.output(),
+            Made::Fast(fast) => fast.output(),
+        }
+    }
+}
+
 /// What runs on the GPU for one screen size.
 struct Gpu {
     size: [u32; 2],
-    flow: optical_flow::OpticalFlow,
-    interpolation: interpolation::Interpolation,
+    fast: bool,
+    made: Made,
     /// This frame's world at the screen's size, and bindings that copy it or the
     /// interpolation's output (`Post::finish_with`).
     world: wgpu::TextureView,
@@ -104,6 +128,7 @@ impl FrameGen {
     pub fn new() -> Self {
         Self {
             on: false,
+            fast: false,
             paused: false,
             gpu: None,
             presenter: None,
@@ -249,7 +274,12 @@ impl FrameGen {
         config: &wgpu::SurfaceConfiguration,
     ) -> wgpu::TextureView {
         let size = [config.width, config.height];
-        if self.gpu.as_ref().is_none_or(|g| g.size != size) {
+        let fast = self.fast;
+        if self
+            .gpu
+            .as_ref()
+            .is_none_or(|g| g.size != size || g.fast != fast)
+        {
             let world = device
                 .create_texture(&wgpu::TextureDescriptor {
                     label: Some("Frame generation world"),
@@ -269,13 +299,20 @@ impl FrameGen {
                     view_formats: &[],
                 })
                 .create_view(&Default::default());
-            let interpolation = interpolation::Interpolation::new(device, size);
+            let made = if fast {
+                Made::Fast(reproject::Reproject::new(device, size))
+            } else {
+                Made::Fsr {
+                    flow: optical_flow::OpticalFlow::new(device, size),
+                    interpolation: interpolation::Interpolation::new(device, size),
+                }
+            };
             self.gpu = Some(Gpu {
                 size,
-                flow: optical_flow::OpticalFlow::new(device, size),
+                fast,
                 world_group: post.bind(device, &world),
-                output_group: post.bind(device, interpolation.output()),
-                interpolation,
+                output_group: post.bind(device, made.output()),
+                made,
                 world,
                 reset: true,
             });
@@ -315,26 +352,47 @@ impl FrameGen {
                 camera.view_proj,
                 reproject * camera.view_proj,
             );
-        gpu.flow.dispatch(device, queue, encoder, &gpu.world, reset);
-        gpu.interpolation.dispatch(
-            device,
-            queue,
-            encoder,
-            &interpolation::Inputs {
-                color: &gpu.world,
-                depth: &camera.depth,
-                render_size: camera.render_size,
-                jitter: camera.jitter,
-                reproject,
-                object_motion: &object_motion,
-                near: camera.near,
-                far: camera.far,
-                fov_y: camera.fov_y,
-                reset,
-                flow_vectors: gpu.flow.vectors(),
-                scene_change: gpu.flow.scene_change(),
-            },
-        );
+        match &mut gpu.made {
+            Made::Fsr {
+                flow,
+                interpolation,
+            } => {
+                flow.dispatch(device, queue, encoder, &gpu.world, reset);
+                interpolation.dispatch(
+                    device,
+                    queue,
+                    encoder,
+                    &interpolation::Inputs {
+                        color: &gpu.world,
+                        depth: &camera.depth,
+                        render_size: camera.render_size,
+                        jitter: camera.jitter,
+                        reproject,
+                        object_motion: &object_motion,
+                        near: camera.near,
+                        far: camera.far,
+                        fov_y: camera.fov_y,
+                        reset,
+                        flow_vectors: flow.vectors(),
+                        scene_change: flow.scene_change(),
+                    },
+                );
+            }
+            Made::Fast(fast) => fast.dispatch(
+                device,
+                queue,
+                encoder,
+                &reproject::Inputs {
+                    color: &gpu.world,
+                    depth: &camera.depth,
+                    object_motion: &object_motion,
+                    render_size: camera.render_size,
+                    jitter: camera.jitter,
+                    reproject,
+                    reset,
+                },
+            ),
+        }
         gpu.reset = false;
         if debug() == Some("motion") {
             post.finish_with(encoder, generated, &post.bind(device, &object_motion), None);

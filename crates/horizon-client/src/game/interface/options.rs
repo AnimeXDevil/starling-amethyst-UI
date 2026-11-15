@@ -756,9 +756,7 @@ impl Game<'_> {
                 s.horizon.upscaling.ratio(),
                 s.horizon.upscaling_sharpness as f32 / 100.0,
             );
-            r.set_frame_generation(
-                s.horizon.frame_generation != horizon_client::graphics::FrameGeneration::Off,
-            );
+            r.set_frame_generation(s.horizon.frame_generation);
             r.set_hdr_lighting(s.horizon.hdr_lighting);
             // Where it is offered (`Renderer::gpu_culling_offer`); unchanged, it does nothing.
             // Auto has it on while its measurements say so (`GpuCullingAuto`), and starts over
