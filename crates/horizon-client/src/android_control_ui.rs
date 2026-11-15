@@ -8258,7 +8258,10 @@ mod tests {
             // The "...": drawn clear of the strips, hit by `action` in the same layout.
             draw_between_strips(&mut batch, left, right, |b| ui.draw(b, &atlas, false));
             let [x0, y0, x1, y1] = bounds(&batch, 0);
-            assert!(x0 >= left, "inset {inset}: the key keeps out of the left strip");
+            assert!(
+                x0 >= left,
+                "inset {inset}: the key keeps out of the left strip"
+            );
             let centre = [(x0 + x1) / 2.0 * scale, (y0 + y1) / 2.0 * scale];
             let p = point_between_strips(centre, scale, left);
             assert!(
@@ -8293,7 +8296,10 @@ mod tests {
             for phase in [TouchPhase::Started, TouchPhase::Ended] {
                 ui.floating_menu_touch(&mut hit, &atlas, 1, phase, p, &mut settings);
             }
-            assert!(ui.floating_menu, "inset {inset}: a tap on the drawn \"H\" misses it");
+            assert!(
+                ui.floating_menu,
+                "inset {inset}: a tap on the drawn \"H\" misses it"
+            );
             ui.floating_menu = false;
         }
     }

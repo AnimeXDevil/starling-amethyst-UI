@@ -380,6 +380,13 @@ impl Game<'_> {
             );
             // Out of the camera cutout's strips with the controls (#166), the hub with the keys
             // beside it; `android_aux_touch` and `floating_menu_touch` read them there.
+            note_hub_layout(
+                "draw",
+                b.scale,
+                self.safe_gui_insets(b.scale),
+                b.width,
+                self.mobile.ui.utility_offset_y,
+            );
             self.draw_clear_of_cutout(b, |b, _| {
                 self.mobile.ui.draw(b, &self.gui.atlas, self.pad_in_menu());
                 self.mobile
@@ -1290,6 +1297,13 @@ impl Game<'_> {
         // utility keys (#166).
         let [left, _, right, _] = self.safe_gui_insets(b.scale);
         b.width = (b.width - left - right).max(0.0);
+        note_hub_layout(
+            "hit",
+            b.scale,
+            self.safe_gui_insets(b.scale),
+            b.width,
+            self.mobile.ui.utility_offset_y,
+        );
         let p = horizon_client::android_control_ui::point_between_strips(
             [t.location.x as f32, t.location.y as f32],
             b.scale,
@@ -2178,5 +2192,22 @@ mod controls_drawn_tests {
     fn the_controls_draw_in_a_world_and_in_a_menu() {
         assert!(controls_drawn(false, false, true));
         assert!(controls_drawn(true, true, false));
+    }
+}
+
+/// Logs the hub's layout inputs where it is drawn (`side` "draw") and where a touch is tested
+/// against it ("hit") when they change: the "H" and "..." buttons were drawn and hit apart on a
+/// phone with a camera cutout after sync 7, with no cause found in the code. Each side logs once
+/// per change, so the log shows what differs between the two.
+fn note_hub_layout(side: &'static str, scale: f32, insets: [f32; 4], width: f32, offset: f32) {
+    static LAST: std::sync::Mutex<[Option<String>; 2]> = std::sync::Mutex::new([None, None]);
+    let line = format!("scale {scale} insets {insets:?} width {width} utility offset {offset}");
+    let slot = usize::from(side == "hit");
+    let mut last = LAST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if last[slot].as_deref() != Some(line.as_str()) {
+        log::info!("Horizon: touch hub {side}: {line}");
+        last[slot] = Some(line);
     }
 }
