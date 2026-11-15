@@ -540,6 +540,7 @@ impl<'a> Pipelines<'a> {
         };
         let paths = SolidPaths::new(
             &terrain,
+            "fs_cutout_static",
             &gpu.bindings,
             &gpu.layout,
             gpu.flat_bindings.as_ref(),
@@ -610,6 +611,7 @@ impl<'a> Pipelines<'a> {
             Pulled {
                 paths: SolidPaths::new(
                     &terrain,
+                    "fs_cutout_static",
                     &gpu.bindings,
                     &gpu.layout,
                     Some(pages),

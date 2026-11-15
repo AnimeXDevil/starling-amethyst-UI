@@ -444,12 +444,41 @@ impl Game<'_> {
                 match words.get(1).copied() {
                     None => {}
                     Some("flat") => r.set_flat_draws(true)?,
-                    Some("indirect") => r.set_flat_draws(false)?,
+                    Some("indirect") => {
+                        r.set_flat_draws(false)?;
+                        r.set_indirect_draws(true);
+                    }
+                    Some("direct") => {
+                        r.set_flat_draws(false)?;
+                        r.set_indirect_draws(false);
+                    }
                     Some(other) => return Err(format!("unknown section draw mode {other}").into()),
                 }
-                Ok(Some(json!({ "ok": true, "flat": r.flat_draws() })))
+                Ok(Some(
+                    json!({ "ok": true, "flat": r.flat_draws(), "indirect": r.indirect_draws() }),
+                ))
             }
             "static-cutout" => self.static_cutout_command(&words),
+            "flat-quad-cache" => {
+                let renderer = self.renderer.as_mut().ok_or("no renderer")?;
+                match words.get(1).copied() {
+                    None => {}
+                    Some("on") => renderer.flat_quad_cache_on = true,
+                    Some("off") => renderer.flat_quad_cache_on = false,
+                    Some(_) => return Err("flat-quad-cache [on|off]".into()),
+                }
+                Ok(Some(json!({ "enabled": renderer.flat_quad_cache_on })))
+            }
+            "cutout-sdr" => {
+                let renderer = self.renderer.as_mut().ok_or("no renderer")?;
+                match words.get(1).copied() {
+                    None => {}
+                    Some("on") => renderer.cutout_sdr_on = true,
+                    Some("off") => renderer.cutout_sdr_on = false,
+                    Some(_) => return Err("cutout-sdr [on|off]".into()),
+                }
+                Ok(Some(json!({ "enabled": renderer.cutout_sdr_on })))
+            }
             "section-cull" => {
                 let r = self.renderer.as_mut().ok_or("no renderer")?;
                 match words.get(1).copied() {

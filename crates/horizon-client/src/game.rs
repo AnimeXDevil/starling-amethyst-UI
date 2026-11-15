@@ -2678,6 +2678,8 @@ struct Game<'a> {
     /// (game/input_mode.rs).
     input_mode: horizon_client::input_mode::InputMode,
     frames: u64,
+    /// The last frame's blurred menu could be kept (`Game::menu_blur_cache`).
+    menu_blur_kept: bool,
     /// The glint clock and options, read once at the start of each frame
     /// (game/interface/item_draw.rs).
     glint_frame: horizon_client::item_render::GlintFrame,
@@ -3168,6 +3170,8 @@ struct Game<'a> {
     frame_graph: horizon_client::perf_overlay::FrameGraph,
     /// The Stats overlay's sampler and caches (game/perf.rs).
     stats_overlay: perf::Perf,
+    /// Starling's performance test: draw choices and each setup's averages (perf_lab.rs).
+    perf_lab: perf_lab::PerfLab,
     /// Files handed to the game from outside (game/imports.rs).
     imports: imports::Imports,
     /// The offer of the Starling folder in shared storage (game/files_offer.rs).
@@ -15068,9 +15072,11 @@ impl Game<'_> {
                 .facts()
                 .get(self.world.block(block[0], block[1], block[2]))
                 .solid_render;
+        let (menu_blur_cache, kept_menu) = self.menu_blur_cache();
         // The cave culling search runs on its worker while the frame is prepared.
         if cave_culling
             && self.title.is_none()
+            && !kept_menu
             && let Some(renderer) = self.renderer.as_mut()
         {
             horizon_client::spans::time("occlusion", || {
@@ -15447,7 +15453,7 @@ impl Game<'_> {
         } else {
             self.shader_pack_inputs(camera, alpha as f32, &sky)
         };
-        if !title {
+        if !title && !kept_menu {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
                     self.entity_geometry(camera, alpha, billboard_frustum, entities)
@@ -15719,6 +15725,7 @@ impl Game<'_> {
                 .boss_overlay
                 .darken_amount(self.clock.fraction() as f32),
             menu_blur: self.menu_blur(),
+            menu_blur_cache,
             post_effects: horizon_client::post_chain::Request {
                 effects: &requested_post_effects,
                 root: &self.pack.source,
@@ -16498,6 +16505,7 @@ impl<'a> Game<'a> {
             mobile: Default::default(),
             input_mode: horizon_client::input_mode::InputMode::first(cfg!(target_os = "android")),
             frames: 0,
+            menu_blur_kept: false,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
             prepared_model_draws: Default::default(),
@@ -16788,6 +16796,7 @@ impl<'a> Game<'a> {
             pending_uploads: Vec::new(),
             frame_graph: Default::default(),
             stats_overlay: Default::default(),
+            perf_lab: Default::default(),
             imports: Default::default(),
             #[cfg(target_os = "android")]
             files_offer: Default::default(),

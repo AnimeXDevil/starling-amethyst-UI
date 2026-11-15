@@ -312,6 +312,40 @@ fn translucent_batchable(info: &wgpu::AdapterInfo, multi_draw: bool) -> bool {
     multi_draw && info.backend != wgpu::Backend::Gl
 }
 
+/// The present mode a new window's swapchain starts with, until the game applies VSync and the
+/// present-mode setting (`Renderer::set_present_mode`): Mailbox where the surface offers it.
+#[cfg(not(target_os = "android"))]
+fn first_present_mode(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
+    if modes.contains(&wgpu::PresentMode::Mailbox) {
+        wgpu::PresentMode::Mailbox
+    } else {
+        wgpu::PresentMode::Fifo
+    }
+}
+
+/// The present mode a new window's swapchain starts with, until the game applies VSync and the
+/// present-mode setting (`Renderer::set_present_mode`): Fifo on Android, where a Mali driver was
+/// seen stalling for seconds inside a Mailbox present before the first world frame, long enough
+/// for Android to report the app as not responding. Adapted from Vasysik/horizon-android
+/// (`Renderer::new_with_context`), MIT, copyright (c) 2026 Ludovic Marie and the Horizon
+/// contributors.
+#[cfg(target_os = "android")]
+fn first_present_mode(_modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
+    wgpu::PresentMode::Fifo
+}
+
+/// Whether sections are drawn with indirect multi-draws where the device takes them: not on
+/// Android, which draws each section with a call of its own instead (as OpenGL without indirect
+/// draws does), as Vasysik's Android fork does on every Android GPU (its commit 77b9e17f76,
+/// `multi_draw`): it measured per-section indirect draws at 46.05 ms of GPU against about 22 ms
+/// for direct ones on an Adreno 710. Frames drawn flat (`flat`: Adreno's Vulkan from 512
+/// sections, PowerVR's always) are not per-section draws at all. `horizon-ctl section-draws
+/// indirect` brings them back for an A/B check. Adapted from Vasysik/horizon-android, MIT,
+/// copyright (c) 2026 Ludovic Marie and the Horizon contributors.
+fn indirect_draws_wanted() -> bool {
+    !cfg!(target_os = "android")
+}
+
 /// Two solid passes only where a discard costs the GPU its hidden surface removal: Apple's tiled
 /// GPUs, behind Metal, and Adreno (Vasysik's Android fork measured 25-27% less GPU time on an
 /// Adreno 710). A Mali-G57 gained no GPU time from it, and PowerVR hasn't been measured. Elsewhere
@@ -1246,6 +1280,10 @@ pub struct Frame<'a> {
     /// `Screen.extractBlurredBackground`: blur the frame by this radius
     /// (`menuBackgroundBlurriness`) before the screen is drawn over it.
     pub menu_blur: Option<f32>,
+    /// The world under this blurred menu does not move (a paused single-player game): the
+    /// blurred frame may be kept, and once kept, drawn again in place of the world and the blur
+    /// (`Renderer::has_menu_blur_cache`).
+    pub menu_blur_cache: bool,
     /// `Options.chunkSectionFadeInTime`, in seconds: how long a section takes to fade in once
     /// uploaded (0 draws it whole at once).
     pub chunk_fade: f32,
@@ -1361,6 +1399,11 @@ pub struct Renderer {
     solid_cutout: SolidPipeline,
     /// Cheaper pipelines for those two passes, on Adreno's Vulkan (`solid_paths`).
     solid_paths: Option<solid_paths::SolidPaths>,
+    solid_settled_single: Option<wgpu::RenderPipeline>,
+    settled_single_on: bool,
+    pub settled_single_active: bool,
+    solid_paths_sdr: Option<solid_paths::SolidPaths>,
+    pub cutout_sdr_on: bool,
     translucent: wgpu::RenderPipeline,
     translucent_mark: wgpu::RenderPipeline,
     /// Flat section draws (`flat`), where multi-draw is emulated.
@@ -1373,6 +1416,7 @@ pub struct Renderer {
     visbuf: Option<visbuffer::Visbuffer>,
     /// `flat` draws this frame's sections (off: the per-section draws).
     flat_on: bool,
+    pub flat_quad_cache_on: bool,
     /// Occlusion culling of solid section draws, where the GPU's instance
     /// counts reach a multi-draw's entries (Vulkan, Metal).
     cull: Option<cull::Cull>,
@@ -1623,6 +1667,9 @@ pub struct Renderer {
     indirect_capacity: u64,
     /// Indirect draws may set `first_instance` (the section origin).
     pub multi_draw: bool,
+    /// The device takes indirect multi-draws, which `multi_draw` may still leave off
+    /// (`indirect_draws_wanted`, `set_indirect_draws`).
+    indirect_capable: bool,
     base_vertex: bool,
     /// Per-frame scratch, kept to avoid allocating every frame.
     visible: Vec<resident::Visible>,
@@ -5302,11 +5349,12 @@ impl Renderer {
             .get_downlevel_capabilities()
             .flags
             .contains(wgpu::DownlevelFlags::BASE_VERTEX);
-        let multi_draw = device
+        let indirect_capable = device
             .features()
             .contains(wgpu::Features::INDIRECT_FIRST_INSTANCE)
             && indirect_execution;
-        let batchable = translucent_batchable(&adapter.get_info(), multi_draw);
+        let multi_draw = indirect_capable && indirect_draws_wanted();
+        let batchable = translucent_batchable(&adapter.get_info(), indirect_capable);
         crate::graphics::offer_translucent_batching(batchable);
         let translucent_batching = batchable && translucent_batching;
         let gpu_culling_offer = gpu_culling::offer(
@@ -5344,24 +5392,70 @@ impl Renderer {
         if let (Some(flat), Some(arena)) = (&mut flat, &translucent_arena) {
             flat.set_translucent_page_vertices(arena.page_vertices());
         }
-        let solid_paths = adreno::adreno_vulkan(&adapter.get_info())
-            .then(|| {
-                solid_paths::SolidPaths::new(
-                    &adreno::TerrainModule {
-                        kept: &kept,
-                        shader: &shader,
-                        format: frame_format,
-                        constants: &sprite_constants,
-                    },
-                    &bindings,
-                    &layout,
-                    flat.as_ref().map(|flat| &flat.draw_layout),
-                    &terrain_buffers,
-                    // With flat draws the solid draws read the pages, as `solid_opaque` above.
-                    flat.is_some(),
-                )
-            })
-            .flatten();
+        let make_solid_paths = |constants: &[(&str, f64)], cutout_fragment: &str| {
+            adreno::adreno_vulkan(&adapter.get_info())
+                .then(|| {
+                    solid_paths::SolidPaths::new(
+                        &adreno::TerrainModule {
+                            kept: &kept,
+                            shader: &shader,
+                            format: frame_format,
+                            constants,
+                        },
+                        cutout_fragment,
+                        &bindings,
+                        &layout,
+                        flat.as_ref().map(|flat| &flat.draw_layout),
+                        &terrain_buffers,
+                        // With flat draws the solid draws read the pages, as `solid_opaque` above.
+                        flat.is_some(),
+                    )
+                })
+                .flatten()
+        };
+        let solid_paths = make_solid_paths(&sprite_constants, "fs_cutout_static");
+        let solid_paths_sdr = make_solid_paths(&plain_constants, "fs_cutout_static_sdr");
+        let solid_settled_single = (cfg!(target_os = "android")
+            && info.backend == wgpu::Backend::Vulkan
+            && info.vendor == 0x13b5
+            && !splits_solid(&info))
+        .then(|| {
+            let constants = [
+                plain_constants[0],
+                plain_constants[1],
+                plain_constants[2],
+                ("SETTLED_TERRAIN", 1.0),
+            ];
+            let terrain = adreno::TerrainModule {
+                kept: &kept,
+                shader: &shader,
+                format: frame_format,
+                constants: &constants,
+            };
+            let pulled_layout = flat.as_ref().map(|flat| {
+                kept.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Settled terrain layout (pulled)"),
+                    bind_group_layouts: &[Some(&bindings), Some(&flat.draw_layout)],
+                    ..Default::default()
+                })
+            });
+            let origins = [None, terrain_buffers[1].clone()];
+            let (layout, vertex, buffers) = match pulled_layout.as_ref() {
+                Some(layout) => (layout, "vs_section", origins.as_slice()),
+                None => (&layout, "vs_terrain", terrain_buffers.as_slice()),
+            };
+            terrain.pipeline(
+                layout,
+                "Settled terrain single pass",
+                vertex,
+                "fs_cutout_static",
+                buffers,
+                Some(wgpu::Face::Back),
+                true,
+                None,
+            )
+        })
+        .flatten();
         // Without indirect draws (OpenGL before 4.0 without indirect execution, or
         // before 4.2 + GL_ARB_shader_draw_parameters without indirect first instance)
         // even creating an indirect buffer fails; one draw per section reads
@@ -5369,7 +5463,7 @@ impl Renderer {
         let indirect = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Section draws"),
             size: 1024 * 20,
-            usage: if multi_draw {
+            usage: if indirect_capable {
                 wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST
             } else {
                 wgpu::BufferUsages::COPY_DST
@@ -5405,7 +5499,7 @@ impl Renderer {
         let section_uploads = upload::Uploads::with_chunk(&device, SECTION_UPLOAD_CHUNK);
         let stars = stars::Stars::new(&device, frame_format);
         let custom_sky = custom_sky::CustomSky::new(&device, frame_format);
-        let late_sky = adreno::adreno_vulkan(&adapter_info)
+        let late_sky = late_sky::wanted(&adapter_info)
             .then(|| {
                 late_sky::LateSky::new(
                     &adreno::TerrainModule {
@@ -5421,6 +5515,7 @@ impl Renderer {
                 )
             })
             .flatten();
+        let late_sky_on = late_sky::on_by_default(&adapter_info.name);
         let entity_outline = entity_outline::EntityOutline::new(
             &device,
             (&entity_shader, &entity_layout, &entity_vertex),
@@ -5489,9 +5584,15 @@ impl Renderer {
             solid_opaque,
             solid_cutout,
             solid_paths,
+            solid_settled_single,
+            settled_single_on: true,
+            settled_single_active: false,
+            solid_paths_sdr,
+            cutout_sdr_on: true,
             translucent,
             translucent_mark,
             flat_on: flat.is_some(),
+            flat_quad_cache_on: true,
             packed_quads,
             cull_on,
             sides_on: true,
@@ -5505,7 +5606,7 @@ impl Renderer {
             visbuf,
             sky,
             late_sky,
-            late_sky_on: true,
+            late_sky_on,
             sky_base,
             sunrise_pipeline,
             sunrise_buffer,
@@ -5660,6 +5761,7 @@ impl Renderer {
             indirect,
             indirect_capacity: 1024,
             multi_draw,
+            indirect_capable,
             base_vertex,
             visible: Vec::new(),
             visible_lods: Vec::new(),
@@ -6118,18 +6220,28 @@ impl Renderer {
             None if on => return Err("the cheaper terrain shaders are off on this device".into()),
             None => {}
         }
+        if let Some(paths) = &mut self.solid_paths_sdr {
+            paths.static_cutout_on = on;
+        }
         Ok(())
     }
     /// Whether frames that may take it draw whole sections through less work (`solid_paths`).
     pub fn settled_terrain_on(&self) -> bool {
-        self.solid_paths.as_ref().is_some_and(|p| p.settled_on)
+        self.settled_single_on || self.solid_paths.as_ref().is_some_and(|p| p.settled_on)
     }
     /// Switches drawing whole sections through less work, for A/B checks.
     pub fn set_settled_terrain(&mut self, on: bool) -> Result<()> {
+        if self.solid_settled_single.is_some() {
+            self.settled_single_on = on;
+            return Ok(());
+        }
         match &mut self.solid_paths {
             Some(paths) => paths.settled_on = on,
             None if on => return Err("the cheaper terrain shaders are off on this device".into()),
             None => {}
+        }
+        if let Some(paths) = &mut self.solid_paths_sdr {
+            paths.settled_on = on;
         }
         Ok(())
     }
@@ -6145,6 +6257,37 @@ impl Renderer {
         self.flat_on = on;
         Ok(())
     }
+    /// Drops the blurred menu frame kept for `Frame::menu_blur_cache`: the next blurred
+    /// frame draws the world again (the menu was left, or a setting changed under it).
+    pub fn forget_menu_blur(&mut self) {
+        if let Some(blur) = &mut self.menu_blur {
+            blur.forget();
+        }
+    }
+    /// Whether a frame of a menu blurred by `radius` with `Frame::menu_blur_cache` draws the
+    /// kept blurred frame, without the world: one is kept for this window's size and radius,
+    /// and no screenshot, HDR output or SDR finish of a 0.2 pack (`overlay_format`) needs the
+    /// whole frame. Adapted from Vasysik/horizon-android (`has_cached_menu_blur`, its commit
+    /// 77b9e17f76), MIT.
+    pub fn has_menu_blur_cache(&self, radius: f32) -> bool {
+        self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
+            && self.screenshot.is_none()
+            && self.hdr.is_none()
+            && self.output.frame.overlay_format == self.output.frame.format
+            && self
+                .menu_blur
+                .as_ref()
+                .is_some_and(|b| b.kept([self.config.width, self.config.height], radius))
+    }
+    /// Whether per-section draws are indirect multi-draws rather than one call per section.
+    pub fn indirect_draws(&self) -> bool {
+        self.multi_draw
+    }
+    /// Switches per-section draws between indirect multi-draws, where the device takes them,
+    /// and one call per section, for A/B checks.
+    pub fn set_indirect_draws(&mut self, on: bool) {
+        self.multi_draw = on && self.indirect_capable;
+    }
     /// Whether frames that may take it draw the sky after solid terrain (`late_sky`).
     pub fn late_sky_on(&self) -> bool {
         self.late_sky_on
@@ -6156,6 +6299,16 @@ impl Renderer {
         }
         self.late_sky_on = on;
         Ok(())
+    }
+    /// Which A/B switches this device takes: flat draws, indirect multi-draws, the late sky
+    /// and occlusion culling (Starling's performance test offers only these).
+    pub fn draw_choices(&self) -> [bool; 4] {
+        [
+            self.flat.is_some(),
+            self.indirect_capable,
+            self.late_sky.is_some(),
+            self.cull.is_some(),
+        ]
     }
     /// Whether one of Horizon's own packs reads the water mirror, which needs the frame's
     /// `water_plane`.
@@ -7184,8 +7337,11 @@ impl Renderer {
         self.lod_pending = None;
         self.detail_columns.clear();
         self.detail_revision += 1;
-        // A dimension change drops every page at once: freed later, off this thread.
+        // A dimension change drops every page at once: freed later, off this thread. One
+        // page's buffer stays for the next level's first sections, or is made now, while
+        // its loading screen shows (`Arena::prewarm`).
         self.graveyard.add(self.arena.clear());
+        self.arena.prewarm(&self.device);
         if let Some(gpu) = &mut self.gpu_culling {
             gpu.records.clear();
             // The chunk fade-in time they were decided with stays.
@@ -8820,6 +8976,21 @@ impl Renderer {
                     label: Some("Horizon frame"),
                 })
         });
+        if frame.menu_blur_cache
+            && fg_frames.is_none()
+            && checks.is_none()
+            && frame.menu_blur.is_some_and(|r| self.has_menu_blur_cache(r))
+        {
+            return self.draw_kept_menu(
+                frame,
+                encoder,
+                has_section_copies,
+                &target_texture,
+                surface_frame,
+                reconfigure,
+                started,
+            );
+        }
         // Horizon's own passes are timed like a shader pack's, from the frame's first pass.
         if self.own_timing.is_some() != self.pass_timing {
             self.own_timing = self
@@ -10550,6 +10721,12 @@ impl Renderer {
                 let lods = &self.lods;
                 let sorted = &self.sorted_indices;
                 let phase2 = self.cull.as_ref().filter(|_| culling).map(|c| &c.phase2);
+                let cache_quads = self.flat_quad_cache_on
+                    && adreno::adreno_vulkan(&self.info)
+                    && self.native.is_none()
+                    && self.pack_post.is_none()
+                    && self.hdr.is_none()
+                    && phase2.is_none();
                 crate::spans::time("flatten", || {
                     flat.prepare(
                         &self.device,
@@ -10579,6 +10756,7 @@ impl Renderer {
                                 Some((id, lod::instance(v.origin, v.fade)))
                             })),
                         |page| sorted.buffer(page).clone(),
+                        cache_quads,
                         self.own_timing.as_mut(),
                     )
                 })
@@ -11094,15 +11272,33 @@ impl Renderer {
             .and_then(|n| Some((n.material.as_ref()?, &n.frame.group)));
         // Without HDR output, the solid shaders without its lighting (`SolidPipeline`).
         let hdr = self.hdr.is_some();
-        let solid_pipeline = material.map_or(self.solid.get(hdr), |(m, _)| &m.solid);
+        let settled_single = self.solid_settled_single.as_ref().filter(|_| {
+            self.settled_single_on
+                && !hdr
+                && !frame.title
+                && !flat_frame
+                && !gpu_frame
+                && self.native.is_none()
+                && self.pack_post.is_none()
+                && cull.is_none()
+                && phase1_draws > 0
+                && solid_paths::can_use_settled(&self.origins, self.texture_filtering)
+        });
+        self.settled_single_active = settled_single.is_some();
+        let solid_pipeline = material.map_or(
+            settled_single.unwrap_or_else(|| self.solid.get(hdr)),
+            |(m, _)| &m.solid,
+        );
         // Two solid passes only where a discard costs the GPU its hidden surface
         // removal: Apple's tiled GPUs, behind Metal, and Adreno's Vulkan (`splits_solid`).
         // Elsewhere the second pass would double the solid draw calls and vertex work.
         let split_solid = splits_solid(&self.info);
         // What this frame's instances allow its two solid passes (`solid_paths`).
-        let solid_passes = self
-            .solid_paths
-            .as_ref()
+        let sdr_paths = (self.cutout_sdr_on && !hdr)
+            .then_some(self.solid_paths_sdr.as_ref())
+            .flatten();
+        let solid_passes = sdr_paths
+            .or(self.solid_paths.as_ref())
             .filter(|_| split_solid && self.native.is_none() && self.pack_post.is_none())
             .filter(|_| cull.is_none())
             .map_or_else(Default::default, |paths| {
@@ -12641,6 +12837,10 @@ impl Renderer {
                 Some(copy_frame(&self.device, &mut encoder, &texture, size))
             });
         let first_frame = self.first_frame == FirstFrame::Submit;
+        if flat_frame && let Some(flat) = &mut self.flat {
+            // From here the encoder is submitted either locally or in queue order.
+            flat.submitted();
+        }
         // Finished, submitted and presented on the submit thread when nothing after the
         // submission needs this one: screenshots' readbacks, the error scopes (one per
         // thread), the first frame's startup log, VSync's frame callback, a reconfigure.
@@ -12806,6 +13006,84 @@ impl Renderer {
     }
 }
 impl Renderer {
+    /// A frame of a paused menu from the blurred frame `MenuBlur::keep` kept: that frame, then
+    /// the menu over it, with the section copies and HUD uploads of the frame, submitted and
+    /// presented as `draw_frame` presents a plain one. The world and the blur are not drawn.
+    /// Adapted from Vasysik/horizon-android (the cached path of its `Renderer::render`, commit
+    /// 77b9e17f76), MIT, copyright (c) 2026 Ludovic Marie and the Horizon contributors.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_kept_menu(
+        &mut self,
+        frame: &Frame,
+        mut encoder: wgpu::CommandEncoder,
+        has_section_copies: bool,
+        target_texture: &wgpu::Texture,
+        surface_frame: Option<wgpu::SurfaceTexture>,
+        reconfigure: bool,
+        started: Instant,
+    ) -> Result<bool> {
+        let size = [self.config.width, self.config.height];
+        self.hud.prepare(
+            &self.device,
+            &mut self.uploads,
+            &mut encoder,
+            frame.hud,
+            size,
+        );
+        // `has_menu_blur_cache` holds only where the HUD draws in the frame's own format.
+        let view_target = target_texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.output.frame.format),
+            ..Default::default()
+        });
+        if let Some(blur) = &self.menu_blur {
+            blur.draw_kept(&self.device, &self.queue, &mut encoder, &view_target);
+        }
+        self.hud.draw_range(
+            &mut encoder,
+            &view_target,
+            None,
+            &self.depth,
+            frame.hud,
+            size,
+            frame.hud.blur_at..frame.hud.vertices.len() as u32,
+            None,
+        );
+        self.uploads.finish(&encoder);
+        if has_section_copies {
+            self.section_copy_bytes = 0;
+            self.section_uploads.finish(&encoder);
+        }
+        if let Some(image) = surface_frame
+            .as_ref()
+            .map(|f| &f.texture)
+            .or(self.offscreen.as_ref())
+        {
+            self.readback.present(&self.device, &mut encoder, image);
+        }
+        let commands = crate::spans::time("encode", || encoder.finish());
+        let submission = crate::spans::time("submit", || self.queue.submit([commands]));
+        self.last_wait += self.queue.take_waited();
+        let present = Instant::now();
+        if let Some(surface_frame) = surface_frame {
+            if self.config.present_mode == wgpu::PresentMode::Fifo {
+                self.window.pre_present_notify();
+            }
+            self.queue.present(surface_frame);
+            if reconfigure {
+                self.configure_surface();
+            }
+        }
+        if self.surface.is_none() {
+            self.in_flight.push_back(submission);
+            if !self.paced_elsewhere {
+                self.wait_in_flight();
+            }
+        }
+        self.last_wait += present.elapsed();
+        self.queue.take_waited();
+        self.last_encode = started.elapsed().saturating_sub(self.last_wait);
+        Ok(true)
+    }
     /// What draws over the world, on the real frame and frame generation's made one:
     /// the hand, entity outlines, post effects, screen effects, the debug crosshair and
     /// the HUD. Returns the world icon's readback, taken on the real frame.
@@ -13153,16 +13431,22 @@ impl Renderer {
                     );
                     hdr.keep_world(encoder, timing.as_mut());
                 }
-                None => blur.apply(
-                    device,
-                    &self.queue,
-                    encoder,
-                    target_texture,
-                    view_target,
-                    size,
-                    radius,
-                    timing.as_mut(),
-                ),
+                None => {
+                    blur.apply(
+                        device,
+                        &self.queue,
+                        encoder,
+                        target_texture,
+                        view_target,
+                        size,
+                        radius,
+                        timing.as_mut(),
+                    );
+                    // HDR output never draws the kept frame back (`has_menu_blur_cache`).
+                    if frame.menu_blur_cache && overlay.real {
+                        blur.keep(encoder, target_texture, size, radius);
+                    }
+                }
             }
             if let Some(view) = &coverage {
                 hud_coverage::clear(encoder, view);
