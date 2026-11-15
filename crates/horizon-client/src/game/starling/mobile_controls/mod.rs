@@ -1617,15 +1617,15 @@ impl Game<'_> {
         if t.phase == TouchPhase::Moved {
             return Ok(false);
         }
-        // The utility keys as `mobile_draw` lays them out, clear of the cutout's strips.
-        let [left, _, right, _] = self.safe_gui_insets(b.scale);
+        // The utility keys as `mobile_draw` lays them out, clear of the cutout's strips: from the
+        // touch's own window pixels, as `b` and `p` already have the strips taken off.
         if t.phase == TouchPhase::Started
             && !self.mobile.ui.owns_relative(t.id)
             && !self.mobile.ui.owns_gesture(t.id)
-            && let Some(action) = self.mobile.ui.action(
-                b.width - left - right,
-                b.height,
-                [p[0] - left, p[1]],
+            && let Some(action) = self.mobile.ui.action_at(
+                [size.width, size.height],
+                [t.location.x as f32, t.location.y as f32],
+                [left, right],
                 self.pad_in_menu(),
             )
         {

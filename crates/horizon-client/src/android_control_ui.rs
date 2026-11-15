@@ -900,6 +900,32 @@ impl TouchUi {
         }
         None
     }
+    /// [`Self::action`] for a touch at `px` (window pixels) on a window `size` pixels big whose
+    /// keys are drawn between a camera cutout's strips, `left` and `right` GUI pixels wide
+    /// (`Game::draw_clear_of_cutout`). The point and the width go into that layout here, once:
+    /// the game took the strip off both a second time, and the keys at the left ("...", F3, F5,
+    /// Chat) were hit a strip's width right of where they were drawn.
+    pub fn action_at(
+        &self,
+        size: [u32; 2],
+        px: [f32; 2],
+        [left, right]: [f32; 2],
+        menu: bool,
+    ) -> Option<Action> {
+        let b = HudBatch::new(
+            size,
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
+        self.action(
+            (b.width - left - right).max(0.0),
+            b.height,
+            [px[0] / b.scale - left, px[1] / b.scale],
+            menu,
+        )
+    }
     pub fn draw(&self, b: &mut HudBatch, a: &HudAtlas, menu: bool) {
         if menu && !self.goy_mode && self.keyboard_button {
             let right = b.width
@@ -8156,6 +8182,113 @@ mod tests {
             start,
             &mut settings,
         );
+    }
+
+    /// The hub's "..." and its "H" button drawn between a camera cutout's strips (as
+    /// `Game::draw_clear_of_cutout` draws them: narrowed, then moved in from the left) are where a
+    /// touch on them lands, whatever the inset (#166).
+    #[test]
+    fn the_hub_buttons_are_hit_where_they_are_drawn_beside_a_cutout() {
+        fn between_strips(
+            batch: &mut HudBatch,
+            left: f32,
+            right: f32,
+            draw: impl FnOnce(&mut HudBatch),
+        ) {
+            let (start, width) = (batch.vertices.len(), batch.width);
+            batch.width = (width - left - right).max(0.0);
+            draw(batch);
+            batch.width = width;
+            batch.translate_since(start, left, 0.0);
+        }
+        let atlas = HudAtlas::boot();
+        crate::android_controls::set_current_hud_opacity_scale(1.0);
+        let mut settings = crate::android_controls::Settings {
+            show_control_hub: true,
+            ..Default::default()
+        };
+        for inset in [0.0_f32, 104.0, 190.0] {
+            let mut batch = HudBatch::new(
+                [3200, 1440],
+                crate::hud::GuiScale {
+                    requested: 0,
+                    unicode: false,
+                },
+            );
+            let scale = batch.scale;
+            let left = (inset / scale).ceil();
+            let right = (inset / 2.0 / scale).ceil();
+            let bounds = |batch: &HudBatch, from: usize| {
+                batch.vertices[from..].iter().fold(
+                    [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+                    |[x0, y0, x1, y1], v| {
+                        [
+                            x0.min(v.pos[0]),
+                            y0.min(v.pos[1]),
+                            x1.max(v.pos[0]),
+                            y1.max(v.pos[1]),
+                        ]
+                    },
+                )
+            };
+            // As the game has it with the hub shown: the "H" first, the "..." beside it.
+            let mut ui = TouchUi {
+                hub_visible: true,
+                ..Default::default()
+            };
+            // The "...": drawn clear of the strips, hit by `action_at` from the touch's own
+            // window pixels, as the game tests it.
+            between_strips(&mut batch, left, right, |b| ui.draw(b, &atlas, false));
+            let [x0, y0, x1, y1] = bounds(&batch, 0);
+            assert!(
+                x0 >= left,
+                "inset {inset}: the key keeps out of the left strip"
+            );
+            let y = (y0 + y1) / 2.0 * scale;
+            for x in [x0 + 2.0, (x0 + x1) / 2.0, x1 - 2.0] {
+                assert!(
+                    matches!(
+                        ui.action_at([3200, 1440], [x * scale, y], [left, right], false),
+                        Some(Action::More)
+                    ),
+                    "inset {inset}: a touch at {x} on the \"...\" drawn from {x0} to {x1} misses it"
+                );
+            }
+            assert!(
+                ui.action_at([3200, 1440], [(x1 + 4.0) * scale, y], [left, right], false)
+                    .is_none(),
+                "inset {inset}: a touch right of the drawn \"...\" still hits it"
+            );
+            // The "H": the floating menu's button, tapped where it is drawn.
+            let mut batch = HudBatch::new(
+                [3200, 1440],
+                crate::hud::GuiScale {
+                    requested: 0,
+                    unicode: false,
+                },
+            );
+            between_strips(&mut batch, left, right, |b| {
+                ui.draw_floating_menu(b, &atlas, &settings)
+            });
+            let [x0, y0, x1, y1] = bounds(&batch, 0);
+            let p = [(x0 + x1) / 2.0 - left, (y0 + y1) / 2.0];
+            let mut hit = HudBatch::new(
+                [3200, 1440],
+                crate::hud::GuiScale {
+                    requested: 0,
+                    unicode: false,
+                },
+            );
+            hit.width = (hit.width - left - right).max(0.0);
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                ui.floating_menu_touch(&mut hit, &atlas, 1, phase, p, &mut settings);
+            }
+            assert!(
+                ui.floating_menu,
+                "inset {inset}: a tap on the drawn \"H\" misses it"
+            );
+            ui.floating_menu = false;
+        }
     }
 
     use super::*;
