@@ -6353,6 +6353,7 @@ impl Launcher {
             Some(Action::ChooseRenderer(mode)) => {
                 self.catalog.config.renderer = mode;
                 self.catalog.config.save(&self.home)?;
+                self.catalog.config.apply_renderer_to_game(&self.home);
                 self.chooser = None;
             }
             Some(Action::ChooseProfile(profile)) => {

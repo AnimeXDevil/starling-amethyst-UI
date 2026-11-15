@@ -35,6 +35,8 @@ pub(crate) mod skins;
 // Starling's accounts under the names Horizon's launcher gave them (account.rs).
 pub(crate) mod account;
 pub(crate) mod content_files;
+// The wardrobe's choice for Starling's game (own_skin).
+pub(crate) mod appearance;
 // The account's head on the header and the account pages (Horizon Android's game had it).
 pub(crate) mod skin_head;
 /// Horizon Android's documents provider told the launcher when the Files app changed a file;
@@ -50,7 +52,7 @@ pub(crate) mod document_provider {
 /// game's Diagnostics exports it): kept in the app's private files, where Horizon Android named
 /// the launcher's folder.
 pub(crate) mod diagnostics {
-    pub use crate::diagnostics::{heartbeat, reason_name, record_error, redact, tail, timestamp};
+    pub use crate::diagnostics::{heartbeat, record_error, redact};
     use std::path::{Path, PathBuf};
     fn private() -> PathBuf {
         horizon_client::logging::private_home()
@@ -69,7 +71,7 @@ pub(crate) mod diagnostics {
 }
 /// The game's performance recording, which the game starts (Play turns it on for its run).
 pub(crate) mod performance {
-    pub use crate::performance::{active, stop};
+    pub use crate::performance::stop;
     pub fn export(_home: &std::path::Path) -> Result<(), String> {
         crate::performance::export(&horizon_client::logging::private_home())
     }
@@ -342,6 +344,19 @@ pub fn game_started(folder: &Path, home: &Path) {
         }
     }
     let _ = home;
+    // The theme and its motion came with Config::load; the controls' scale and the screen's
+    // orientation hold in the game as in the launcher.
+    client::ui_theme::set_ui_scale_percent(config.ui_scale_percent);
+    let orientation = config.orientation.android_value();
+    crate::android::with_activity(|env, activity| {
+        env.call_method(
+            activity,
+            "setRequestedOrientation",
+            "(I)V",
+            &[jni::objects::JValue::Int(orientation)],
+        )
+        .map(drop)
+    });
 }
 
 /// `StarlingActivity.nativeDocumentResult`: the file the launcher's picker chose (android_lib.rs).

@@ -557,6 +557,7 @@ impl Launcher {
                 .selected()
                 .is_none()
             {
+                crate::ha_launcher::appearance::play_offline(&self.catalog.config.name);
                 self.wardrobe
                     .prepare_game(&self.catalog.config.name, &game_home)?;
             }

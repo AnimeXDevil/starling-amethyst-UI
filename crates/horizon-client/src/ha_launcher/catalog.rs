@@ -250,6 +250,21 @@ impl Config {
             _ => "Auto (Phone DPI)",
         }
     }
+    /// The rendering mode chosen in the launcher, as the instance's graphics API: OpenGL ES, or
+    /// Starling's own choice (Vulkan, and OpenGL ES after a driver that died starting).
+    pub fn apply_renderer_to_game(&self, home: &Path) {
+        use crate::ha_launcher::client::graphics::GraphicsApi;
+        let game = self.game_home(home);
+        let _ = std::fs::create_dir_all(&game);
+        let options_path = game.join("options.txt");
+        let mut settings = crate::ha_launcher::client::settings::Settings::load(&options_path);
+        settings.horizon.api = if self.renderer == RendererMode::OpenGl {
+            GraphicsApi::OpenGl
+        } else {
+            GraphicsApi::Auto
+        };
+        settings.save(&options_path);
+    }
     pub fn apply_experimental_to_game(&self, home: &Path) {
         crate::ha_launcher::client::android_runtime::set_experimental_leaf_culling(
             self.experimental_leaf_culling,
@@ -294,6 +309,27 @@ impl Config {
         settings.horizon.cave_culling = true;
         // Entity culling stays the player's choice in the game's Video Settings (three modes).
         settings.horizon.resolution_scale = self.render_scale.percent().clamp(25, 100);
+        // Starling's game reads the rest from its graphics settings (horizon-graphics.txt): the
+        // workers' ceiling as their number, and the leaf culling as its Hidden mode, leaving a
+        // mode the player chose in Video Settings as it is.
+        if self.worker_limit > 0 {
+            settings.horizon.workers = self.worker_limit;
+        }
+        {
+            use crate::ha_launcher::client::graphics::LeafCullingMode;
+            match (
+                self.experimental_leaf_culling,
+                settings.horizon.leaf_culling,
+            ) {
+                (true, LeafCullingMode::Off) => {
+                    settings.horizon.leaf_culling = LeafCullingMode::Hidden
+                }
+                (false, LeafCullingMode::Hidden) => {
+                    settings.horizon.leaf_culling = LeafCullingMode::Off
+                }
+                _ => {}
+            }
+        }
         settings.save(&options_path);
         let touch_path = game.join("horizon-touch.json");
         let mut touch_cfg = crate::ha_launcher::client::touch::Settings::load_from(&touch_path);

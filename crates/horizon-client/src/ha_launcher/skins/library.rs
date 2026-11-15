@@ -185,7 +185,8 @@ impl Library {
             .cloned()
             .unwrap_or_default();
         let local = |id: &Option<String>| id.as_ref().map(|id| Self::image(root, id)).transpose();
-        let skin = local(&selection.skin)?.or_else(|| cloud.map(|(p, _, _)| p.to_owned()));
+        let own = local(&selection.skin)?;
+        let skin = own.clone().or_else(|| cloud.map(|(p, _, _)| p.to_owned()));
         let cape = if selection.hide_cape {
             None
         } else {
@@ -202,7 +203,12 @@ impl Library {
             game_home.join("horizon-appearance.json"),
             descriptor.to_string(),
         )
-        .map_err(|_| "Could not prepare the game's appearance.".into())
+        .map_err(|_| "Could not prepare the game's appearance.")?;
+        crate::ha_launcher::appearance::wear(
+            game_home,
+            own.as_deref(),
+            selection.model == Model::Slim,
+        )
     }
 }
 fn valid_id(id: &str) -> bool {
