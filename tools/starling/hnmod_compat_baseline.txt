@@ -1,16 +1,17 @@
 # The website's native mods that built (cargo ndk check, arm64-v8a) on the last measured Starling:
-# sync-horizon-7 at e0220f9c81 (2026-11-15), hnmod-compat run 43671098271: 85 of the index's 135.
+# sync-horizon-7 with sync-horizon-6 merged in (9b1cedb204, 2026-11-15), hnmod-compat run 43733910338: 87 of the
+# index's 135, and dynamic_fps_for_rust, which that merge broke and the next commit mends: 88.
 # hnmod-compat.yml names every one of these that no longer builds. Update it from a run's summary when a sync is
 # measured, and say what left it.
-# Left since sync 6 (82 then), on purpose: ayynoxs_map_pack and elytratrails use the old mod network hooks
-# (net_from_client/net_from_server), which the fork replaced with declared payloads; horizon_physics binds
-# parameters native_material::module no longer has.
+# Back since 85 (e0220f9c81): ayynoxs_map_pack and elytratrails (the old mod messages, game/starling/old_mod_net.rs)
+# and horizon_physics (native_mod_adapt.py FOLDED_PARAMETERS).
 accurate_block_placement
 appleskin
 appleskin_horizon
 armor_status
 armorhud
 atlas
+ayynoxs_map_pack
 betterf3
 biomecompass
 blockscope
@@ -26,6 +27,7 @@ customhud
 distant_horizons
 dynamic_fps_for_rust
 dynamiclights
+elytratrails
 enchantmenthints
 fast_trading
 fence_perch
@@ -42,6 +44,7 @@ fullbright_nofog
 gyro
 held_item_info
 hitbox_plus
+horizon_physics
 hud_plus
 imfast
 inventory_profiles

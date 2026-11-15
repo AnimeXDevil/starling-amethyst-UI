@@ -34,6 +34,17 @@ fn catalog_shelf(shelf: horizon_client::options_ui::CatalogShelf) -> starling_ca
     }
 }
 
+/// Starling: on a phone a menu over the world (pause, inventory, ...) draws at most 60 frames a
+/// second. A paused game's menu draws its kept backdrop (`menu_blur_cache`) so cheaply that it
+/// ran at 300+ FPS, warming the phone for nothing. A computer keeps its limit.
+fn menu_frame_cap(limit: i32, has_screen: bool) -> i32 {
+    if cfg!(target_os = "android") && has_screen {
+        limit.min(60)
+    } else {
+        limit
+    }
+}
+
 impl Game<'_> {
     /// One of the game's folders (packs, shader packs, mods) in the file manager. On a phone the
     /// Files app shows it through Starling's own provider, wherever the game keeps it. A folder it
@@ -925,15 +936,10 @@ impl Game<'_> {
             .settings
             .horizon
             .battery_limit(limit, self.title.is_none(), self.focused);
-        // Starling: on a phone a menu over the world (pause, inventory, ...) draws at most 60
-        // frames a second. A paused game's menu draws its kept backdrop (`menu_blur_cache`) so
-        // cheaply that it ran at 300+ FPS, warming the phone for nothing.
-        #[cfg(target_os = "android")]
-        let limit = if context.has_screen {
-            limit.min(60)
-        } else {
-            limit
-        };
+        // Starling: a phone's menu over the world draws at most 60 frames a second
+        // (`menu_frame_cap`). No `cfg` here: dynamic_fps_for_rust hooks this function, and
+        // horizon-mixins refuses a target body with one.
+        let limit = menu_frame_cap(limit, context.has_screen);
         // A native mod may only lower it (`native_framerate_limit`).
         let mut hooked = limit;
         self.native_framerate_limit(
@@ -1200,5 +1206,20 @@ mod controller_context_tests {
             detected_controller_style(None, GlyphStyle::PlayStation),
             GlyphStyle::PlayStation
         );
+    }
+}
+
+#[cfg(test)]
+mod menu_frame_cap_tests {
+    use super::menu_frame_cap;
+
+    /// A phone's menu over the world draws at most 60 FPS; the world itself, and a computer's
+    /// menu, keep the limit.
+    #[test]
+    fn a_menu_caps_the_frame_rate_on_a_phone_only() {
+        let capped = if cfg!(target_os = "android") { 60 } else { 300 };
+        assert_eq!(menu_frame_cap(300, true), capped);
+        assert_eq!(menu_frame_cap(300, false), 300);
+        assert_eq!(menu_frame_cap(30, true), 30);
     }
 }
