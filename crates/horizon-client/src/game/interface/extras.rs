@@ -72,6 +72,8 @@ impl Game<'_> {
         let (world_partial_tick, partial_tick) = self.frame_partial_ticks();
         self.extras.frame_partial_ticks = Some((world_partial_tick, partial_tick));
         self.native_render_frame_pre(elapsed, world_partial_tick, partial_tick);
+        // Starling: the old hook, for the mods made for it (native_compat.rs).
+        self.native_frame(elapsed);
         // A clear a mod asked for (in this frame's `RenderFrameEvent.Pre`, or after the last
         // frame was drawn) lands before this frame's particles are drawn, paused or not.
         self.apply_mod_particle_clear();
