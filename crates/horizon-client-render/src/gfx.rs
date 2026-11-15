@@ -5430,6 +5430,7 @@ impl Renderer {
                 )
             })
             .flatten();
+        let late_sky_on = late_sky::on_by_default(&adapter_info.name);
         let entity_outline = entity_outline::EntityOutline::new(
             &device,
             (&entity_shader, &entity_layout, &entity_vertex),
@@ -5513,7 +5514,7 @@ impl Renderer {
             visbuf,
             sky,
             late_sky,
-            late_sky_on: true,
+            late_sky_on,
             sky_base,
             sunrise_pipeline,
             sunrise_buffer,
