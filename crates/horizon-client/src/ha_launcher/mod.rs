@@ -35,6 +35,15 @@ pub(crate) mod skins;
 // Starling's accounts under the names Horizon's launcher gave them (account.rs).
 pub(crate) mod account;
 pub(crate) mod content_files;
+// The account's head on the header and the account pages (Horizon Android's game had it).
+pub(crate) mod skin_head;
+/// Horizon Android's documents provider told the launcher when the Files app changed a file;
+/// Starling's (GameFolderProvider) is the system's, which tells it nothing.
+pub(crate) mod document_provider {
+    pub fn take_changes() -> bool {
+        false
+    }
+}
 // The game's own, which Horizon Android's had beside these.
 
 /// Starling's diagnostics, the ZIP players attach to their reports (`crate::diagnostics`, as the
@@ -73,7 +82,7 @@ pub(crate) mod game;
 /// `android_controls`, `android_control_ui`, `android_control_theme` and
 /// `android_control_keyboard`.
 pub(crate) mod client {
-    pub use super::content_files;
+    pub(crate) use super::{content_files, skin_head};
     pub use horizon_client::android_control_keyboard as osk;
     pub use horizon_client::android_control_theme as ui_theme;
     pub use horizon_client::android_control_ui as touch_ui;
@@ -176,6 +185,13 @@ pub(crate) mod client {
         pub fn cleanup_completed_downloads(_home: &Path) -> horizon_client::Result<()> {
             Ok(())
         }
+    }
+
+    /// The game's mod list. Horizon Android's game carried mods of its own, which its Mods page
+    /// listed beside the installed ones; Starling's has none.
+    pub mod mod_list {
+        pub use horizon_client::mod_list::*;
+        pub const ANDROID_BUNDLED: [(&str, &str, &str); 0] = [];
     }
 
     /// Horizon Android mended its own engine data's structure files; Starling's prepared files

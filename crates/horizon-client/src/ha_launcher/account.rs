@@ -6,7 +6,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub use starling_account::{Account, DeviceCode, Provider, SecretStore, Secrets};
+pub use starling_account::{Account, Provider, SecretStore, Secrets};
+
+/// The code the player types at Microsoft's page.
+#[derive(Clone)]
+pub struct DeviceCode {
+    pub user_code: String,
+    pub verification_uri: String,
+}
 
 /// The Microsoft app Starling signs in with.
 pub fn client_id() -> Option<String> {
@@ -100,8 +107,6 @@ impl SignIn {
             State::Code { code, link } => SignInState::Code(DeviceCode {
                 user_code: code,
                 verification_uri: link,
-                interval: 5,
-                expires_at: 0,
             }),
             State::SignedIn(account) => SignInState::Done(Ok(account)),
             State::OfflineProfile(name) => {

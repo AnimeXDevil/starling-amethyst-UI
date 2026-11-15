@@ -5459,7 +5459,9 @@ impl Launcher {
         if action.is_some() && crate::ha_launcher::client::official_install::ready(&self.home) {
             let audio = self.audio.get_or_insert_with(|| {
                 let mut audio = crate::ha_launcher::client::audio::Audio::new(
-                    &self.home.join(".local/horizon-client/26.3"),
+                    &crate::ha_launcher::client::resource_source::ResourceSource::directory(
+                        crate::ha_launcher::client::logging::private_home().join("resources"),
+                    ),
                 );
                 let settings = crate::ha_launcher::client::settings::Settings::load(
                     &self

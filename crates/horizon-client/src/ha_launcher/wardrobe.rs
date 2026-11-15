@@ -57,10 +57,9 @@ impl Wardrobe {
         let note = loaded.as_ref().err().cloned().unwrap_or_default();
         let mut value = Self {
             root,
-            default_skin: home
-                .join(".local/horizon-client")
-                .join(horizon_core::VANILLA_VERSION)
-                .join("assets/minecraft/textures/entity/player/wide/steve.png"),
+            // Starling's prepared resources (the app's own files).
+            default_skin: crate::ha_launcher::client::logging::private_home()
+                .join("resources/assets/minecraft/textures/entity/player/wide/steve.png"),
             default_worker: None,
             library: loaded.unwrap_or_default(),
             key: String::new(),

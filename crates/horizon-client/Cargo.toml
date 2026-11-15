@@ -117,6 +117,8 @@ starling-catalog = { path = "../starling-catalog" }
 # Horizon Android's launcher (ha_launcher/): the accounts it lists and signs in, the links it
 # checks, and the skins it reads and draws in the wardrobe.
 starling-account = { path = "../starling-account" }
+# Its proxy settings and the Java mods' checks, as Horizon's launcher shares them.
+horizon-port-pack = { path = "../horizon-port-pack" }
 url = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 

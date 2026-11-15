@@ -1882,6 +1882,7 @@ dependencies = [
  "horizon-optifine",
  "horizon-perf",
  "horizon-perf-format",
+ "horizon-port-pack",
  "horizon-protocol",
  "horizon-server-files",
  "horizon-shader-api",

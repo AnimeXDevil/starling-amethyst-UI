@@ -55,7 +55,7 @@ pub fn validate(
     kind: Kind,
     name: &str,
     cancelled: impl Fn() -> bool,
-) -> crate::ha_launcher::Result<bool> {
+) -> crate::ha_launcher::client::Result<bool> {
     if !plain_name(name) || !kind.accepts(name) {
         return Err(
             "Choose a ZIP pack, .hshader shader pack or sandboxed .hmod matching this folder"

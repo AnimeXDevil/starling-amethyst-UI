@@ -1,6 +1,7 @@
 //! A native Rust installer and version screen, sharing the game's Vulkan renderer.
 use crate::ha_launcher::catalog::{Catalog, Page};
 use crate::ha_launcher::game::{self, Renderer};
+use crate::ha_launcher::skin_head::AvatarHead as _;
 #[path = "chooser.rs"]
 mod chooser;
 #[path = "launcher_gesture.rs"]

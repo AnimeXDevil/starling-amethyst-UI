@@ -2,6 +2,7 @@
 use super::pages::{Action, button};
 use crate::ha_launcher::account::{self, Account, Accounts, Secrets, SignIn, SignInState};
 use crate::ha_launcher::client::ui_theme::{Face, Icon, Ui, color};
+use crate::ha_launcher::skin_head::AvatarHead as _;
 
 fn login_surface() -> u32 {
     crate::ha_launcher::client::ui_theme::active_theme().surface
