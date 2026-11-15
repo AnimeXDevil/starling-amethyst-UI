@@ -39,7 +39,8 @@ export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_TERM_COLOR=never
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$work/target}
 
 # The source as native_build.sh prepares it (read the reasons there): no links, horizon-android's library an empty
-# file while horizon-mixins plans, lib.rs without its conditional attribute, the game's modules written out.
+# file while horizon-mixins plans, lib.rs without its conditional attribute, the game's modules written out, the
+# modules named through a parent folder moved beside their module.
 rm -rf "$work/source"
 mkdir -p "$work/source"
 git -C "$source" archive --format=tar HEAD | tar -x -C "$work/source"
@@ -60,6 +61,8 @@ CARGO_TARGET_DIR=$work/materialize-target cargo run --quiet --locked --offline \
   --manifest-path "$work/source/Cargo.toml" -p horizon-mod-api-gen --bin horizon-materialize \
   -- "$work/source" > "$out/logs/_materialize.log" 2>&1 \
   || { tail -20 "$out/logs/_materialize.log"; fail "horizon-materialize failed"; }
+python3 "$work/source/packaging/android/native_parent_paths.py" "$work/source" > "$out/logs/_parent_paths.log" 2>&1 \
+  || { cat "$out/logs/_parent_paths.log"; fail "native_parent_paths.py failed"; }
 
 errors() { grep -E '^[^ ]*: *error|^error' "$1" | grep -vE 'could not compile|aborting due to' | cut -c1-200 | head -n 3 | paste -sd'|'; }
 why() {  # horizon-mixins' first diagnostics, else the log's end
