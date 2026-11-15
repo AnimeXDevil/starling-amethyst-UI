@@ -1292,6 +1292,20 @@ impl Title {
     }
     /// Mouse wheel over the classic world and server lists, or cycle buttons. Returns true if a button was cycled.
     pub fn scroll_worlds(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) -> bool {
+        self.scroll_worlds_with(delta, cursor, size, true)
+    }
+    /// A finger's scroll (Starling, a phone's drag): the lists scroll as under the wheel, but a cycle
+    /// button the finger passes over keeps its value; a tap still cycles it.
+    pub fn finger_scroll(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
+        self.scroll_worlds_with(delta, cursor, size, false);
+    }
+    fn scroll_worlds_with(
+        &mut self,
+        delta: f32,
+        cursor: (f32, f32),
+        size: (f32, f32),
+        cycle: bool,
+    ) -> bool {
         if let Some(rules) = self.rules.get_mut() {
             rules.wheel(delta, size.1.ceil());
             return false;
@@ -1320,6 +1334,7 @@ impl Title {
             creative, options, ..
         } = &mut self.mode
             && delta != 0.0
+            && cycle
         {
             let (w, h) = size;
             let buttons =

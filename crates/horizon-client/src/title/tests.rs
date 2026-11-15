@@ -835,6 +835,9 @@ fn only_the_vertical_wheel_cycles_a_create_world_button() {
     // A horizontal notch arrives with no vertical part.
     f.title.scroll_worlds(0.0, at, size);
     assert_eq!(state(&f), before);
+    // Starling: a finger dragging over it on a phone scrolls; the button keeps its value.
+    f.title.finger_scroll(-1.0, at, size);
+    assert_eq!(state(&f), before);
     f.title.scroll_worlds(-1.0, at, size);
     assert_ne!(state(&f), before);
 }

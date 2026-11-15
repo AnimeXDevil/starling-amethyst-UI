@@ -1617,7 +1617,12 @@ impl Loading {
                     );
                     self.menu_option_events(events);
                 } else if let Some(title) = &mut self.menu.title {
-                    title.scroll_worlds(amount, self.menu.cursor, (batch.width, batch.height));
+                    // Starling: a finger's drag scrolls and never cycles a button.
+                    if finger {
+                        title.finger_scroll(amount, self.menu.cursor, (batch.width, batch.height));
+                    } else {
+                        title.scroll_worlds(amount, self.menu.cursor, (batch.width, batch.height));
+                    }
                 }
             }
             WindowEvent::KeyboardInput { event, .. }

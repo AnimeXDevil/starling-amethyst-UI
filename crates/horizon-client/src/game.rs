@@ -9754,6 +9754,9 @@ impl Game<'_> {
                             title.step_scroll(d, self.cursor, gui);
                         } else if stick_scroll {
                             title.stick_scroll(d, self.cursor, gui);
+                        } else if finger {
+                            // Starling: a finger's drag scrolls and never cycles a button.
+                            title.finger_scroll(d, self.cursor, gui);
                         } else {
                             title.scroll_worlds(d, self.cursor, gui);
                         }
