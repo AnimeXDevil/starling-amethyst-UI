@@ -1331,7 +1331,6 @@ pub fn main(app: AndroidApp) {
             refusal: |_| None,
             startup_refused: |_| false,
         },
-        &[],
         crate::entry::prepare(),
     );
     finish_and_exit()

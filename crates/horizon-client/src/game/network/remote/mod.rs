@@ -1792,7 +1792,8 @@ impl Game<'_> {
         self.clock = Default::default();
         self.clear_remote_world();
         let saves = std::env::current_dir()?.join("saves");
-        let mut title = horizon_client::title::Title::new(saves.clone(), &self.options.resources)
+        let mut title = self
+            .new_title(saves.clone())
             .with_user(|| self.options.player_name());
         title.last_server = self.settings.file.string("lastServer");
         title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
@@ -1840,28 +1841,6 @@ impl Game<'_> {
         if let Some(r) = self.renderer.as_mut() {
             r.clear_sections(self.world.layout());
         }
-        let saves = std::env::current_dir()?.join("saves");
-        let mut title = self
-            .new_title(saves.clone())
-            .with_user(|| self.options.player_name());
-        title.last_server = self.settings.file.string("lastServer");
-        title.skip_multiplayer_warning = self.settings.file.bool("skipMultiplayerWarning");
-        if single_player && reason.is_none() {
-            self.show_title(title);
-            self.capture(false);
-            return Ok(());
-        }
-        title.mode = horizon_client::title::Mode::Multiplayer(match reason {
-            Some(reason) => horizon_client::multiplayer::Screen::Disconnected {
-                reason,
-                retry: None,
-                lines: std::cell::Cell::new(1),
-            },
-            None => horizon_client::multiplayer::Screen::list(&saves),
-        });
-        self.show_title(title);
-        self.capture(false);
-        Ok(())
     }
     /// `Hud.onDisconnected`, from `Minecraft.disconnect` and `clearClientLevel`
     /// (a proxy's reconfiguration too), but the chat: joining clears it and a
@@ -6730,30 +6709,6 @@ impl Game<'_> {
             }
             p.health.food.food = food;
             p.health.food.saturation = saturation;
-        }
-    }
-    /// ClientPacketListener.handlePlayerAbilities, also for a LocalPlayer made after the packet
-    /// came (it follows Login): without one since the last respawn, the game mode's
-    /// (GameType.updatePlayerAbilities).
-    fn apply_remote_abilities(&mut self) {
-        let abilities = self.remote.as_ref().and_then(|r| r.abilities.clone());
-        let spectator = self.spectator();
-        let creative = self.creative;
-        let Some(player) = self.player.as_mut() else {
-            return;
-        };
-        match abilities {
-            Some(a) => {
-                player.invulnerable = a.flags & 1 != 0;
-                player.flying = a.flags & 2 != 0;
-                player.may_fly = a.flags & 4 != 0;
-                player.flying_speed = a.flying_speed;
-            }
-            None => {
-                player.invulnerable = creative || spectator;
-                player.may_fly = creative || spectator;
-                player.flying = spectator;
-            }
         }
     }
     /// ClientPacketListener.handleUpdateAttributes for a LocalPlayer made after the packet came

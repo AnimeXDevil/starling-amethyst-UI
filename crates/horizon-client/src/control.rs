@@ -844,6 +844,10 @@ fn percentiles(values: &[f32]) -> serde_json::Value {
 
 impl FrameStats {
     const LIMIT: usize = 1 << 20;
+    /// Every recorded frame time, in milliseconds, in order (Starling's diagnostics read them).
+    pub fn frame_millis(&self) -> &[f32] {
+        &self.millis
+    }
     pub fn record(&mut self, millis: f32) {
         if self.millis.len() < Self::LIMIT {
             self.millis.push(millis);

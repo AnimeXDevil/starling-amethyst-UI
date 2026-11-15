@@ -840,6 +840,7 @@ impl ApplicationHandler for App {
 /// manifest is `horizon-resources.json`): without them, say where they were
 /// looked for and how to get them, before a window or a loader starts. `get` is
 /// the page a hook sends the player to (`horizon_hooks::engine::get_the_game`).
+#[cfg(not(target_os = "android"))]
 pub(super) fn missing_resources(
     root: &std::path::Path,
     get: Option<horizon_hooks::GetTheGame>,

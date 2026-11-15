@@ -2444,9 +2444,12 @@ mod tests {
             assert_eq!(cfg::Serverbound::decode(id, &body).unwrap(), expected);
         }
         // A failure reads as 0 and fails the assertion below.
+        // Starling's configure answers a kick apart from a failure: either reads as 0.
         let revision = thread
             .join()
             .unwrap()
+            .ok()
+            .and_then(Result::ok)
             .map(|registries| registries.menu_extra_revision)
             .unwrap_or(0);
         drop(writer);

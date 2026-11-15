@@ -123,9 +123,9 @@ impl Game<'_> {
                     );
                     log::warn!("Horizon: {folder}: {message}");
                     let saves = std::env::current_dir()?.join("saves");
-                    let title = self
-                        .title
-                        .get_or_insert_with(|| Title::new(saves, &self.options.resources));
+                    let title = self.title.get_or_insert_with(|| {
+                        Title::new(saves, &self.options.resources, &self.gui.splashes)
+                    });
                     title.mode = horizon_client::title::Mode::Error {
                         message,
                         alert: None,
@@ -170,9 +170,9 @@ impl Game<'_> {
                 );
                 log::warn!("Horizon: {folder}: {message}");
                 let saves = std::env::current_dir()?.join("saves");
-                let title = self
-                    .title
-                    .get_or_insert_with(|| Title::new(saves, &self.options.resources));
+                let title = self.title.get_or_insert_with(|| {
+                    Title::new(saves, &self.options.resources, &self.gui.splashes)
+                });
                 title.mode = horizon_client::title::Mode::Error {
                     message,
                     alert: None,

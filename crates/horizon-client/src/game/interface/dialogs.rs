@@ -1429,6 +1429,7 @@ mod pause_tests {
                 fields: Vec::new(),
                 focus: None,
                 scroll: ui::Scroll::default(),
+                local: false,
                 dragging: None,
                 selecting: None,
             }),

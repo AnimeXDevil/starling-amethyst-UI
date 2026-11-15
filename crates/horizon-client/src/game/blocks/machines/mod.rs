@@ -1115,7 +1115,7 @@ impl Game<'_> {
         }
         let view = self.containers().view((pos[0], pos[1], pos[2]), false)?;
         let mut out: Option<ItemStack> = None;
-        for slot in view.slots_for_face(Some(face)) {
+        for slot in view.slots_for_face_iter(Some(face)) {
             let Some(stack) = self.containers().get(&view, slot).cloned() else {
                 continue;
             };

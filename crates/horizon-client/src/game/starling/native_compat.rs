@@ -773,7 +773,15 @@ impl Game<'_> {
         channel: &str,
         data: &[u8],
     ) -> Result<(), String> {
-        self.net_send_to_server(channel, data)
+        // The fork replaced the mod_net channel with declared payloads (payload_transport.rs):
+        // the old call goes out on the payload of that name, which a mod made for the old API
+        // has not declared, so it is refused unless one did.
+        self.send_payload_to_server(
+            &mod_api::PayloadId(channel.into()),
+            mod_api::PayloadBytes(data.to_vec()),
+        )
+        .map(|_| ())
+        .map_err(|error| format!("{error:?}"))
     }
     /// Sends `data` on `channel` to `player`.
     pub(in crate::game) fn native_net_send_to_player(
@@ -782,7 +790,10 @@ impl Game<'_> {
         channel: &str,
         data: &[u8],
     ) -> Result<(), String> {
-        self.net_send_to_player(player, channel, data)
+        // The fork's payloads go to a player by its live reference, which the old call (a UUID)
+        // does not give: refused, as for a player who left.
+        let _ = (player, channel, data);
+        Err("this game sends mod messages to players by payload declarations only".into())
     }
     /// An image for the mod's own screen.
     pub(in crate::game) fn native_mod_image(

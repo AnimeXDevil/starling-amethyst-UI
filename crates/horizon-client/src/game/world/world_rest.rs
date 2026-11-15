@@ -321,7 +321,7 @@ pub(super) fn load_world_rest(
                     R::Shaped { cells, result, .. } => {
                         (false, cells.iter().flatten().map(set).collect(), result)
                     }
-                    R::Special(_) => return None,
+                    R::Special(_) | R::Mod(_) => return None,
                 };
                 Some(basins::CraftingRecipe {
                     shapeless,

@@ -1058,7 +1058,7 @@ impl Game<'_> {
             return;
         }
         self.mobile.ui.virtual_mouse = true;
-        if let Some(b) = self.gui_scale() {
+        if let Some(b) = self.gui_batch() {
             self.mobile
                 .ui
                 .sync_viewport_cursor(&mut self.cursor, [b.width, b.height]);
@@ -1069,7 +1069,7 @@ impl Game<'_> {
     pub(super) fn android_sync_pointer(&mut self) {
         self.mobile.ui.pointer_off = !self.mobile.controls.settings.virtual_mouse_enabled;
         let in_menu = self.pad_in_menu();
-        if let Some(b) = self.gui_scale() {
+        if let Some(b) = self.gui_batch() {
             self.mobile
                 .ui
                 .sync_viewport_cursor(&mut self.cursor, [b.width, b.height]);
@@ -1828,7 +1828,7 @@ impl Game<'_> {
             self.android_virtual_touch(t, events, id);
             return;
         }
-        let Some(b) = self.gui_scale() else {
+        let Some(b) = self.gui_batch() else {
             return;
         };
         let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
@@ -1925,7 +1925,7 @@ impl Game<'_> {
         events: &dyn super::event_loop::EventLoopCtl,
         id: WindowId,
     ) {
-        let Some(b) = self.gui_scale() else {
+        let Some(b) = self.gui_batch() else {
             return;
         };
         let position = self.mobile.ui.relative_touch(
