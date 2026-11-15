@@ -143,7 +143,7 @@ impl TextEdit {
         let room = self
             .max_length
             .saturating_sub(utf16_len(&self.value) - selected_units);
-        let insert = utf16_prefix(&filtered, room);
+        let insert = utf16_prefix(filtered, room);
         let (ba, bb) = (byte_index(&self.value, a), byte_index(&self.value, b));
         self.value.replace_range(ba..bb, &insert);
         let pos = a + char_len(&insert);
