@@ -1877,16 +1877,11 @@ impl Game<'_> {
         batch: &mut HudBatch,
         draw: impl FnOnce(&mut HudBatch, f32),
     ) {
-        let [left, ..] = self.safe_gui_insets(batch.scale);
-        let (start, targets, width) = (
-            batch.vertices.len(),
-            horizon_client::widgets::targets_mark(),
-            batch.width,
-        );
-        batch.width = self.width_between_cutouts(width, batch.scale);
-        draw(batch, left);
-        batch.width = width;
-        batch.translate_since(start, left, 0.0);
+        let [left, _, right, _] = self.safe_gui_insets(batch.scale);
+        let targets = horizon_client::widgets::targets_mark();
+        horizon_client::android_control_ui::draw_between_strips(batch, left, right, |batch| {
+            draw(batch, left)
+        });
         horizon_client::widgets::shift_targets(targets, left);
     }
 

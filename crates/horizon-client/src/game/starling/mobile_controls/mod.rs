@@ -1290,10 +1290,11 @@ impl Game<'_> {
         // utility keys (#166).
         let [left, _, right, _] = self.safe_gui_insets(b.scale);
         b.width = (b.width - left - right).max(0.0);
-        let p = [
-            t.location.x as f32 / b.scale - left,
-            t.location.y as f32 / b.scale,
-        ];
+        let p = horizon_client::android_control_ui::point_between_strips(
+            [t.location.x as f32, t.location.y as f32],
+            b.scale,
+            left,
+        );
         if !self.mobile.ui.owns_relative(t.id)
             && !self.mobile.ui.owns_gesture(t.id)
             && let Some(menu_act) = self.mobile.ui.floating_menu_touch(
