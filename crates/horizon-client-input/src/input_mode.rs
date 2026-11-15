@@ -5,6 +5,7 @@
 //! the keyboard and mouse beside them. And what Android's window system leaves out about the
 //! keyboard: which keys are a physical keyboard's, and the modifiers held.
 use std::collections::HashSet;
+use winit::event::MouseButton;
 use winit::keyboard::{KeyCode, ModifiersState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,9 +96,110 @@ pub fn free_mouse_motion(
     before.map_or((0.0, 0.0), |(x, y)| (at.0 - x, at.1 - y))
 }
 
+/// The bits of Android's `MotionEvent.getButtonState()` and the mouse button each is: primary,
+/// secondary, tertiary, back and forward. Back and forward are the side buttons, Java's
+/// "mouse 4" and "mouse 5".
+const ANDROID_MOUSE_BUTTONS: [(u32, MouseButton); 5] = [
+    (1, MouseButton::Left),
+    (2, MouseButton::Right),
+    (4, MouseButton::Middle),
+    (8, MouseButton::Back),
+    (16, MouseButton::Forward),
+];
+
+/// The buttons an Android mouse holds. A side button comes twice: in the motion events' button
+/// state, and as the Back or Forward key (`KEYCODE_BACK` 4, `KEYCODE_FORWARD` 125) Android makes
+/// of it; some mice may send only one of the two. A button is held while either says so, and its
+/// press and release count once. Before, the side buttons were left to Android as its Back and
+/// Forward keys, so they could not be bound to anything in the game.
+#[derive(Debug, Default)]
+pub struct AndroidMouseButtons {
+    motion: u32,
+    keys: u32,
+    held: u32,
+}
+
+impl AndroidMouseButtons {
+    pub const fn new() -> Self {
+        Self {
+            motion: 0,
+            keys: 0,
+            held: 0,
+        }
+    }
+
+    /// A motion event's button state: the presses and releases it brings.
+    pub fn motion(&mut self, state: u32) -> Vec<(MouseButton, bool)> {
+        self.motion = state;
+        self.update()
+    }
+
+    /// A key from the mouse: its presses and releases when it is a side button's, `None` for
+    /// another key.
+    pub fn key(&mut self, code: i32, down: bool) -> Option<Vec<(MouseButton, bool)>> {
+        let bit = match code {
+            4 => 8,
+            125 => 16,
+            _ => return None,
+        };
+        if down {
+            self.keys |= bit;
+        } else {
+            self.keys &= !bit;
+        }
+        Some(self.update())
+    }
+
+    fn update(&mut self) -> Vec<(MouseButton, bool)> {
+        let now = self.motion | self.keys;
+        let news = ANDROID_MOUSE_BUTTONS
+            .iter()
+            .filter(|(bit, _)| (self.held ^ now) & bit != 0)
+            .map(|&(bit, button)| (button, now & bit != 0))
+            .collect();
+        self.held = now;
+        news
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A side button counts once whether the mouse sends it as the motion's button state, as the
+    /// Back or Forward key, or both (in either order); the other buttons come only in the motion.
+    #[test]
+    fn an_android_mouse_side_button_counts_once_however_it_comes() {
+        let mut buttons = AndroidMouseButtons::new();
+        // Both: Android's key first, then the motion carrying the bit.
+        assert_eq!(buttons.key(4, true), Some(vec![(MouseButton::Back, true)]));
+        assert_eq!(buttons.motion(8), vec![]);
+        assert_eq!(buttons.motion(8 | 1), vec![(MouseButton::Left, true)]);
+        assert_eq!(buttons.motion(1), vec![]);
+        assert_eq!(
+            buttons.key(4, false),
+            Some(vec![(MouseButton::Back, false)])
+        );
+        // Only the motion's state.
+        assert_eq!(buttons.motion(1 | 16), vec![(MouseButton::Forward, true)]);
+        assert_eq!(
+            buttons.motion(0),
+            vec![(MouseButton::Left, false), (MouseButton::Forward, false)]
+        );
+        // Only the key, held across moves that carry no bit.
+        assert_eq!(
+            buttons.key(125, true),
+            Some(vec![(MouseButton::Forward, true)])
+        );
+        assert_eq!(buttons.motion(0), vec![]);
+        assert_eq!(buttons.key(125, true), Some(vec![]), "a repeat is no news");
+        assert_eq!(
+            buttons.key(125, false),
+            Some(vec![(MouseButton::Forward, false)])
+        );
+        // Another key from the mouse is not a button.
+        assert_eq!(buttons.key(66, true), None);
+    }
 
     #[test]
     fn a_free_mouse_moves_by_its_relative_axes_or_else_by_its_pointer() {

@@ -689,13 +689,6 @@ mod input {
     /// their class bits.
     const SOURCE_MOUSE: u32 = 0x2000;
     const SOURCE_MOUSE_RELATIVE: u32 = 0x0002_0000;
-    /// `MotionEvent.BUTTON_PRIMARY`, `_SECONDARY` and `_TERTIARY`. The back and forward buttons
-    /// are left to Android, which makes the Back and Forward keys of them.
-    const BUTTONS: [(u32, MouseButton); 3] = [
-        (1, MouseButton::Left),
-        (2, MouseButton::Right),
-        (4, MouseButton::Middle),
-    ];
     /// The most mouse events kept for a game that is not reading them (a save on quit).
     const MOUSE_QUEUE: usize = 512;
 
@@ -716,7 +709,8 @@ mod input {
         /// screen gets them as winit makes them, as a finger.
         taken: bool,
         events: Vec<MouseEvent>,
-        buttons: u32,
+        /// The side buttons too, which Android also sends as its Back and Forward keys.
+        buttons: input_mode::AndroidMouseButtons,
         at: Option<(f32, f32)>,
     }
 
@@ -724,7 +718,7 @@ mod input {
     static MOUSE: Mutex<Mouse> = Mutex::new(Mouse {
         taken: false,
         events: Vec::new(),
-        buttons: 0,
+        buttons: input_mode::AndroidMouseButtons::new(),
         at: None,
     });
     /// A physical keyboard's key went down since the game last asked.
@@ -751,6 +745,21 @@ mod input {
             let mut pads = PADS.lock().unwrap_or_else(|e| e.into_inner());
             pads.key(key.device_id(), button, down);
             return Some(InputStatus::Handled);
+        }
+        // A mouse's side button, which Android also sends as its Back or Forward key: while the
+        // game reads the mouse it is mouse button 4 or 5 (bindable, as in Java), not the Back key.
+        if source & (SOURCE_MOUSE | SOURCE_MOUSE_RELATIVE) != 0 {
+            let mut mouse = MOUSE.lock().unwrap_or_else(|e| e.into_inner());
+            if mouse.taken
+                && let Some(news) = mouse.buttons.key(code, down)
+            {
+                for (button, down) in news {
+                    if mouse.events.len() < MOUSE_QUEUE {
+                        mouse.events.push(MouseEvent::Button(button, down));
+                    }
+                }
+                return Some(InputStatus::Handled);
+            }
         }
         // winit turns it into a key event as on a computer; this only notes the keyboard in use.
         if down && input_mode::android_keyboard(source, key.device_id(), key.scan_code(), code) {
@@ -839,13 +848,9 @@ mod input {
                 events.push(MouseEvent::Wheel(-right, up));
             }
         }
-        let buttons = motion.button_state().0;
-        for (bit, button) in BUTTONS {
-            if (buttons ^ mouse.buttons) & bit != 0 {
-                events.push(MouseEvent::Button(button, buttons & bit != 0));
-            }
+        for (button, down) in mouse.buttons.motion(motion.button_state().0) {
+            events.push(MouseEvent::Button(button, down));
         }
-        mouse.buttons = buttons;
         if mouse.events.len() + events.len() <= MOUSE_QUEUE {
             mouse.events.append(&mut events);
         }
