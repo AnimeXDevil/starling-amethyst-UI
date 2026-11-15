@@ -123,7 +123,8 @@ use event_loop::EventLoopCtl;
 use hand::interact_location;
 use horizon_client::random_source;
 use loading_window::{
-    build_renderer, loading_frame, loading_renderer, prepare_renderer_textures, start_game,
+    RendererParts, boot_renderer, boot_set_ui, build_renderer, finish_renderer, loading_frame,
+    loading_renderer, prepare_renderer_textures, start_game,
 };
 // `Action` here is the title screen's buttons (`title::Action`).
 use self::api_values::TryIntoApi;
@@ -1242,6 +1243,8 @@ struct Game<'a> {
     /// (game/input_mode.rs).
     input_mode: horizon_client::input_mode::InputMode,
     frames: u64,
+    /// The last frame's blurred menu could be kept (`Game::menu_blur_cache`).
+    menu_blur_kept: bool,
     /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
     glint_frame: horizon_client::item_render::GlintFrame,
     /// Mod block entities' kept geometry (game/modding/native_block_entity_draw.rs).
@@ -1739,6 +1742,8 @@ struct Game<'a> {
     frame_graph: horizon_client::perf_overlay::FrameGraph,
     /// The Stats overlay's sampler and caches (game/perf.rs).
     stats_overlay: perf::Perf,
+    /// Starling's performance test: draw choices and each setup's averages (perf_lab.rs).
+    perf_lab: perf_lab::PerfLab,
     /// Files handed to the game from outside (game/imports.rs).
     imports: imports::Imports,
     /// The offer of the Starling folder in shared storage (game/files_offer.rs).
@@ -8410,9 +8415,11 @@ impl Game<'_> {
                 .facts()
                 .get(self.world.block(block[0], block[1], block[2]))
                 .solid_render;
+        let (menu_blur_cache, kept_menu) = self.menu_blur_cache();
         // The cave culling search runs on its worker while the frame is prepared.
         if cave_culling
             && self.title.is_none()
+            && !kept_menu
             && let Some(renderer) = self.renderer.as_mut()
         {
             horizon_client::spans::time("occlusion", || {
@@ -8788,7 +8795,7 @@ impl Game<'_> {
         } else {
             self.shader_pack_inputs(camera, alpha as f32, &sky)
         };
-        if !title {
+        if !title && !kept_menu {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
                     self.entity_geometry(camera, alpha, billboard_frustum, entities)
@@ -9054,6 +9061,7 @@ impl Game<'_> {
                 .boss_overlay
                 .darken_amount(self.clock.fraction() as f32),
             menu_blur: self.menu_blur(),
+            menu_blur_cache,
             post_effects: horizon_client::post_chain::Request {
                 effects: &requested_post_effects,
                 root: &self.pack.source,
@@ -10503,11 +10511,14 @@ impl Game<'_> {
                     };
                     let mut perf_times = None;
                     let mut diagnostic_sample = None;
+                    // Starling: the frame for the performance test's averages (perf_lab.rs).
+                    let mut lab_sample = None;
                     if let Some(r) = self.renderer.as_mut() {
                         let cpu = now.elapsed().saturating_sub(r.last_wait);
                         horizon_threads::work::tick_end(cpu.as_nanos() as u64);
                         if rendered {
                             let ms = |d: Duration| d.as_secs_f32() * 1000.0;
+                            lab_sample = Some((ms(elapsed), ms(cpu), r.gpu_times.last().copied()));
                             perf_times = Some((ms(cpu), r.gpu_times.last().copied()));
                             self.frame_graph.record(
                                 ms(elapsed),
@@ -10568,6 +10579,7 @@ impl Game<'_> {
                         crate::performance::submit(sample, context);
                     }
                     self.platform_diagnostic_heartbeat();
+                    self.perf_lab_frame(lab_sample);
                     self.limit_frame();
                     let paused = self.pauses_game();
                     if paused != self.pause {
@@ -10974,6 +10986,7 @@ impl<'a> Game<'a> {
             mobile: Default::default(),
             input_mode: horizon_client::input_mode::InputMode::first(cfg!(target_os = "android")),
             frames: 0,
+            menu_blur_kept: false,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
             text_patches: Default::default(),
@@ -11275,6 +11288,7 @@ impl<'a> Game<'a> {
             upload_pace: Default::default(),
             frame_graph: Default::default(),
             stats_overlay: Default::default(),
+            perf_lab: Default::default(),
             imports: Default::default(),
             #[cfg(target_os = "android")]
             files_offer: Default::default(),
@@ -11724,6 +11738,8 @@ pub(crate) fn run_with(
     options.resources = loaded.root.clone();
     // Starling: a phone's setup before 0.1.6 left the sounds out.
     horizon_client::preparer::complete_sounds(&vanilla_root);
+    // Starling: the prepared resources loaded, the files they came from can go.
+    horizon_client::preparer::drop_downloads(&vanilla_root);
     let audio = if !options.execution_role.is_client() || options.headless {
         Audio::silent(&loaded.pack.source)
     } else {

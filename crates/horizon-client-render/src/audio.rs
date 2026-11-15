@@ -1469,8 +1469,8 @@ impl Audio {
         // Without `audio` a stream can't exist (`Infallible`), so the `Ok` arm never runs.
         #[cfg_attr(not(feature = "audio"), allow(unreachable_code))]
         let (stream, live) = match opened {
-            // A build without the `audio` feature has no `Stream` type to hold (`Infallible`),
-            // so this arm is unreachable there and the compiler says so.
+            // Without the `audio` feature there is no `Stream` to hold (`Infallible`), so this arm
+            // is unreachable there and `-D warnings` refuses it. The other one matches the empty type.
             #[cfg(feature = "audio")]
             Ok(v) => (Some(v), true),
             #[cfg(not(feature = "audio"))]

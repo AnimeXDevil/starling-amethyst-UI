@@ -274,6 +274,8 @@ pub(super) fn run_loading(
     let loading = Loading {
         window: None,
         renderer: None,
+        boot_renderer: None,
+        world_renderer: None,
         boot: horizon_client::hud::HudAtlas::boot(),
         gui: None,
         settings,

@@ -926,11 +926,15 @@ impl TouchUi {
             }
         }
         let p = [p[0] - if self.hub_visible { 0. } else { 36. }, p[1]];
-        if self.expanded && (3.0..203.0).contains(&p[0]) && (27.0..219.0).contains(&p[1]) {
-            let i = ((p[1] - 27.0) / 24.0) as usize * 4 + ((p[0] - 3.0) / 50.0) as usize;
-            if i == 28 {
-                return Some(Action::LatchF3);
+        if self.expanded && (3.0..51.0).contains(&p[0]) && (195.0..215.0).contains(&p[1]) {
+            return Some(Action::LatchF3);
+        }
+        if self.expanded && (3.0..203.0).contains(&p[0]) && (27.0..195.0).contains(&p[1]) {
+            let (x, y) = (p[0] - 3.0, p[1] - 27.0);
+            if x % 50.0 >= 48.0 || y % 24.0 >= 20.0 {
+                return None;
             }
+            let i = (y / 24.0) as usize * 4 + (x / 50.0) as usize;
             return KEYS.get(i).map(|(_, k)| match i {
                 23 => Action::Pick,
                 24.. => Action::DebugCombo(*k),
@@ -938,32 +942,6 @@ impl TouchUi {
             });
         }
         None
-    }
-    /// [`Self::action`] for a touch at `px` (window pixels) on a window `size` pixels big whose
-    /// keys are drawn between a camera cutout's strips, `left` and `right` GUI pixels wide
-    /// (`draw_between_strips`). The point and the width go into that layout here, once: the
-    /// game took the strip off both a second time, and the keys at the left ("...", F3, F5,
-    /// Chat) were hit a strip's width right of where they were drawn.
-    pub fn action_at(
-        &self,
-        size: [u32; 2],
-        px: [f32; 2],
-        [left, right]: [f32; 2],
-        menu: bool,
-    ) -> Option<Action> {
-        let b = HudBatch::new(
-            size,
-            crate::hud::GuiScale {
-                requested: 0,
-                unicode: false,
-            },
-        );
-        self.action(
-            (b.width - left - right).max(0.0),
-            b.height,
-            point_between_strips(px, b.scale, left),
-            menu,
-        )
     }
     pub fn draw(&self, b: &mut HudBatch, a: &HudAtlas, menu: bool) {
         if menu && !self.goy_mode && self.keyboard_button {
@@ -8245,7 +8223,8 @@ mod tests {
         );
     }
 
-    /// The hub's "..." and its "H" button drawn between a camera cutout's strips are where a
+    /// The hub's "..." and its "H" button drawn between a camera cutout's strips (as
+    /// `Game::draw_clear_of_cutout` draws them: narrowed, then moved in from the left) are where a
     /// touch on them lands, whatever the inset (#166).
     #[test]
     fn the_hub_buttons_are_hit_where_they_are_drawn_beside_a_cutout() {
@@ -8284,27 +8263,27 @@ mod tests {
                 hub_visible: true,
                 ..Default::default()
             };
-            // The "...": drawn clear of the strips, hit by `action_at` from the touch's own
-            // window pixels, as the game tests it.
+            // The "...": drawn clear of the strips and hit as `Game::android_aux_touch` tests a
+            // touch: its window pixels at the hub's scale, the strip taken off the point and the
+            // width once (a second time hit the keys at the left a strip's width off).
             draw_between_strips(&mut batch, left, right, |b| ui.draw(b, &atlas, false));
             let [x0, y0, x1, y1] = bounds(&batch, 0);
             assert!(
                 x0 >= left,
                 "inset {inset}: the key keeps out of the left strip"
             );
-            let y = (y0 + y1) / 2.0 * scale;
+            let hit_at = |x: f32| {
+                let p = point_between_strips([x * scale, (y0 + y1) / 2.0 * scale], scale, left);
+                ui.action(batch.width - left - right, batch.height, p, false)
+            };
             for x in [x0 + 2.0, (x0 + x1) / 2.0, x1 - 2.0] {
                 assert!(
-                    matches!(
-                        ui.action_at([3200, 1440], [x * scale, y], [left, right], false),
-                        Some(Action::More)
-                    ),
+                    matches!(hit_at(x), Some(Action::More)),
                     "inset {inset}: a touch at {x} on the \"...\" drawn from {x0} to {x1} misses it"
                 );
             }
             assert!(
-                ui.action_at([3200, 1440], [(x1 + 4.0) * scale, y], [left, right], false)
-                    .is_none(),
+                hit_at(x1 + 4.0).is_none(),
                 "inset {inset}: a touch right of the drawn \"...\" still hits it"
             );
             // The "H": the floating menu's button, tapped where it is drawn.
@@ -8373,6 +8352,13 @@ mod tests {
         assert!(matches!(
             ui.action(400.0, 240.0, [160.0, 30.0], false),
             Some(Action::Key(KeyCode::F4))
+        ));
+        assert!(ui.action(400., 240., [52., 30.], false).is_none());
+        assert!(ui.action(400., 240., [10., 48.], false).is_none());
+        assert!(ui.action(400., 240., [70., 200.], false).is_none());
+        assert!(matches!(
+            ui.action(400., 240., [10., 200.], false),
+            Some(Action::LatchF3)
         ));
         ui.expanded = false;
         ui.goy_mode = true;

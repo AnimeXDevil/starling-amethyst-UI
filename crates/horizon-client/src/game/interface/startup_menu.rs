@@ -835,8 +835,8 @@ impl Loading {
                     !crate::performance::gpu_profile(),
                     &horizon_client::logging::private_home(),
                 ),
-                // No world debug list exists before Game construction.
-                Event::DebugEntriesChanged => {}
+                // No world debug list exists before Game construction, nor a renderer to test.
+                Event::DebugEntriesChanged | Event::PerfLab(_) => {}
                 Event::Changed => {
                     self.save_menu_settings();
                     // Starling: the touch options (vibration, ...) live in horizon-touch.json,
@@ -1865,6 +1865,8 @@ mod tests {
         Loading {
             window: None,
             renderer: None,
+            boot_renderer: None,
+            world_renderer: None,
             boot: horizon_client::hud::HudAtlas::boot(),
             gui: None,
             settings: Settings::default(),

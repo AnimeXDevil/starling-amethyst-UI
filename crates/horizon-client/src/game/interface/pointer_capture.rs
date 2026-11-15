@@ -6,6 +6,17 @@ fn studio_suppresses_focus_pause(replay_active: bool, freecam_active: bool) -> b
     replay_active || freecam_active
 }
 
+/// Whether `settle_after_run` grabs again: a window whose grab is the system's (a winit grab
+/// mode) holds it exactly while the game has it grabbed. Android's grab is the activity's pointer
+/// capture, never a grab mode (`capture` leaves `capture_mode` at None), so there the two never
+/// match: grabbing again every frame asked Android for the capture some 120 times a second, threw
+/// each frame's first mouse move away (`set_ignore_first_move`) and pressed the held keys again
+/// (`restore_held_keys`). The view stuttered and jumped with a mouse (#467, #499), and a key held
+/// down (sprint's Ctrl) was pressed anew every frame.
+fn regrab_after_run(android: bool, internal_grab: bool, captured: bool, grab_mode: bool) -> bool {
+    !android && !internal_grab && captured != grab_mode
+}
+
 impl Game<'_> {
     /// The options `MouseHandler.turnPlayer` reads.
     pub(super) fn look_options(&self) -> LookOptions {
@@ -336,7 +347,12 @@ impl Game<'_> {
         }
         // Outside a run, a window whose grab is the system's holds it exactly while the game
         // has it grabbed; only a run leaves the two apart.
-        if !self.internal_grab() && self.captured != self.capture_mode.is_some() {
+        if regrab_after_run(
+            cfg!(target_os = "android"),
+            self.internal_grab(),
+            self.captured,
+            self.capture_mode.is_some(),
+        ) {
             let grab = self.captured;
             self.captured = self.capture_mode.is_some();
             self.capture(grab);
@@ -434,7 +450,7 @@ fn top_screen_pauses(dialog: Option<bool>, book: Option<bool>, screen: bool, win
 
 #[cfg(test)]
 mod tests {
-    use super::{studio_suppresses_focus_pause, top_screen_pauses};
+    use super::{regrab_after_run, studio_suppresses_focus_pause, top_screen_pauses};
 
     #[test]
     fn studio_replay_and_freecam_never_pause_on_focus_loss() {
@@ -464,5 +480,17 @@ mod tests {
         assert!(top_screen_pauses(None, Some(true), false, false));
         // A dialog opens over the book.
         assert!(!top_screen_pauses(Some(false), Some(true), false, false));
+    }
+
+    /// Android's pointer capture has no grab mode: a captured mouse stays as it is, frame after
+    /// frame (#467, #499). A computer's window whose grab went is grabbed again, outside a run.
+    #[test]
+    fn a_captured_android_mouse_is_not_grabbed_again_every_frame() {
+        assert!(!regrab_after_run(true, false, true, false));
+        assert!(!regrab_after_run(true, false, false, false));
+        assert!(regrab_after_run(false, false, true, false));
+        assert!(regrab_after_run(false, false, false, true));
+        assert!(!regrab_after_run(false, false, true, true));
+        assert!(!regrab_after_run(false, true, true, false));
     }
 }

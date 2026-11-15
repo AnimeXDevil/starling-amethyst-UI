@@ -473,11 +473,12 @@ impl Game<'_> {
                 Event::DiagnosticsOpen => self.open_diagnostics(),
                 Event::DiagnosticsRecord => self.toggle_diagnostic_recording(),
                 Event::DiagnosticsGpu => self.toggle_diagnostic_gpu(),
+                Event::PerfLab(i) => self.perf_lab_next(i),
                 Event::ButtonClick => self.audio.play_button_click(),
                 Event::DebugEntriesChanged => self.debug_entries.invalidate(),
                 Event::Changed => {
                     #[cfg(target_os = "android")]
-                    self.mobile_options_apply();
+                    self.mobile_options_apply(true);
                     self.settings.save(&Self::options_path());
                     self.settings.keys.sync_action_bindings();
                     self.apply_settings();
@@ -487,9 +488,11 @@ impl Game<'_> {
                     self.sync_agent_control();
                     self.ui.options.agent_status = self.agent_status_lines();
                 }
+                // Every step of a drag: applied, and written once when the slider is let go
+                // (`Changed`).
                 Event::SliderDrag => {
                     #[cfg(target_os = "android")]
-                    self.mobile_options_apply();
+                    self.mobile_options_apply(false);
                     self.apply_settings();
                 }
                 // Options.createSoundSliderOptionInstance: the preview plays
@@ -511,6 +514,10 @@ impl Game<'_> {
                 Event::PlayMusicTrack(event, track) => self.play_music_track(&event, &track),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
+                    // A drag that ended without a release (`Changed`) still has its touch settings
+                    // written.
+                    #[cfg(target_os = "android")]
+                    self.mobile_options_apply(true);
                     self.settings.save(&Self::options_path());
                     let to_game = self.options_from_title;
                     let back = if let Some(screen) = self.panel.recipes_settings_return.take() {
@@ -918,6 +925,15 @@ impl Game<'_> {
             .settings
             .horizon
             .battery_limit(limit, self.title.is_none(), self.focused);
+        // Starling: on a phone a menu over the world (pause, inventory, ...) draws at most 60
+        // frames a second. A paused game's menu draws its kept backdrop (`menu_blur_cache`) so
+        // cheaply that it ran at 300+ FPS, warming the phone for nothing.
+        #[cfg(target_os = "android")]
+        let limit = if context.has_screen {
+            limit.min(60)
+        } else {
+            limit
+        };
         // A native mod may only lower it (`native_framerate_limit`).
         let mut hooked = limit;
         self.native_framerate_limit(

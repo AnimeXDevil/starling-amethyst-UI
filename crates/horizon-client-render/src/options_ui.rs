@@ -2066,6 +2066,7 @@ pub(crate) enum Act {
     DiagnosticsOpen,
     DiagnosticsRecord,
     DiagnosticsGpu,
+    PerfLab(u8),
     None,
     Push(Page),
     Done,
@@ -2266,6 +2267,8 @@ pub enum Event {
     DiagnosticsGpu,
     /// Dropped resource packs accepted on the confirmation screen.
     ImportPacks(Vec<std::path::PathBuf>),
+    /// One of the performance test's switches (`perf_lab`), by index: the next choice.
+    PerfLab(u8),
     /// The Pack Options page closed with changes: the player's choices of its entries, the
     /// ones that differ from their defaults (the others went back to theirs).
     PackOptions {
@@ -2489,6 +2492,11 @@ pub struct OptionsUi {
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
     pub diagnostics_status: Vec<String>,
+    /// Starling's performance test on the Diagnostics page (game/starling/perf_lab.rs): its
+    /// switches' labels, each a button (`Event::PerfLab` with its index), and the lines after
+    /// them. Empty: no test section.
+    pub perf_lab: Vec<String>,
+    pub perf_lab_notes: Vec<String>,
     /// A repro recording is running: the AI Agent page's button says stop.
     pub agent_recording: bool,
     /// The Music page's groups (set by the game when it opens the page).
@@ -2642,6 +2650,8 @@ impl Default for OptionsUi {
             studio: Default::default(),
             agent_status: Vec::new(),
             diagnostics_status: Vec::new(),
+            perf_lab: Vec::new(),
+            perf_lab_notes: Vec::new(),
             agent_recording: false,
             music_groups: Vec::new(),
             focus: None,
@@ -3851,6 +3861,23 @@ impl OptionsUi {
                     ),
                 ];
                 rows.extend(self.diagnostics_status.iter().cloned().map(Row::Note));
+                if !self.perf_lab.is_empty() {
+                    rows.push(Row::Note(lang::get("starling.perf.title")));
+                    rows.push(Row::Note(lang::get("starling.perf.about")));
+                    for (i, label) in self.perf_lab.iter().enumerate() {
+                        rows.push(Row::Buttons(
+                            button(
+                                0.0,
+                                0.0,
+                                310.0,
+                                Text::literal(label.clone()),
+                                Act::PerfLab(i as u8),
+                            ),
+                            None,
+                        ));
+                    }
+                    rows.extend(self.perf_lab_notes.iter().cloned().map(Row::Note));
+                }
                 rows
             }
             Page::SplitSetup => Vec::new(),
@@ -5264,6 +5291,7 @@ impl OptionsUi {
                         Act::DiagnosticsOpen => events.push(Event::DiagnosticsOpen),
                         Act::DiagnosticsRecord => events.push(Event::DiagnosticsRecord),
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
+                        Act::PerfLab(i) => events.push(Event::PerfLab(i)),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
@@ -6523,6 +6551,7 @@ impl OptionsUi {
                         Act::DiagnosticsOpen => events.push(Event::DiagnosticsOpen),
                         Act::DiagnosticsRecord => events.push(Event::DiagnosticsRecord),
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
+                        Act::PerfLab(i) => events.push(Event::PerfLab(i)),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         // Starling's pages answer taps only.
                         Act::CustomButtons
