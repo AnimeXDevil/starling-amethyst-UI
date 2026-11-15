@@ -507,6 +507,9 @@ impl Game<'_> {
                 && !self.has_shift_down()
                 && self.slot_touch_event(events, id, t)
             {
+                // A tap on a slot decides the keyboard as a tap beside the text field does: an
+                // item tapped after typing in a search puts it away.
+                self.keyboard_after_tap(t, [t.location.x as f32, t.location.y as f32]);
                 return;
             }
             self.android_menu_touch(t, events, id);

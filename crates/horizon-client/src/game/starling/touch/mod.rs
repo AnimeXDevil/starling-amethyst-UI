@@ -65,6 +65,27 @@ pub(super) struct ControlFace {
     pub(super) shape: Shape,
 }
 
+/// Whether the keyboard is wanted after a tap on `context`'s screen: `on` says whether the tap
+/// was on the text box (None where its place is not known), `below_line` that it was below the
+/// chat's line, `was_context` and `was_wanted` the state before it.
+pub(super) fn keyboard_wanted_after_tap(
+    context: &str,
+    on: Option<bool>,
+    below_line: bool,
+    was_context: Option<&str>,
+    was_wanted: bool,
+) -> bool {
+    match (context, on) {
+        // Its line, above the keyboard, keeps it; a tap on the rest puts it away, and with it
+        // away any tap brings it back.
+        ("chat", _) => !was_wanted || below_line,
+        (_, Some(on)) => on,
+        // Its place isn't known (the recipe book's search): the tap that focused it opens it, then
+        // a tap goes either way.
+        (_, None) => was_context != Some(context) || !was_wanted,
+    }
+}
+
 /// A wide button: 16 GUI pixels tall, as wide as its label, as vanilla's buttons.
 const WIDE_HEIGHT: f32 = 16.0;
 
@@ -1063,17 +1084,14 @@ impl Game<'_> {
         let cursor = std::mem::replace(&mut self.cursor, gui);
         let on = self.on_text_field();
         self.cursor = cursor;
-        let wanted = match (context, on) {
-            // Its line, above the keyboard, keeps it; a tap on the rest puts it away, and with it
-            // away any tap brings it back.
-            ("chat", _) => {
-                let lift = self.keyboard_height() as f32 / batch.scale;
-                !self.touch.wanted || gui.1 + lift >= batch.height - 16.0
-            }
-            (_, Some(on)) => on,
-            // Its place isn't known: the tap that focused it opens it, then a tap goes either way.
-            (_, None) => self.touch.context != Some(context) || !self.touch.wanted,
-        };
+        let lift = self.keyboard_height() as f32 / batch.scale;
+        let wanted = keyboard_wanted_after_tap(
+            context,
+            on,
+            gui.1 + lift >= batch.height - 16.0,
+            self.touch.context,
+            self.touch.wanted,
+        );
         self.touch.wanted = wanted;
         // A tap that just focused the field (the options' boxes start without the focus): the frame
         // must not take it for a new screen's and put the keyboard away.
@@ -2189,5 +2207,49 @@ impl Game<'_> {
             skin,
             shape: Shape::Round,
         }
+    }
+}
+
+#[cfg(test)]
+mod keyboard_tap_tests {
+    use super::keyboard_wanted_after_tap as wanted;
+
+    #[test]
+    fn a_tap_beside_a_known_text_box_puts_the_keyboard_away_and_one_on_it_brings_it_back() {
+        assert!(!wanted("creative", Some(false), false, Some("creative"), true));
+        assert!(wanted("creative", Some(true), false, Some("creative"), false));
+    }
+
+    #[test]
+    fn an_item_tapped_after_typing_in_the_recipe_search_puts_the_keyboard_away() {
+        // The recipe book's search has no known place: with its keyboard up (`wanted`, for the
+        // same context) any tap goes away from it; with it away the next tap opens it again.
+        assert!(!wanted("recipe", None, false, Some("recipe"), true));
+        assert!(wanted("recipe", None, false, Some("recipe"), false));
+        assert!(wanted("recipe", None, false, None, false));
+    }
+
+    #[test]
+    fn the_chat_keeps_the_keyboard_for_a_tap_on_its_line_only() {
+        assert!(wanted("chat", Some(false), true, Some("chat"), true));
+        assert!(!wanted("chat", Some(false), false, Some("chat"), true));
+        assert!(wanted("chat", Some(false), false, Some("chat"), false));
+    }
+
+    /// The slot path of the phone's menus is the one a tap on an item takes (it does not reach
+    /// `android_menu_touch`): it must decide the keyboard too, or an item tapped after typing in
+    /// the recipe or creative search leaves the keyboard up.
+    #[test]
+    fn a_tap_on_a_slot_of_the_phones_menus_decides_the_keyboard() {
+        let source = include_str!("../mobile_controls/mod.rs");
+        let call = source
+            .find("self.slot_touch_event(events, id, t)")
+            .expect("mobile_touch hands the menus' slots to slot_touch_event");
+        let branch = &source[call..];
+        let branch = &branch[..branch.find("return;").expect("the branch returns")];
+        assert!(
+            branch.contains("self.keyboard_after_tap("),
+            "the slot branch of mobile_touch must call keyboard_after_tap before it returns"
+        );
     }
 }
