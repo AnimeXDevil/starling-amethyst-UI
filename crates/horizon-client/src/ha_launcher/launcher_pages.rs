@@ -315,7 +315,6 @@ pub(super) enum Action {
     ToggleBundled(&'static str),
     WorldFiles,
     GameFiles,
-    StarlingDownload,
     WorkerLimit,
     ChooseWorkerLimit(u32),
     PerformanceHints,
@@ -1429,76 +1428,6 @@ impl Launcher {
                     ),
                 );
 
-                ui.text(
-                    Face::SemiBold,
-                    15.0,
-                    content_x + 22.0,
-                    card_y + 84.0,
-                    my3_text(),
-                    "Horizon Android is becoming Starling",
-                );
-                let notice = "Some Horizon Android features are still being transferred and merged. Export your worlds through Android Files (SAF) before moving.";
-                let mut line_y = card_y + 108.0;
-                let font_size = 11.5;
-                let mut line = String::new();
-                for word in notice.split_whitespace() {
-                    let candidate = if line.is_empty() {
-                        word.to_owned()
-                    } else {
-                        format!("{line} {word}")
-                    };
-                    if !line.is_empty()
-                        && ui.measure(Face::Regular, font_size, &candidate) > content_w - 44.0
-                    {
-                        ui.text(
-                            Face::Regular,
-                            font_size,
-                            content_x + 22.0,
-                            line_y,
-                            my3_muted(),
-                            &line,
-                        );
-                        line_y += 15.0;
-                        line.clear();
-                    }
-                    if !line.is_empty() {
-                        line.push(' ');
-                    }
-                    line.push_str(word);
-                }
-                if !line.is_empty() {
-                    ui.text(
-                        Face::Regular,
-                        font_size,
-                        content_x + 22.0,
-                        line_y,
-                        my3_muted(),
-                        &line,
-                    );
-                }
-                let migration_y = line_y + 24.0;
-                let migration_w = (content_w - 52.0) * 0.5;
-                button(
-                    &mut ui,
-                    &mut self.targets,
-                    [content_x + 22.0, migration_y, migration_w, 34.0],
-                    "Download Starling",
-                    Action::StarlingDownload,
-                    false,
-                );
-                button(
-                    &mut ui,
-                    &mut self.targets,
-                    [
-                        content_x + 30.0 + migration_w,
-                        migration_y,
-                        migration_w,
-                        34.0,
-                    ],
-                    "Export worlds (SAF)",
-                    Action::WorldFiles,
-                    false,
-                );
                 let btn_y = (h - 92.0).max(card_y + card_h + 12.0);
                 let play_w = content_w.min(256.0);
                 let is_launching = self.launching || self.session_worker.is_some();
@@ -2072,7 +2001,7 @@ impl Launcher {
                 x + 22.0,
                 y + 24.0,
                 my3_text(),
-                "Exit Horizon Android?",
+                "Exit Starling?",
             );
             let bw = (width - 52.0) * 0.5;
             button(
@@ -5983,18 +5912,10 @@ impl Launcher {
             Some(Action::ToggleBundled(id)) => {
                 self.toggle_bundled_mod(id)?;
             }
-            Some(Action::StarlingDownload) => {
-                if !crate::ha_launcher::platform::open_url(
-                    "https://github.com/JuanLuci/starling/releases/latest",
-                ) {
-                    self.catalog.status =
-                        "Open github.com/JuanLuci/starling/releases to download Starling.".into();
-                }
-            }
             Some(Action::GameFiles) => {
                 self.catalog.status = if crate::ha_launcher::platform::open_documents(crate::ha_launcher::document_store::ROOT) {
                     "Game files opened. Worlds, mods, packs, shaders and reports are available here."
-                } else { "Open system Files > Horizon Android." }.into();
+                } else { "Open system Files > Starling." }.into();
             }
             Some(Action::WorldFiles) => {
                 let id = crate::ha_launcher::document_store::folder_id(
@@ -6002,8 +5923,8 @@ impl Launcher {
                     "worlds",
                 );
                 self.catalog.status = if crate::ha_launcher::platform::open_documents(&id) {
-                    "In Android Files, select a complete world folder, then Copy to a folder you choose. Keep Horizon Android installed until you verify your worlds in Starling."
-                } else { "Open system Files > Horizon Android > Worlds. Copy complete world folders while the game is closed." }.into();
+                    "In Android Files, select a complete world folder, then Copy to a folder you choose."
+                } else { "Open system Files > Starling > Worlds. Copy complete world folders while the game is closed." }.into();
             }
             Some(Action::WorkerLimit) => self.open_chooser(chooser::Kind::WorkerLimit),
             Some(Action::ChooseWorkerLimit(limit)) => {
@@ -6059,7 +5980,7 @@ impl Launcher {
                 self.catalog.status = if crate::ha_launcher::platform::open_documents(&id) {
                     "Opened in Files. Return here after copying files.".into()
                 } else {
-                    "Open the system Files app and choose Horizon Android.".into()
+                    "Open the system Files app and choose Starling.".into()
                 };
             }
             Some(Action::Import(kind)) => {
@@ -6396,7 +6317,7 @@ impl Launcher {
                 self.catalog.status = if crate::ha_launcher::platform::open_documents("reports") {
                     "Opened Reports folder in system Files.".into()
                 } else {
-                    "Reports are saved under Horizon Android > Reports.".into()
+                    "Reports are saved in Starling's diagnostics.".into()
                 };
             }
             Some(Action::ToggleOpenDirectly) => {

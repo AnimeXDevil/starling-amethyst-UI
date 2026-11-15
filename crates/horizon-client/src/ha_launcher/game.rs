@@ -28,6 +28,8 @@ pub struct Renderer {
     pub suspended: bool,
     pub config: Surface,
     pub info: wgpu::AdapterInfo,
+    /// The first frame reached the screen: StarlingActivity holds its window back until then.
+    shown: bool,
 }
 
 impl Renderer {
@@ -64,6 +66,10 @@ impl Renderer {
             return Ok(false);
         }
         self.boot.render(batch, 0.0)?;
+        if !self.shown {
+            self.shown = true;
+            crate::android::first_frame_shown();
+        }
         Ok(true)
     }
 }
@@ -100,6 +106,7 @@ pub fn loading_renderer(
         suspended: false,
         config: Surface { width, height },
         info,
+        shown: false,
     })
 }
 
