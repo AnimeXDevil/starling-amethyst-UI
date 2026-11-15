@@ -86,6 +86,32 @@ pub(super) fn keyboard_wanted_after_tap(
     }
 }
 
+/// The screen a finger lands on, to tell a tap that opened another one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct ScreenMark {
+    screen: std::mem::Discriminant<Screen>,
+    title: Option<&'static str>,
+    preparing: bool,
+}
+
+impl ScreenMark {
+    /// `title` is the title screen's id and whether it is preparing the next one, when it shows.
+    pub(super) fn new(screen: &Screen, title: Option<(&'static str, bool)>) -> Self {
+        Self {
+            screen: std::mem::discriminant(screen),
+            title: title.map(|(id, _)| id),
+            preparing: title.is_some_and(|(_, preparing)| preparing),
+        }
+    }
+}
+
+/// Whether the tap that ended on `now` opened another screen than the one it landed on (the
+/// button of a title screen that opens Create New World, its name box focused): it was not a tap
+/// on that screen's text box, wherever the box is.
+pub(super) fn tap_opened_screen(landed: Option<ScreenMark>, now: ScreenMark) -> bool {
+    landed.is_some_and(|landed| landed != now)
+}
+
 /// A wide button: 16 GUI pixels tall, as wide as its label, as vanilla's buttons.
 const WIDE_HEIGHT: f32 = 16.0;
 
@@ -139,6 +165,8 @@ pub(super) struct Touch {
     context: Option<&'static str>,
     /// Where the last finger landed: lifted about there, it was a tap (`keyboard_after_tap`).
     tap_from: Option<[f32; 2]>,
+    /// The screen that finger landed on: a tap that opened another one decided nothing.
+    tap_screen: Option<ScreenMark>,
     /// A tap checked after drawing, when even an unknown screen has reported its focused box.
     field_tap: Option<[f32; 2]>,
     focused_field: Option<[f32; 4]>,
@@ -772,6 +800,7 @@ impl Game<'_> {
         let p = [t.location.x as f32, t.location.y as f32];
         if t.phase == TouchPhase::Started {
             self.touch.tap_from = Some(p);
+            self.touch.tap_screen = Some(self.screen_mark());
         }
         // The chat bar: a tap is its key, and the finger stays the bar's until it lifts.
         if t.phase == TouchPhase::Started
@@ -1049,17 +1078,26 @@ impl Game<'_> {
 
     /// A tap decides the keyboard wherever it landed, a slot too: on the text field it comes up,
     /// beside it it goes away. A finger that moved (a list scrolling) leaves it as it is.
-    pub(super) fn keyboard_after_tap(&mut self, t: &winit::event::Touch, p: [f32; 2]) {
+    /// True when the tap opened another screen (it decided nothing: see [`tap_opened_screen`]).
+    pub(super) fn keyboard_after_tap(&mut self, t: &winit::event::Touch, p: [f32; 2]) -> bool {
         if t.phase != TouchPhase::Ended {
-            return;
+            return false;
         }
         let Some(from) = self.touch.tap_from.take() else {
-            return;
+            return false;
         };
+        let landed = self.touch.tap_screen.take();
         let layout = self.touch_layout();
         let slop = touch::slop(layout.width, layout.height);
         if (p[0] - from[0]).hypot(p[1] - from[1]) >= slop {
-            return;
+            return false;
+        }
+        if tap_opened_screen(landed, self.screen_mark()) {
+            // The screen it opened has a focused box (Create New World's name) that was not
+            // tapped: nothing asks for the keyboard, and one up for the screen left goes.
+            self.touch.wanted = false;
+            self.touch.field_tap = None;
+            return true;
         }
         let Some(context) = self.text_context() else {
             let batch = HudBatch::new(
@@ -1070,7 +1108,7 @@ impl Game<'_> {
                 },
             );
             self.touch.field_tap = Some([p[0] / batch.scale, p[1] / batch.scale]);
-            return;
+            return false;
         };
         let batch = HudBatch::new(
             self.touch_size(),
@@ -1099,6 +1137,13 @@ impl Game<'_> {
             self.touch.context = Some(context);
             self.touch.keyboard_request = true;
         }
+        false
+    }
+
+    /// What the screen shown is, for [`tap_opened_screen`].
+    fn screen_mark(&self) -> ScreenMark {
+        let title = self.title.as_ref().map(|t| (t.mode.id(), t.preparing()));
+        ScreenMark::new(&self.screen, title)
     }
 
     /// Whether a text field that holds the focus shows it: with fingers, while the keyboard is up.
@@ -2251,5 +2296,31 @@ mod keyboard_tap_tests {
             branch.contains("self.keyboard_after_tap("),
             "the slot branch of mobile_touch must call keyboard_after_tap before it returns"
         );
+    }
+}
+
+#[cfg(test)]
+mod tap_screen_tests {
+    use super::{Screen, ScreenMark, tap_opened_screen};
+
+    #[test]
+    fn a_tap_that_opens_create_world_is_not_a_tap_on_its_name_box() {
+        let select = ScreenMark::new(&Screen::Playing, Some(("select_world", false)));
+        let preparing = ScreenMark::new(&Screen::Playing, Some(("select_world", true)));
+        let create = ScreenMark::new(&Screen::Playing, Some(("create_world", false)));
+        // The title's button opens it at once (no saved worlds), or after the read it starts.
+        assert!(tap_opened_screen(Some(select), create));
+        assert!(tap_opened_screen(Some(select), preparing));
+        // A tap on the screen that stays is a tap there; so is one with no landing recorded.
+        assert!(!tap_opened_screen(Some(create), create));
+        assert!(!tap_opened_screen(None, create));
+    }
+
+    #[test]
+    fn a_tap_that_opens_a_game_screen_over_the_title_or_the_world_counts_too() {
+        let world = ScreenMark::new(&Screen::Playing, None);
+        let inventory = ScreenMark::new(&Screen::Inventory, None);
+        assert!(tap_opened_screen(Some(world), inventory));
+        assert!(!tap_opened_screen(Some(inventory), inventory));
     }
 }
