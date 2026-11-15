@@ -1,10 +1,10 @@
 use super::*;
-use crate::catalog::SettingsCategory;
-use horizon_client::{
-    gfx::Renderer,
+use crate::ha_launcher::catalog::SettingsCategory;
+use crate::ha_launcher::client::{
     osk::Output,
     ui_theme::{Icon, color},
 };
+use crate::ha_launcher::game::Renderer;
 use std::sync::atomic::Ordering;
 use winit::{
     event::{KeyEvent, Touch},
@@ -16,66 +16,69 @@ thread_local! {
     static SLIDER_TRACK_TARGETS: std::cell::RefCell<Vec<([f32; 4], Action, f32, f32)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Centralized dynamic theme accessors backed by `horizon_client::ui_theme::active_theme()`.
+/// Centralized dynamic theme accessors backed by `crate::ha_launcher::client::ui_theme::active_theme()`.
 #[inline]
 fn my3_bg() -> u32 {
-    horizon_client::ui_theme::active_theme().bg_solid
+    crate::ha_launcher::client::ui_theme::active_theme().bg_solid
 }
 #[inline]
 fn my3_surface() -> u32 {
-    horizon_client::ui_theme::active_theme().surface
+    crate::ha_launcher::client::ui_theme::active_theme().surface
 }
 #[inline]
 fn my3_card_bg() -> u32 {
-    horizon_client::ui_theme::active_theme().surface_dim
+    crate::ha_launcher::client::ui_theme::active_theme().surface_dim
 }
 #[inline]
 fn my3_card_border() -> u32 {
-    horizon_client::ui_theme::active_theme().border
+    crate::ha_launcher::client::ui_theme::active_theme().border
 }
 #[inline]
 fn my3_surface_high() -> u32 {
-    horizon_client::ui_theme::active_theme().surface_bright
+    crate::ha_launcher::client::ui_theme::active_theme().surface_bright
 }
 #[inline]
 fn my3_border() -> u32 {
-    horizon_client::ui_theme::active_theme().border
+    crate::ha_launcher::client::ui_theme::active_theme().border
 }
 #[inline]
 fn my3_nav_active() -> u32 {
-    horizon_client::ui_theme::active_theme().surface_selected
+    crate::ha_launcher::client::ui_theme::active_theme().surface_selected
 }
 #[inline]
 fn my3_accent() -> u32 {
-    horizon_client::ui_theme::active_theme().accent
+    crate::ha_launcher::client::ui_theme::active_theme().accent
 }
 #[inline]
 fn my3_accent_soft() -> u32 {
-    horizon_client::ui_theme::active_theme().accent_soft
+    crate::ha_launcher::client::ui_theme::active_theme().accent_soft
 }
 #[inline]
 fn my3_on_accent() -> u32 {
-    horizon_client::ui_theme::active_theme().on_accent
+    crate::ha_launcher::client::ui_theme::active_theme().on_accent
 }
 #[inline]
 fn my3_track() -> u32 {
-    horizon_client::ui_theme::active_theme().surface_dim
+    crate::ha_launcher::client::ui_theme::active_theme().surface_dim
 }
 #[inline]
 fn my3_pause_bg() -> u32 {
-    horizon_client::ui_theme::active_theme().surface_bright
+    crate::ha_launcher::client::ui_theme::active_theme().surface_bright
 }
 #[inline]
 fn my3_cancel_bg() -> u32 {
-    color::with_alpha(horizon_client::ui_theme::active_theme().danger, 0.28)
+    color::with_alpha(
+        crate::ha_launcher::client::ui_theme::active_theme().danger,
+        0.28,
+    )
 }
 #[inline]
 fn my3_text() -> u32 {
-    horizon_client::ui_theme::active_theme().text_primary
+    crate::ha_launcher::client::ui_theme::active_theme().text_primary
 }
 #[inline]
 fn my3_muted() -> u32 {
-    horizon_client::ui_theme::active_theme().text_muted
+    crate::ha_launcher::client::ui_theme::active_theme().text_muted
 }
 
 /// Smooth 60fps UI animation state across navigation, pages, accordions, theme previews, progress bars, and modals.
@@ -141,7 +144,7 @@ impl AnimState {
         self.last_tick = now;
         self.target_nav_y = target_nav_y;
 
-        if horizon_client::ui_theme::motion::reduced_motion() {
+        if crate::ha_launcher::client::ui_theme::motion::reduced_motion() {
             self.intro_done = true;
             self.last_page = page;
             self.last_category = category;
@@ -195,7 +198,7 @@ impl AnimState {
     }
 
     pub fn trigger_page_transition(&mut self) {
-        if !horizon_client::ui_theme::motion::reduced_motion() {
+        if !crate::ha_launcher::client::ui_theme::motion::reduced_motion() {
             self.last_tick = std::time::Instant::now();
             self.page_fade = 0.0;
             self.page_slide = 18.0;
@@ -203,7 +206,7 @@ impl AnimState {
     }
 
     pub fn trigger_theme_pulse(&mut self) {
-        if !horizon_client::ui_theme::motion::reduced_motion() {
+        if !crate::ha_launcher::client::ui_theme::motion::reduced_motion() {
             self.last_tick = std::time::Instant::now();
             self.theme_pulse = 0.0;
         }
@@ -213,7 +216,7 @@ impl AnimState {
         if !self.intro_done {
             return true;
         }
-        if horizon_client::ui_theme::motion::reduced_motion() {
+        if crate::ha_launcher::client::ui_theme::motion::reduced_motion() {
             return false;
         }
         self.page_fade < 0.99
@@ -235,8 +238,8 @@ pub(super) enum Action {
     PauseCatalogDownload,
     CancelCatalogDownload,
     Search,
-    ShaderSource(crate::shader_catalog::Origin),
-    ModSource(crate::shader_catalog::Origin),
+    ShaderSource(crate::ha_launcher::shader_catalog::Origin),
+    ModSource(crate::ha_launcher::shader_catalog::Origin),
     Field(&'static str),
     FinishNameEdit,
     Install(usize),
@@ -245,8 +248,8 @@ pub(super) enum Action {
     CloseProjectModal,
     SelectModalVersion(usize),
     InstallModalProject,
-    Import(horizon_client::content_files::Kind),
-    OpenFolder(horizon_client::content_files::Kind),
+    Import(crate::ha_launcher::client::content_files::Kind),
+    OpenFolder(crate::ha_launcher::client::content_files::Kind),
     ToggleSection(usize),
     ToggleLocal(usize),
     DeleteLocal(usize),
@@ -291,20 +294,20 @@ pub(super) enum Action {
     CloseLogin,
     Renderer,
     RenderScale,
-    ChooseRenderScale(crate::display::RenderScale),
+    ChooseRenderScale(crate::ha_launcher::display::RenderScale),
     UiScale,
     ChooseUiScale(u32),
     Orientation,
     InputHost,
-    ChooseInputHost(crate::catalog::InputHost),
-    ChooseOrientation(crate::catalog::Orientation),
-    ChooseRenderer(crate::catalog::RendererMode),
+    ChooseInputHost(crate::ha_launcher::catalog::InputHost),
+    ChooseOrientation(crate::ha_launcher::catalog::Orientation),
+    ChooseRenderer(crate::ha_launcher::catalog::RendererMode),
     ChooseProfile(u32),
     Dismiss,
     Immersive,
     Cutout,
     Aspect,
-    ChooseAspect(crate::display::Aspect),
+    ChooseAspect(crate::ha_launcher::display::Aspect),
     DisplayHz,
     ChooseDisplayHz(u16),
     CacheBudget,
@@ -330,6 +333,7 @@ pub(super) enum Action {
     FovDelta(f32),
     // Animation & Diagnostics Modal actions
     ToggleLauncherAnimations,
+    ToggleOpenDirectly,
     ToggleGameAnimations,
     CloseDiagnosticsSummary,
     OpenReportsFolder,
@@ -353,7 +357,7 @@ pub(super) enum Action {
     VirtualMouseSpeedDelta(f32),
     ButtonScaleDelta(f32),
     ToggleControlScheme,
-    SelectControlMode(horizon_client::touch::ControlStyle),
+    SelectControlMode(crate::ha_launcher::client::touch::ControlStyle),
     CopyActivePreset,
     EditActivePresetMeta,
     ToggleSplitControls,
@@ -371,10 +375,10 @@ pub(super) enum Action {
     ToggleAutoJump,
     ToggleInventoryControls,
     // Theme customization actions (Settings -> Launcher Settings -> Theme)
-    SelectThemePreset(horizon_client::ui_theme::ThemePreset),
-    SetThemeAppearance(horizon_client::ui_theme::ThemeAppearance),
-    SetThemeBackgroundMode(horizon_client::ui_theme::BackgroundMode),
-    SetGradientDirection(horizon_client::ui_theme::GradientDirection),
+    SelectThemePreset(crate::ha_launcher::client::ui_theme::ThemePreset),
+    SetThemeAppearance(crate::ha_launcher::client::ui_theme::ThemeAppearance),
+    SetThemeBackgroundMode(crate::ha_launcher::client::ui_theme::BackgroundMode),
+    SetGradientDirection(crate::ha_launcher::client::ui_theme::GradientDirection),
     ToggleGradientThreeStops,
     StepGradientMidPos(i8),
     SelectAccentSwatch(u32),
@@ -384,8 +388,8 @@ pub(super) enum Action {
     ResetTheme,
     // Intro & Installed / File Manager actions
     SkipIntro,
-    SetInstalledSubTab(crate::catalog::InstalledSubTab),
-    SetInstalledFilter(crate::catalog::InstalledFilter),
+    SetInstalledSubTab(crate::ha_launcher::catalog::InstalledSubTab),
+    SetInstalledFilter(crate::ha_launcher::catalog::InstalledFilter),
     CycleInstalledSort,
     ExportLocal(usize),
     FmNavigateRoot(&'static str),
@@ -987,7 +991,7 @@ impl Launcher {
         self.navigate_key(&key.logical_key)
     }
     pub(super) fn navigate_key(&mut self, key: &winit::keyboard::Key) -> bool {
-        use horizon_client::gamepad::{self, Button};
+        use crate::ha_launcher::client::gamepad::{self, Button};
         use winit::keyboard::{Key, NamedKey};
         if self.pending_focus.is_some() {
             return true;
@@ -1074,31 +1078,37 @@ impl Launcher {
             let game_home = self.catalog.config.game_home(&self.home);
             let prev_cwd = std::env::current_dir().ok();
             let _ = std::env::set_current_dir(&game_home);
-            let mut b = HudBatch::new([r.config.width, r.config.height]);
+            let mut b = HudBatch::scratch([r.config.width, r.config.height]);
             tc.viewport(r.config.width, r.config.height);
             let profile_name = tc.settings.active_profile.clone();
-            horizon_client::touch_ui::draw_hud_editor(tc, &mut b, &gui.atlas, &profile_name, None);
+            crate::ha_launcher::client::touch_ui::draw_hud_editor(
+                tc,
+                &mut b,
+                &gui.atlas,
+                &profile_name,
+                None,
+            );
             if let Some(prev) = prev_cwd {
                 let _ = std::env::set_current_dir(prev);
             }
             if !r.render(&game::loading_frame(&b))? && !b.patches.is_empty() {
-                horizon_client::ui_theme::reset_atlas();
+                crate::ha_launcher::client::ui_theme::reset_atlas();
             }
             return Ok(());
         }
 
-        let mut b = HudBatch::new([r.config.width, r.config.height]);
+        let mut b = HudBatch::scratch([r.config.width, r.config.height]);
         let mut ui = Ui::mobile(&gui.atlas, &mut b, (0.0, 0.0));
         // Keep ui.w and ui.h synchronized with Launcher::ui_density(). When the soft keyboard is
         // active, compute ime_top_dp and bias scroll offsets / modal Y positions instead of shrinking ui.h.
         let ime_top_dp = if self.catalog.editing.is_some() {
-            crate::native_ime::viewport_bottom()
+            crate::ha_launcher::native_ime::viewport_bottom()
                 .map(|bottom_px| (bottom_px as f32 / ui.density).clamp(110.0, ui.h))
         } else {
             None
         };
         let (w, h) = (ui.w, ui.h);
-        let active_th = horizon_client::ui_theme::active_theme();
+        let active_th = crate::ha_launcher::client::ui_theme::active_theme();
         ui.draw_theme_background(0.0, 0.0, w, h, &active_th);
 
         // ---- Top Header Bar (brand lockup ... account pill) ----
@@ -1142,7 +1152,7 @@ impl Launcher {
 
         let brand_w = (eq_btn_rect[0] - 66.0).max(70.0);
         ui.text(Face::SemiBold, 16.0, 54.0, 10.0, my3_text(), "Horizon");
-        let version_line = format!("Android {}", crate::backend::VERSION);
+        let version_line = format!("Android {}", crate::ha_launcher::backend::VERSION);
         let fitted_version = ui.fit_text(Face::Regular, 11.0, &version_line, brand_w);
         ui.text(
             Face::Regular,
@@ -1316,8 +1326,8 @@ impl Launcher {
                 Action::CancelCatalogDownload,
             );
         } else if page == Page::Play {
-            use horizon_client::official_install::InstallStage;
-            let installed = horizon_client::official_install::ready(&self.home);
+            use crate::ha_launcher::client::official_install::InstallStage;
+            let installed = crate::ha_launcher::client::official_install::ready(&self.home);
             let installing = self.worker.is_some();
             let progress = *self
                 .install
@@ -1565,7 +1575,7 @@ impl Launcher {
                 },
             );
             if matches!(page, Page::Shaders | Page::Mods) {
-                use crate::shader_catalog::Origin;
+                use crate::ha_launcher::shader_catalog::Origin;
                 let seg_w = 100.0;
                 for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
                     let rx = content_x + content_w - (2 - i) as f32 * (seg_w + 6.0) + 6.0;
@@ -1625,9 +1635,9 @@ impl Launcher {
             );
 
             let kind = match page {
-                Page::Mods => horizon_client::content_files::Kind::Mods,
-                Page::Shaders => horizon_client::content_files::Kind::Shaders,
-                _ => horizon_client::content_files::Kind::Packs,
+                Page::Mods => crate::ha_launcher::client::content_files::Kind::Mods,
+                Page::Shaders => crate::ha_launcher::client::content_files::Kind::Shaders,
+                _ => crate::ha_launcher::client::content_files::Kind::Packs,
             };
             let sub_y = 140.0 + slide_y;
             button(
@@ -1665,10 +1675,11 @@ impl Launcher {
             }
 
             let bundled: Vec<_> = if page == Page::Mods
-                && self.catalog.config.mod_source == crate::shader_catalog::Origin::Horizon
+                && self.catalog.config.mod_source
+                    == crate::ha_launcher::shader_catalog::Origin::Horizon
             {
                 let query = self.catalog.query.to_lowercase();
-                horizon_client::mod_list::ANDROID_BUNDLED
+                crate::ha_launcher::client::mod_list::ANDROID_BUNDLED
                     .into_iter()
                     .filter(|(id, title, _)| {
                         id.contains(&query) || title.to_lowercase().contains(&query)
@@ -1684,8 +1695,8 @@ impl Launcher {
                 .enumerate()
                 .filter(|(_, p)| {
                     !(page == Page::Mods
-                        && p.source == crate::browser::SourceId::Horizon
-                        && horizon_client::mod_list::ANDROID_BUNDLED
+                        && p.source == crate::ha_launcher::browser::SourceId::Horizon
+                        && crate::ha_launcher::client::mod_list::ANDROID_BUNDLED
                             .iter()
                             .any(|(id, _, _)| *id == p.id))
                 })
@@ -1847,10 +1858,12 @@ impl Launcher {
 
                 let text_max = (content_w - 190.0).max(80.0);
                 let title = ui.fit_text(Face::SemiBold, 15.0, &p.title, text_max);
-                let rich_summary = if crate::catalog::source_only_mod(p) {
+                let rich_summary = if crate::ha_launcher::catalog::source_only_mod(p) {
                     "Native .hnmod temporarily unsupported on Android; built-in mods are available."
                 } else {
-                    self.catalog.enriched_summaries.get(&p.id)
+                    self.catalog
+                        .enriched_summaries
+                        .get(&p.id)
                         .map_or(p.summary.as_str(), String::as_str)
                 };
                 let summary = ui.fit_text(Face::Regular, 12.5, rich_summary, text_max);
@@ -2045,7 +2058,7 @@ impl Launcher {
                 w,
                 h,
                 0.0,
-                horizon_client::hud::rgba(0, 0, 0, (180.0 * modal_t) as u8),
+                crate::ha_launcher::client::hud::rgba(0, 0, 0, (180.0 * modal_t) as u8),
             );
             let scale_in = 0.94 + 0.06 * modal_t;
             let width = (w - 32.0).min(360.0) * scale_in;
@@ -2108,7 +2121,7 @@ impl Launcher {
                     *w,
                     *h,
                     (*h * 0.42).clamp(10.0, 22.0),
-                    horizon_client::hud::rgba(255, 255, 255, 36),
+                    crate::ha_launcher::client::hud::rgba(255, 255, 255, 36),
                 );
             }
         }
@@ -2124,10 +2137,10 @@ impl Launcher {
                 *w,
                 *h,
                 (*h * 0.42).clamp(10.0, 22.0),
-                horizon_client::hud::rgba(255, 255, 255, 36),
+                crate::ha_launcher::client::hud::rgba(255, 255, 255, 36),
             );
         }
-        crate::documents::draw_ui(&mut ui);
+        crate::ha_launcher::documents::draw_ui(&mut ui);
         if !self.anim.intro_done {
             let session_prog = if self.session_worker.is_some() {
                 0.30
@@ -2158,7 +2171,7 @@ impl Launcher {
         if !r.render(&game::loading_frame(&b))? && !b.patches.is_empty() {
             // A suspended/lost surface skips the frame, including its glyph
             // uploads. Rebuild them next time instead of caching invisible text.
-            horizon_client::ui_theme::reset_atlas();
+            crate::ha_launcher::client::ui_theme::reset_atlas();
         }
         Ok(())
     }
@@ -2176,8 +2189,8 @@ impl Launcher {
         compact: bool,
         slide_y: f32,
     ) {
-        use crate::catalog::{InstalledFilter, InstalledSubTab};
-        use horizon_client::content_files::Kind;
+        use crate::ha_launcher::catalog::{InstalledFilter, InstalledSubTab};
+        use crate::ha_launcher::client::content_files::Kind;
 
         let header_y = 60.0 + slide_y;
         ui.text(
@@ -2297,7 +2310,7 @@ impl Launcher {
 
             // Filtered items list
             let q = self.catalog.installed_query.trim().to_lowercase();
-            let filtered: Vec<(usize, crate::catalog::LocalItem)> = self
+            let filtered: Vec<(usize, crate::ha_launcher::catalog::LocalItem)> = self
                 .catalog
                 .local
                 .iter()
@@ -2666,7 +2679,7 @@ impl Launcher {
 
         // Row 2: Quick Root Folder Pills (Root, Worlds, Mods, Packs, Shaders, Controls, Shots, Reports)
         let root_y = 128.0 + slide_y;
-        let root_dirs = crate::document_store::FM_ROOT_DIRS;
+        let root_dirs = crate::ha_launcher::document_store::FM_ROOT_DIRS;
         let r_gap = 4.0;
         let r_w = ((content_w - r_gap * (root_dirs.len() as f32 - 1.0)) / root_dirs.len() as f32)
             .max(38.0);
@@ -2880,8 +2893,8 @@ impl Launcher {
                 format!(
                     "{}  •  {}  •  {}",
                     entry.kind_label,
-                    crate::catalog::format_file_size(entry.size_bytes),
-                    crate::document_store::format_timestamp_utc(entry.modified_secs)
+                    crate::ha_launcher::catalog::format_file_size(entry.size_bytes),
+                    crate::ha_launcher::document_store::format_timestamp_utc(entry.modified_secs)
                 )
             };
             ui.text_clipped(
@@ -2945,11 +2958,11 @@ impl Launcher {
             w,
             h,
             0.0,
-            horizon_client::hud::rgba(6, 5, 12, (185.0 * modal_t) as u8),
+            crate::ha_launcher::client::hud::rgba(6, 5, 12, (185.0 * modal_t) as u8),
         );
 
         match modal {
-            crate::catalog::FmModal::ConfirmDelete { paths } => {
+            crate::ha_launcher::catalog::FmModal::ConfirmDelete { paths } => {
                 let mw = (w - 32.0).min(420.0);
                 let mh = 190.0;
                 let mx = (w - mw) * 0.5;
@@ -3005,7 +3018,7 @@ impl Launcher {
                     true,
                 );
             }
-            crate::catalog::FmModal::Rename { target_rel } => {
+            crate::ha_launcher::catalog::FmModal::Rename { target_rel } => {
                 let mw = (w - 32.0).min(430.0);
                 let mh = 196.0;
                 let mx = (w - mw) * 0.5;
@@ -3059,7 +3072,7 @@ impl Launcher {
                     true,
                 );
             }
-            crate::catalog::FmModal::NewFolder => {
+            crate::ha_launcher::catalog::FmModal::NewFolder => {
                 let mw = (w - 32.0).min(430.0);
                 let mh = 196.0;
                 let mx = (w - mw) * 0.5;
@@ -3118,7 +3131,7 @@ impl Launcher {
                     true,
                 );
             }
-            crate::catalog::FmModal::Details(details) => {
+            crate::ha_launcher::catalog::FmModal::Details(details) => {
                 let mw = (w - 36.0).min(560.0);
                 let mh = (h - 32.0).min(340.0);
                 let mx = (w - mw) * 0.5;
@@ -3148,7 +3161,7 @@ impl Launcher {
                     "Path: /{}  •  Kind: {}  •  Size: {} ({} bytes)  •  Modified: {}",
                     details.rel_path,
                     details.kind_label,
-                    crate::catalog::format_file_size(details.size_bytes),
+                    crate::ha_launcher::catalog::format_file_size(details.size_bytes),
                     details.size_bytes,
                     details.modified_label
                 );
@@ -3239,7 +3252,7 @@ impl Launcher {
                 } else {
                     format!("Enable Built-in ({version})")
                 }
-            } else if crate::catalog::source_only_mod(&modal.project) {
+            } else if crate::ha_launcher::catalog::source_only_mod(&modal.project) {
                 "Native .hnmod temporarily unsupported on Android".to_owned()
             } else if let Some(state) = self.catalog.download_label(&modal.project) {
                 state
@@ -3263,7 +3276,7 @@ impl Launcher {
             w,
             h,
             0.0,
-            horizon_client::hud::rgba(6, 5, 12, alpha),
+            crate::ha_launcher::client::hud::rgba(6, 5, 12, alpha),
         );
 
         let scale_in = 0.94 + 0.06 * self.anim.modal_anim.clamp(0.0, 1.0);
@@ -3544,7 +3557,7 @@ impl Launcher {
             w,
             h,
             0.0,
-            horizon_client::hud::rgba(4, 6, 14, (198.0 * modal_t) as u8),
+            crate::ha_launcher::client::hud::rgba(4, 6, 14, (198.0 * modal_t) as u8),
         );
 
         let mw = (w - 28.0).clamp(320.0, 560.0);
@@ -3558,7 +3571,7 @@ impl Launcher {
             mw,
             mh,
             22.0,
-            horizon_client::hud::rgba(0, 0, 0, 175),
+            crate::ha_launcher::client::hud::rgba(0, 0, 0, 175),
         );
         ui.rounded(mx, my, mw, mh, 22.0, my3_surface());
         ui.border(mx, my, mw, mh, 22.0, my3_accent());
@@ -3676,10 +3689,10 @@ impl Launcher {
         ui.rounded(gx, log_y, gw, log_h, 12.0, my3_card_bg());
         ui.border(gx, log_y, gw, log_h, 12.0, my3_card_border());
 
-        let summary_str = crate::diagnostics::summary(&self.home);
+        let summary_str = crate::ha_launcher::diagnostics::summary(&self.home);
         let err_str = std::fs::read_to_string(self.home.join("android-error.txt"))
             .ok()
-            .map(|e| crate::diagnostics::redact(&e))
+            .map(|e| crate::ha_launcher::diagnostics::redact(&e))
             .unwrap_or_else(|| {
                 "None — last session exited cleanly with zero unhandled errors.".into()
             });
@@ -3911,9 +3924,11 @@ impl Launcher {
         let step_y = 66.0;
 
         let game_home = self.catalog.config.game_home(&self.home);
-        let opts = horizon_client::settings::Settings::load(&game_home.join("options.txt"));
-        let touch_cfg =
-            horizon_client::touch::Settings::load_from(&game_home.join("horizon-touch.json"));
+        let opts =
+            crate::ha_launcher::client::settings::Settings::load(&game_home.join("options.txt"));
+        let touch_cfg = crate::ha_launcher::client::touch::Settings::load_from(
+            &game_home.join("horizon-touch.json"),
+        );
 
         match cat {
             SettingsCategory::Video => {
@@ -4102,16 +4117,16 @@ impl Launcher {
             }
             SettingsCategory::Launcher => {
                 let c = &self.catalog.config;
-                let count = 12;
+                let count = 13;
                 let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
                 let max_scroll =
                     (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
                 if self.catalog.editing == Some("server")
                     && let Some(ime_y) = ime_top_dp
                 {
-                    let server_y = list_top + 10.0 * step_y - self.catalog.scroll;
+                    let server_y = list_top + 11.0 * step_y - self.catalog.scroll;
                     if server_y + card_h > ime_y - 12.0 {
-                        self.catalog.scroll = (list_top + 10.0 * step_y + card_h - (ime_y - 16.0))
+                        self.catalog.scroll = (list_top + 11.0 * step_y + card_h - (ime_y - 16.0))
                             .clamp(0.0, max_scroll);
                     }
                 }
@@ -4139,7 +4154,7 @@ impl Launcher {
                 };
                 let game_anim_off = c.disable_game_animations || touch_cfg.disable_game_animations;
 
-                let rows: [(&str, &str, SettingControl<'_>); 12] = [
+                let rows: [(&str, &str, SettingControl<'_>); 13] = [
                     (
                         "APPEARANCE, DPI SCALING & MOTION",
                         "Material 3 Expressive theme studio, adaptive phone DPI scaling & animation toggles",
@@ -4181,6 +4196,11 @@ impl Launcher {
                         "Active game profile",
                         "Each profile isolates its own worlds, mods and options",
                         SettingControl::Button(&profile_str, Action::Profile, false),
+                    ),
+                    (
+                        "Open directly in this instance",
+                        "Skip the launcher on start; its button on the title screen and pause menu comes back",
+                        SettingControl::Toggle(c.open_directly, Action::ToggleOpenDirectly),
                     ),
                     (
                         "Input host mode",
@@ -4242,7 +4262,7 @@ impl Launcher {
                 ui.set_clip(None);
             }
             SettingsCategory::Theme => {
-                use horizon_client::ui_theme::{
+                use crate::ha_launcher::client::ui_theme::{
                     BackgroundMode, GradientDirection, THEME_ACCENT_SWATCHES,
                     THEME_BG_SWATCHES_DARK, THEME_BG_SWATCHES_LIGHT, ThemeAppearance, ThemePreset,
                     color,
@@ -4781,10 +4801,11 @@ impl Launcher {
                 self.list_view = Some([list_top, list_bottom, max_scroll]);
 
                 let style = touch_cfg.control_style;
-                let is_mcpe = style == horizon_client::touch::ControlStyle::Mcpe;
-                let is_goy = style == horizon_client::touch::ControlStyle::GoyControl;
+                let is_mcpe = style == crate::ha_launcher::client::touch::ControlStyle::Mcpe;
+                let is_goy = style == crate::ha_launcher::client::touch::ControlStyle::GoyControl;
                 let sys_name = style.label();
-                let sys_presets = horizon_client::touch::Settings::list_presets(&game_home, style);
+                let sys_presets =
+                    crate::ha_launcher::client::touch::Settings::list_presets(&game_home, style);
                 let preset_label = format!(
                     "{} ({} presets) v",
                     touch_cfg.preset_name,
@@ -4803,10 +4824,10 @@ impl Launcher {
                 );
                 let editor_title = format!("{} Control Editor", sys_name);
                 let editor_sub = match style {
-                    horizon_client::touch::ControlStyle::Mcpe => {
+                    crate::ha_launcher::client::touch::ControlStyle::Mcpe => {
                         "Customize MCPE controls with exact Minecraft sprites, size, opacity & alignment"
                     }
-                    horizon_client::touch::ControlStyle::GoyControl => {
+                    crate::ha_launcher::client::touch::ControlStyle::GoyControl => {
                         "Customize GoyControl buttons, custom keys, toggle, swipe & pass-through"
                     }
                 };
@@ -5076,7 +5097,9 @@ impl Launcher {
                             "Vanilla touch sprites, D-Pad & thumbstick",
                             "CLASSIC HUD",
                             is_mcpe,
-                            Action::SelectControlMode(horizon_client::touch::ControlStyle::Mcpe),
+                            Action::SelectControlMode(
+                                crate::ha_launcher::client::touch::ControlStyle::Mcpe,
+                            ),
                         ),
                         (
                             "GoyControl",
@@ -5084,7 +5107,7 @@ impl Launcher {
                             "PRO OVERLAY",
                             is_goy,
                             Action::SelectControlMode(
-                                horizon_client::touch::ControlStyle::GoyControl,
+                                crate::ha_launcher::client::touch::ControlStyle::GoyControl,
                             ),
                         ),
                     ]
@@ -5398,7 +5421,7 @@ impl Launcher {
         let (Some(r), Some(gui)) = (&self.renderer, &self.gui) else {
             return Ok(());
         };
-        let mut b = HudBatch::new([r.config.width, r.config.height]);
+        let mut b = HudBatch::scratch([r.config.width, r.config.height]);
         let ui = Ui::mobile(&gui.atlas, &mut b, (0.0, 0.0));
         let p = self.focus.and_then(|index| self.targets.get(index)).map_or(
             [
@@ -5415,7 +5438,7 @@ impl Launcher {
                 (*x..*x + *w).contains(&p[0]) && (*y..*y + *h).contains(&p[1])
             })
             .map(|(_, a)| *a);
-        if crate::documents::busy() {
+        if crate::ha_launcher::documents::busy() {
             return Ok(());
         }
         if self.catalog.busy()
@@ -5433,12 +5456,12 @@ impl Launcher {
         }
         self.feedback = action.map(|action| (action, std::time::Instant::now()));
         self.focus = None;
-        if action.is_some() && horizon_client::official_install::ready(&self.home) {
+        if action.is_some() && crate::ha_launcher::client::official_install::ready(&self.home) {
             let audio = self.audio.get_or_insert_with(|| {
-                let mut audio = horizon_client::audio::Audio::new(
+                let mut audio = crate::ha_launcher::client::audio::Audio::new(
                     &self.home.join(".local/horizon-client/26.3"),
                 );
-                let settings = horizon_client::settings::Settings::load(
+                let settings = crate::ha_launcher::client::settings::Settings::load(
                     &self
                         .catalog
                         .config
@@ -5448,7 +5471,7 @@ impl Launcher {
                 audio.master = settings.volumes[0];
                 let mut volumes = settings.volumes;
                 volumes[0] = 1.0;
-                horizon_client::settings::set_source_volumes(volumes);
+                crate::ha_launcher::client::settings::set_source_volumes(volumes);
                 audio
             });
             audio.play_button_click();
@@ -5485,12 +5508,13 @@ impl Launcher {
                 }
             }
             Some(Action::OpenBundledProject(id)) => {
-                if let Some((_, title, desc)) = horizon_client::mod_list::ANDROID_BUNDLED
-                    .iter()
-                    .find(|(bid, _, _)| *bid == id)
+                if let Some((_, title, desc)) =
+                    crate::ha_launcher::client::mod_list::ANDROID_BUNDLED
+                        .iter()
+                        .find(|(bid, _, _)| *bid == id)
                 {
-                    let project = crate::browser::Project {
-                        source: crate::browser::SourceId::Horizon,
+                    let project = crate::ha_launcher::browser::Project {
+                        source: crate::ha_launcher::browser::SourceId::Horizon,
                         id: (*id).to_owned(),
                         slug: (*id).to_owned(),
                         title: (*title).to_owned(),
@@ -5499,9 +5523,9 @@ impl Launcher {
                         downloads: 0,
                         icon: None,
                         page: String::new(),
-                        kind: crate::browser::Kind::Mod,
+                        kind: crate::ha_launcher::browser::Kind::Mod,
                         license: "MIT / Apache-2.0".into(),
-                        game_versions: vec![crate::browser::GAME.into()],
+                        game_versions: vec![crate::ha_launcher::browser::GAME.into()],
                         loaders: vec!["horizon".into()],
                     };
                     self.catalog
@@ -5530,7 +5554,7 @@ impl Launcher {
             Some(Action::UiScale) => self.open_chooser(chooser::Kind::UiScale),
             Some(Action::ChooseUiScale(pct)) => {
                 self.catalog.config.ui_scale_percent = pct;
-                horizon_client::ui_theme::set_ui_scale_percent(pct);
+                crate::ha_launcher::client::ui_theme::set_ui_scale_percent(pct);
                 self.catalog.config.save(&self.home)?;
                 self.chooser = None;
                 self.catalog.status = format!(
@@ -5542,10 +5566,10 @@ impl Launcher {
             Some(Action::RenderScaleDelta(delta)) => {
                 let next_pct = (self.catalog.config.render_scale.percent() as i32 + delta)
                     .clamp(25, 100) as u32;
-                let scale = crate::display::RenderScale::new(next_pct);
+                let scale = crate::ha_launcher::display::RenderScale::new(next_pct);
                 self.catalog.config.render_scale = scale;
                 let _ = self.catalog.config.save(&self.home);
-                crate::display::set_scale(scale);
+                crate::ha_launcher::display::set_scale(scale);
                 self.modify_game_settings(|s| {
                     s.horizon.resolution_scale = next_pct;
                 });
@@ -5613,9 +5637,10 @@ impl Launcher {
                 self.catalog.config.super_perf_mode = !self.catalog.config.super_perf_mode;
                 if self.catalog.config.super_perf_mode {
                     self.catalog.config.battery_perf_mode = false;
-                    self.catalog.config.renderer = crate::catalog::RendererMode::Vulkan;
+                    self.catalog.config.renderer =
+                        crate::ha_launcher::catalog::RendererMode::Vulkan;
                 }
-                horizon_client::ui_theme::motion::set_reduced_motion(
+                crate::ha_launcher::client::ui_theme::motion::set_reduced_motion(
                     self.catalog.config.super_perf_mode || self.catalog.config.battery_perf_mode,
                 );
                 self.catalog.config.save(&self.home)?;
@@ -5633,7 +5658,7 @@ impl Launcher {
                     self.catalog.config.super_perf_mode = false;
                     self.catalog.config.max_fps_mode = false;
                 }
-                horizon_client::ui_theme::motion::set_reduced_motion(
+                crate::ha_launcher::client::ui_theme::motion::set_reduced_motion(
                     self.catalog.config.super_perf_mode || self.catalog.config.battery_perf_mode,
                 );
                 self.catalog.config.save(&self.home)?;
@@ -5687,7 +5712,7 @@ impl Launcher {
             // Controls & Control Editor actions
             Some(Action::SelectControlMode(style)) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let mut touch = horizon_client::touch::Settings::load_from(
+                let mut touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 touch.switch_control_system(&game_home, style);
@@ -5699,8 +5724,8 @@ impl Launcher {
             }
             Some(Action::OpenControlEditor) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let mut tc = horizon_client::touch::TouchControls::default();
-                tc.settings = horizon_client::touch::Settings::load_from(
+                let mut tc = crate::ha_launcher::client::touch::TouchControls::default();
+                tc.settings = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 tc.open_editor();
@@ -5726,11 +5751,12 @@ impl Launcher {
             }
             Some(Action::ChooseControlProfile(idx)) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let mut touch = horizon_client::touch::Settings::load_from(
+                let mut touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 let style = touch.control_style;
-                let presets = horizon_client::touch::Settings::list_presets(&game_home, style);
+                let presets =
+                    crate::ha_launcher::client::touch::Settings::list_presets(&game_home, style);
                 if let Some(meta) = presets.get(idx as usize) {
                     touch.select_preset(&game_home, style, &meta.id);
                     self.catalog.status = format!(
@@ -5744,14 +5770,14 @@ impl Launcher {
             }
             Some(Action::CopyActivePreset) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let touch = horizon_client::touch::Settings::load_from(
+                let touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 self.catalog.config.preset_edit_mode = "copy".into();
                 self.catalog.config.custom_profile_name = format!("{} Copy", touch.preset_name);
                 self.catalog.config.custom_profile_desc = touch.preset_description.clone();
                 self.catalog.editing = Some("profile_name");
-                crate::platform::show(&self.catalog.config.custom_profile_name);
+                crate::ha_launcher::platform::show(&self.catalog.config.custom_profile_name);
                 self.catalog.status = format!(
                     "Step 1/2: Enter new {} preset name and press Enter.",
                     touch.control_style.label()
@@ -5759,7 +5785,7 @@ impl Launcher {
             }
             Some(Action::EditActivePresetMeta) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let touch = horizon_client::touch::Settings::load_from(
+                let touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 if touch.is_default_preset() {
@@ -5772,7 +5798,7 @@ impl Launcher {
                     self.catalog.config.custom_profile_name = touch.preset_name.clone();
                     self.catalog.config.custom_profile_desc = touch.preset_description.clone();
                     self.catalog.editing = Some("profile_name");
-                    crate::platform::show(&self.catalog.config.custom_profile_name);
+                    crate::ha_launcher::platform::show(&self.catalog.config.custom_profile_name);
                     self.catalog.status = format!(
                         "Step 1/2: Edit {} preset name and press Enter.",
                         touch.control_style.label()
@@ -5781,14 +5807,14 @@ impl Launcher {
             }
             Some(Action::SaveControlProfileAsNew) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let touch = horizon_client::touch::Settings::load_from(
+                let touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 self.catalog.config.preset_edit_mode = "copy".into();
                 self.catalog.config.custom_profile_name = format!("{} Copy", touch.preset_name);
                 self.catalog.config.custom_profile_desc = touch.preset_description.clone();
                 self.catalog.editing = Some("profile_name");
-                crate::platform::show(&self.catalog.config.custom_profile_name);
+                crate::ha_launcher::platform::show(&self.catalog.config.custom_profile_name);
                 self.catalog.status = format!(
                     "Step 1/2: Enter new {} preset name and press Enter.",
                     touch.control_style.label()
@@ -5796,7 +5822,7 @@ impl Launcher {
             }
             Some(Action::ExportControlProfile) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let touch = horizon_client::touch::Settings::load_from(
+                let touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 match touch.export_profile(&self.home, &game_home, &touch.preset_id) {
@@ -5806,7 +5832,7 @@ impl Launcher {
                             .unwrap_or_default()
                             .to_string_lossy()
                             .into_owned();
-                        let _ = crate::platform::open_documents("reports");
+                        let _ = crate::ha_launcher::platform::open_documents("reports");
                         self.catalog.status = format!(
                             "Exported '{}' to Reports & controls/{}/{}.json.",
                             file_name,
@@ -5819,7 +5845,7 @@ impl Launcher {
             }
             Some(Action::ImportControlProfile) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let touch = horizon_client::touch::Settings::load_from(
+                let touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 let _ = std::fs::create_dir_all(
@@ -5827,7 +5853,9 @@ impl Launcher {
                         .join("controls")
                         .join(touch.control_style.storage_subdir()),
                 );
-                let _ = crate::platform::open_documents(crate::document_store::ROOT);
+                let _ = crate::ha_launcher::platform::open_documents(
+                    crate::ha_launcher::document_store::ROOT,
+                );
                 self.catalog.status = format!(
                     "Place any .json preset file in controls/{}/ and select it under {} Preset Selector.",
                     touch.control_style.storage_subdir(),
@@ -5858,9 +5886,15 @@ impl Launcher {
             Some(Action::ToggleControlScheme) => {
                 self.modify_touch_settings(|t| {
                     t.mode = match t.mode {
-                        horizon_client::touch::Mode::Crosshair => horizon_client::touch::Mode::Tap,
-                        horizon_client::touch::Mode::Tap => horizon_client::touch::Mode::Dpad,
-                        horizon_client::touch::Mode::Dpad => horizon_client::touch::Mode::Crosshair,
+                        crate::ha_launcher::client::touch::Mode::Crosshair => {
+                            crate::ha_launcher::client::touch::Mode::Tap
+                        }
+                        crate::ha_launcher::client::touch::Mode::Tap => {
+                            crate::ha_launcher::client::touch::Mode::Dpad
+                        }
+                        crate::ha_launcher::client::touch::Mode::Dpad => {
+                            crate::ha_launcher::client::touch::Mode::Crosshair
+                        }
                     };
                 });
             }
@@ -5948,7 +5982,7 @@ impl Launcher {
                 self.toggle_bundled_mod(id)?;
             }
             Some(Action::StarlingDownload) => {
-                if !crate::platform::open_url(
+                if !crate::ha_launcher::platform::open_url(
                     "https://github.com/JuanLuci/starling/releases/latest",
                 ) {
                     self.catalog.status =
@@ -5956,13 +5990,16 @@ impl Launcher {
                 }
             }
             Some(Action::GameFiles) => {
-                self.catalog.status = if crate::platform::open_documents(crate::document_store::ROOT) {
+                self.catalog.status = if crate::ha_launcher::platform::open_documents(crate::ha_launcher::document_store::ROOT) {
                     "Game files opened. Worlds, mods, packs, shaders and reports are available here."
                 } else { "Open system Files > Horizon Android." }.into();
             }
             Some(Action::WorldFiles) => {
-                let id = crate::document_store::folder_id(self.catalog.config.profile, "worlds");
-                self.catalog.status = if crate::platform::open_documents(&id) {
+                let id = crate::ha_launcher::document_store::folder_id(
+                    self.catalog.config.profile,
+                    "worlds",
+                );
+                self.catalog.status = if crate::ha_launcher::platform::open_documents(&id) {
                     "In Android Files, select a complete world folder, then Copy to a folder you choose. Keep Horizon Android installed until you verify your worlds in Starling."
                 } else { "Open system Files > Horizon Android > Worlds. Copy complete world folders while the game is closed." }.into();
             }
@@ -5978,20 +6015,20 @@ impl Launcher {
                 self.catalog.config.device.display_hz = hz;
                 self.catalog.config.device.sanitize();
                 self.catalog.config.save(&self.home)?;
-                crate::device_runtime::configure(self.catalog.config.device);
+                crate::ha_launcher::device_runtime::configure(self.catalog.config.device);
                 self.chooser = None;
             }
             Some(Action::PerformanceHints) => {
                 self.catalog.config.device.performance_hints ^= true;
                 self.catalog.status="ADPF gives Android CPU frame-work hints on supported devices. It does not cap FPS or guarantee a speedup.".into();
                 self.catalog.config.save(&self.home)?;
-                crate::device_runtime::configure(self.catalog.config.device);
+                crate::ha_launcher::device_runtime::configure(self.catalog.config.device);
             }
             Some(Action::GpuProfile) => {
                 self.catalog.config.device.gpu_profile ^= true;
                 self.catalog.status="Detailed GPU profiling records diagnostics and has overhead. Reports remain on this device.".into();
                 self.catalog.config.save(&self.home)?;
-                crate::device_runtime::configure(self.catalog.config.device);
+                crate::ha_launcher::device_runtime::configure(self.catalog.config.device);
             }
 
             Some(Action::ModSource(origin)) => {
@@ -6007,23 +6044,26 @@ impl Launcher {
                 self.catalog.browse(&self.home);
             }
             Some(Action::OpenFolder(kind)) => {
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 let folder = match kind {
-                    horizon_client::content_files::Kind::Mods => "mods",
-                    horizon_client::content_files::Kind::Packs => "packs",
-                    horizon_client::content_files::Kind::Shaders => "shaders",
+                    crate::ha_launcher::client::content_files::Kind::Mods => "mods",
+                    crate::ha_launcher::client::content_files::Kind::Packs => "packs",
+                    crate::ha_launcher::client::content_files::Kind::Shaders => "shaders",
                 };
-                let id = crate::document_store::folder_id(self.catalog.config.profile, folder);
-                self.catalog.status = if crate::platform::open_documents(&id) {
+                let id = crate::ha_launcher::document_store::folder_id(
+                    self.catalog.config.profile,
+                    folder,
+                );
+                self.catalog.status = if crate::ha_launcher::platform::open_documents(&id) {
                     "Opened in Files. Return here after copying files.".into()
                 } else {
                     "Open the system Files app and choose Horizon Android.".into()
                 };
             }
             Some(Action::Import(kind)) => {
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 let home = self.catalog.config.game_home(&self.home);
-                if let Err(e) = crate::documents::begin(kind, home) {
+                if let Err(e) = crate::ha_launcher::documents::begin(kind, home) {
                     self.catalog.status = e;
                 }
             }
@@ -6043,7 +6083,7 @@ impl Launcher {
                 self.chooser = None;
             }
             Some(Action::Repository) => {
-                self.catalog.status = if crate::platform::open_repository() {
+                self.catalog.status = if crate::ha_launcher::platform::open_repository() {
                     "Repository opened in browser."
                 } else {
                     "No browser available to open the repository."
@@ -6052,7 +6092,7 @@ impl Launcher {
             }
             Some(Action::Account) => {
                 self.catalog.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.login.refresh_status();
                 self.login.visible = true;
                 self.login.offline = false;
@@ -6097,7 +6137,7 @@ impl Launcher {
                 }
             }
             Some(Action::SelectAccount(index)) => {
-                let mut accounts = crate::account::Accounts::load();
+                let mut accounts = crate::ha_launcher::account::Accounts::load();
                 if let Some(account) = self.login.saved_accounts.get(index)
                     && accounts.accounts.iter().any(|a| a.key() == account.key())
                 {
@@ -6113,9 +6153,9 @@ impl Launcher {
             Some(Action::SelectOffline) => {
                 self.catalog.config.save(&self.home)?;
                 self.catalog.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.login.hide();
-                let mut accounts = crate::account::Accounts::load();
+                let mut accounts = crate::ha_launcher::account::Accounts::load();
                 accounts.selected = None;
                 accounts.save()?;
                 self.session_ready = false;
@@ -6133,7 +6173,7 @@ impl Launcher {
             }
             Some(Action::SubmitEly) => {
                 self.catalog.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.session_ready = false;
                 self.prepared_session = None;
                 self.session_worker = None;
@@ -6143,7 +6183,7 @@ impl Launcher {
             }
             Some(Action::CloseLogin) => {
                 self.login.hide();
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.catalog.editing = None;
                 self.refresh_wardrobe_account();
             }
@@ -6184,8 +6224,8 @@ impl Launcher {
                 self.catalog.editing = None;
                 self.catalog.project_modal = None;
                 self.catalog.modal_worker = None;
-                if crate::platform::active() {
-                    crate::platform::hide();
+                if crate::ha_launcher::platform::active() {
+                    crate::ha_launcher::platform::hide();
                 }
                 if page == Page::Settings && self.catalog.page == Page::Settings {
                     self.catalog.settings_category = SettingsCategory::Overview;
@@ -6228,7 +6268,7 @@ impl Launcher {
             }
             Some(Action::WardrobeHideCape) => self.wardrobe.hide_cape(),
             Some(Action::Search) => {
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.catalog.offset = 0;
                 self.catalog.search(&self.home);
             }
@@ -6237,7 +6277,7 @@ impl Launcher {
                     self.refresh_wardrobe_account();
                 }
                 self.catalog.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.catalog.config.touch_name_changed();
                 self.catalog.config.save(&self.home)?;
             }
@@ -6245,9 +6285,9 @@ impl Launcher {
                 if let Some(value) = self.login.field(name) {
                     self.catalog.editing = Some(name);
                     if name == "ely_password" || name == "ely_otp" {
-                        crate::platform::show_secret(value);
+                        crate::ha_launcher::platform::show_secret(value);
                     } else {
-                        crate::platform::show(value);
+                        crate::ha_launcher::platform::show(value);
                     }
                     return Ok(());
                 }
@@ -6274,7 +6314,7 @@ impl Launcher {
                     "fm_rename" | "fm_new_folder" => &self.catalog.fm_input_text,
                     _ => &self.catalog.query,
                 };
-                crate::platform::show(initial);
+                crate::ha_launcher::platform::show(initial);
             }
             Some(Action::Install(i)) => self.catalog.install(&self.home, i),
             Some(Action::Next) => {
@@ -6292,7 +6332,7 @@ impl Launcher {
                 self.catalog.config.render_scale = scale;
                 self.catalog.config.save(&self.home)?;
                 self.chooser = None;
-                crate::display::set_scale(scale);
+                crate::ha_launcher::display::set_scale(scale);
             }
             Some(Action::Orientation) => self.open_chooser(chooser::Kind::Orientation),
             Some(Action::InputHost) => self.open_chooser(chooser::Kind::InputHost),
@@ -6300,13 +6340,13 @@ impl Launcher {
                 self.catalog.config.input_host = mode;
                 self.catalog.config.save(&self.home)?;
                 self.chooser = None;
-                crate::configure_input_mode(mode);
+                crate::ha_launcher::configure_input_mode(mode);
             }
             Some(Action::ChooseOrientation(mode)) => {
                 self.catalog.config.orientation = mode;
                 self.catalog.config.save(&self.home)?;
                 self.chooser = None;
-                crate::platform::set_orientation(mode);
+                crate::ha_launcher::platform::set_orientation(mode);
             }
             Some(Action::ChooseRenderer(mode)) => {
                 self.catalog.config.renderer = mode;
@@ -6335,11 +6375,11 @@ impl Launcher {
                 }
             }
             Some(Action::Logs) => {
-                self.catalog.status = crate::diagnostics::summary(&self.home);
+                self.catalog.status = crate::ha_launcher::diagnostics::summary(&self.home);
                 if let Ok(error) = std::fs::read_to_string(self.home.join("android-error.txt")) {
                     self.catalog.status = format!(
                         "Last handled error: {}. {}",
-                        crate::diagnostics::redact(&error),
+                        crate::ha_launcher::diagnostics::redact(&error),
                         self.catalog.status
                     );
                 }
@@ -6350,16 +6390,28 @@ impl Launcher {
             }
             Some(Action::OpenReportsFolder) => {
                 self.diagnostics_modal_open = false;
-                self.catalog.status = if crate::platform::open_documents("reports") {
+                self.catalog.status = if crate::ha_launcher::platform::open_documents("reports") {
                     "Opened Reports folder in system Files.".into()
                 } else {
                     "Reports are saved under Horizon Android > Reports.".into()
                 };
             }
+            Some(Action::ToggleOpenDirectly) => {
+                self.catalog.config.open_directly = !self.catalog.config.open_directly;
+                self.catalog.config.save(&self.home)?;
+                self.catalog.status = if self.catalog.config.open_directly {
+                    format!(
+                        "Starling now opens directly in profile {}. Press Launcher on the title screen or in the pause menu to come back.",
+                        self.catalog.config.profile + 1
+                    )
+                } else {
+                    "Starling opens in the launcher.".into()
+                };
+            }
             Some(Action::ToggleLauncherAnimations) => {
                 self.catalog.config.disable_launcher_animations =
                     !self.catalog.config.disable_launcher_animations;
-                horizon_client::ui_theme::motion::set_launcher_animations_disabled(
+                crate::ha_launcher::client::ui_theme::motion::set_launcher_animations_disabled(
                     self.catalog.config.disable_launcher_animations,
                 );
                 self.catalog.config.save(&self.home)?;
@@ -6373,7 +6425,7 @@ impl Launcher {
             Some(Action::ToggleGameAnimations) => {
                 let next = !self.catalog.config.disable_game_animations;
                 self.catalog.config.disable_game_animations = next;
-                horizon_client::ui_theme::motion::set_game_animations_disabled(next);
+                crate::ha_launcher::client::ui_theme::motion::set_game_animations_disabled(next);
                 self.catalog.config.save(&self.home)?;
                 self.catalog.config.apply_experimental_to_game(&self.home);
                 self.modify_touch_settings(|t| t.disable_game_animations = next);
@@ -6391,7 +6443,7 @@ impl Launcher {
                 self.catalog.status =
                     "Preparing local diagnostic ZIP. No upload; review before sharing.".into();
                 std::thread::spawn(move || {
-                    let result = crate::diagnostics::export(&home).map(|p| {
+                    let result = crate::ha_launcher::diagnostics::export(&home).map(|p| {
                         p.file_name()
                             .unwrap_or_default()
                             .to_string_lossy()
@@ -6404,7 +6456,7 @@ impl Launcher {
             Some(Action::RecordPerformance) => {
                 self.catalog.config.record_performance = !self.catalog.config.record_performance;
                 if !self.catalog.config.record_performance {
-                    crate::performance::stop();
+                    crate::ha_launcher::performance::stop();
                 }
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = if self.catalog.config.record_performance {
@@ -6412,14 +6464,16 @@ impl Launcher {
                 } else { "Performance recording off." }.into();
             }
             Some(Action::ExportPerformance) => {
-                self.catalog.status = match crate::performance::export(&self.home) {
+                self.catalog.status = match crate::ha_launcher::performance::export(&self.home) {
                     Ok(()) => "Reports opened in Files. Copy or share a report from there.".into(),
                     Err(e) => e,
                 };
             }
             Some(Action::SelectThemePreset(preset)) => {
                 self.catalog.config.theme.apply_preset(preset);
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = format!("Applied '{}' theme.", preset.label());
@@ -6427,20 +6481,24 @@ impl Launcher {
             Some(Action::SetThemeAppearance(appearance)) => {
                 self.catalog.config.theme.appearance = appearance;
                 if self.catalog.config.theme.preset
-                    == horizon_client::ui_theme::ThemePreset::DaylightFrost
-                    && appearance == horizon_client::ui_theme::ThemeAppearance::Dark
+                    == crate::ha_launcher::client::ui_theme::ThemePreset::DaylightFrost
+                    && appearance == crate::ha_launcher::client::ui_theme::ThemeAppearance::Dark
                 {
                     self.catalog.config.theme.preset =
-                        horizon_client::ui_theme::ThemePreset::ObsidianViolet;
+                        crate::ha_launcher::client::ui_theme::ThemePreset::ObsidianViolet;
                 }
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = format!("Switched to {}.", appearance.label());
             }
             Some(Action::SetThemeBackgroundMode(mode)) => {
                 self.catalog.config.theme.background_mode = mode;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = format!("Background style set to {}.", mode.label());
@@ -6448,8 +6506,10 @@ impl Launcher {
             Some(Action::SetGradientDirection(dir)) => {
                 self.catalog.config.theme.gradient_direction = dir;
                 self.catalog.config.theme.background_mode =
-                    horizon_client::ui_theme::BackgroundMode::Gradient;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::BackgroundMode::Gradient;
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = format!("Gradient direction set to {}.", dir.label());
@@ -6458,8 +6518,10 @@ impl Launcher {
                 self.catalog.config.theme.use_three_stops =
                     !self.catalog.config.theme.use_three_stops;
                 self.catalog.config.theme.background_mode =
-                    horizon_client::ui_theme::BackgroundMode::Gradient;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::BackgroundMode::Gradient;
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
             }
@@ -6480,53 +6542,69 @@ impl Launcher {
                 };
                 self.catalog.config.theme.gradient_mid_pos = next;
                 self.catalog.config.theme.background_mode =
-                    horizon_client::ui_theme::BackgroundMode::Gradient;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::BackgroundMode::Gradient;
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::SelectAccentSwatch(rgb)) => {
                 self.catalog.config.theme.custom_accent_hex =
-                    horizon_client::ui_theme::format_hex_color(rgb);
-                self.catalog.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::format_hex_color(rgb);
+                self.catalog.config.theme.preset =
+                    crate::ha_launcher::client::ui_theme::ThemePreset::Custom;
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::SelectBgSwatch(rgb)) => {
                 self.catalog.config.theme.custom_bg_hex =
-                    horizon_client::ui_theme::format_hex_color(rgb);
-                self.catalog.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
+                    crate::ha_launcher::client::ui_theme::format_hex_color(rgb);
+                self.catalog.config.theme.preset =
+                    crate::ha_launcher::client::ui_theme::ThemePreset::Custom;
                 self.catalog.config.theme.background_mode =
-                    horizon_client::ui_theme::BackgroundMode::Solid;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::BackgroundMode::Solid;
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::SelectGradStartSwatch(rgb)) => {
                 self.catalog.config.theme.gradient_start_hex =
-                    horizon_client::ui_theme::format_hex_color(rgb);
-                self.catalog.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
+                    crate::ha_launcher::client::ui_theme::format_hex_color(rgb);
+                self.catalog.config.theme.preset =
+                    crate::ha_launcher::client::ui_theme::ThemePreset::Custom;
                 self.catalog.config.theme.background_mode =
-                    horizon_client::ui_theme::BackgroundMode::Gradient;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::BackgroundMode::Gradient;
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::SelectGradEndSwatch(rgb)) => {
                 self.catalog.config.theme.gradient_end_hex =
-                    horizon_client::ui_theme::format_hex_color(rgb);
-                self.catalog.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
+                    crate::ha_launcher::client::ui_theme::format_hex_color(rgb);
+                self.catalog.config.theme.preset =
+                    crate::ha_launcher::client::ui_theme::ThemePreset::Custom;
                 self.catalog.config.theme.background_mode =
-                    horizon_client::ui_theme::BackgroundMode::Gradient;
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::BackgroundMode::Gradient;
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::ResetTheme) => {
                 self.catalog.config.theme =
-                    horizon_client::ui_theme::LauncherThemeConfig::default();
-                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::LauncherThemeConfig::default();
+                crate::ha_launcher::client::ui_theme::set_active_theme(
+                    self.catalog.config.theme.resolve(),
+                );
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = "Theme reset to Horizon default (Obsidian Violet).".into();
@@ -6537,9 +6615,9 @@ impl Launcher {
             Some(Action::SetInstalledSubTab(tab)) => {
                 self.catalog.installed_sub_tab = tab;
                 self.catalog.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.catalog.scroll = 0.0;
-                if tab == crate::catalog::InstalledSubTab::FileManager {
+                if tab == crate::ha_launcher::catalog::InstalledSubTab::FileManager {
                     self.catalog.refresh_fm(&self.home);
                 }
                 self.anim.trigger_page_transition();
@@ -6562,7 +6640,7 @@ impl Launcher {
                     } else {
                         game_home.join(item.kind.folder()).join(&item.file)
                     };
-                    self.catalog.status = match crate::documents::export_file(
+                    self.catalog.status = match crate::ha_launcher::documents::export_file(
                         &self.home,
                         self.catalog.config.profile,
                         &path,
@@ -6605,14 +6683,14 @@ impl Launcher {
                         self.catalog.fm_navigate(&self.home, entry.rel_path);
                     } else {
                         let game_home = self.catalog.config.game_home(&self.home);
-                        match crate::document_store::fm_details(
+                        match crate::ha_launcher::document_store::fm_details(
                             &self.home,
                             &game_home,
                             &entry.rel_path,
                         ) {
                             Ok(details) => {
                                 self.catalog.fm_modal =
-                                    Some(crate::catalog::FmModal::Details(details));
+                                    Some(crate::ha_launcher::catalog::FmModal::Details(details));
                             }
                             Err(e) => self.catalog.status = e,
                         }
@@ -6646,13 +6724,13 @@ impl Launcher {
             }
             Some(Action::FmImportHere) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                match crate::document_store::resolve_fm_path(
+                match crate::ha_launcher::document_store::resolve_fm_path(
                     &self.home,
                     &game_home,
                     &self.catalog.fm_current_dir,
                 ) {
                     Ok(target_dir) => {
-                        if let Err(e) = crate::documents::begin_into_dir(target_dir) {
+                        if let Err(e) = crate::ha_launcher::documents::begin_into_dir(target_dir) {
                             self.catalog.status = e;
                         }
                     }
@@ -6661,40 +6739,42 @@ impl Launcher {
             }
             Some(Action::FmOpenNewFolder) => {
                 self.catalog.fm_input_text = "New Folder".into();
-                self.catalog.fm_modal = Some(crate::catalog::FmModal::NewFolder);
+                self.catalog.fm_modal = Some(crate::ha_launcher::catalog::FmModal::NewFolder);
                 self.catalog.editing = Some("fm_new_folder");
-                crate::platform::show(&self.catalog.fm_input_text);
+                crate::ha_launcher::platform::show(&self.catalog.fm_input_text);
             }
             Some(Action::FmSubmitNewFolder) => {
                 self.catalog.fm_submit_new_folder(&self.home);
             }
             Some(Action::FmOpenRename(idx)) => {
                 if let Some(entry) = self.catalog.fm_entries.get(idx).cloned() {
-                    if crate::document_store::is_protected_root_folder(&entry.rel_path) {
+                    if crate::ha_launcher::document_store::is_protected_root_folder(&entry.rel_path)
+                    {
                         self.catalog.status =
                             "Built-in profile root folders cannot be renamed.".into();
                     } else {
                         self.catalog.fm_input_text = entry.name;
-                        self.catalog.fm_modal = Some(crate::catalog::FmModal::Rename {
-                            target_rel: entry.rel_path,
-                        });
+                        self.catalog.fm_modal =
+                            Some(crate::ha_launcher::catalog::FmModal::Rename {
+                                target_rel: entry.rel_path,
+                            });
                         self.catalog.editing = Some("fm_rename");
-                        crate::platform::show(&self.catalog.fm_input_text);
+                        crate::ha_launcher::platform::show(&self.catalog.fm_input_text);
                     }
                 }
             }
             Some(Action::FmOpenRenameSelected) => {
                 if let Some(rel) = self.catalog.fm_selected.iter().next().cloned() {
-                    if crate::document_store::is_protected_root_folder(&rel) {
+                    if crate::ha_launcher::document_store::is_protected_root_folder(&rel) {
                         self.catalog.status =
                             "Built-in profile root folders cannot be renamed.".into();
                     } else {
                         let cur_name = rel.rsplit_once('/').map_or(rel.as_str(), |(_, n)| n);
                         self.catalog.fm_input_text = cur_name.to_owned();
                         self.catalog.fm_modal =
-                            Some(crate::catalog::FmModal::Rename { target_rel: rel });
+                            Some(crate::ha_launcher::catalog::FmModal::Rename { target_rel: rel });
                         self.catalog.editing = Some("fm_rename");
-                        crate::platform::show(&self.catalog.fm_input_text);
+                        crate::ha_launcher::platform::show(&self.catalog.fm_input_text);
                     }
                 } else {
                     self.catalog.status = "Select a single file or folder to rename.".into();
@@ -6705,13 +6785,15 @@ impl Launcher {
             }
             Some(Action::FmRequestDeleteSingle(idx)) => {
                 if let Some(entry) = self.catalog.fm_entries.get(idx).cloned() {
-                    if crate::document_store::is_protected_root_folder(&entry.rel_path) {
+                    if crate::ha_launcher::document_store::is_protected_root_folder(&entry.rel_path)
+                    {
                         self.catalog.status =
                             "Built-in profile root folders cannot be deleted.".into();
                     } else {
-                        self.catalog.fm_modal = Some(crate::catalog::FmModal::ConfirmDelete {
-                            paths: vec![entry.rel_path],
-                        });
+                        self.catalog.fm_modal =
+                            Some(crate::ha_launcher::catalog::FmModal::ConfirmDelete {
+                                paths: vec![entry.rel_path],
+                            });
                     }
                 }
             }
@@ -6723,7 +6805,9 @@ impl Launcher {
                         .catalog
                         .fm_selected
                         .iter()
-                        .filter(|p| !crate::document_store::is_protected_root_folder(p))
+                        .filter(|p| {
+                            !crate::ha_launcher::document_store::is_protected_root_folder(p)
+                        })
                         .cloned()
                         .collect();
                     if paths.is_empty() {
@@ -6731,7 +6815,7 @@ impl Launcher {
                             "Built-in profile root folders cannot be deleted.".into();
                     } else {
                         self.catalog.fm_modal =
-                            Some(crate::catalog::FmModal::ConfirmDelete { paths });
+                            Some(crate::ha_launcher::catalog::FmModal::ConfirmDelete { paths });
                     }
                 }
             }
@@ -6741,10 +6825,14 @@ impl Launcher {
             Some(Action::FmOpenDetails(idx)) => {
                 if let Some(entry) = self.catalog.fm_entries.get(idx).cloned() {
                     let game_home = self.catalog.config.game_home(&self.home);
-                    match crate::document_store::fm_details(&self.home, &game_home, &entry.rel_path)
-                    {
+                    match crate::ha_launcher::document_store::fm_details(
+                        &self.home,
+                        &game_home,
+                        &entry.rel_path,
+                    ) {
                         Ok(details) => {
-                            self.catalog.fm_modal = Some(crate::catalog::FmModal::Details(details));
+                            self.catalog.fm_modal =
+                                Some(crate::ha_launcher::catalog::FmModal::Details(details));
                         }
                         Err(e) => self.catalog.status = e,
                     }
@@ -6753,13 +6841,13 @@ impl Launcher {
             Some(Action::FmExportSingle(idx)) => {
                 if let Some(entry) = self.catalog.fm_entries.get(idx).cloned() {
                     let game_home = self.catalog.config.game_home(&self.home);
-                    match crate::document_store::resolve_fm_path(
+                    match crate::ha_launcher::document_store::resolve_fm_path(
                         &self.home,
                         &game_home,
                         &entry.rel_path,
                     ) {
                         Ok(path) => {
-                            self.catalog.status = match crate::documents::export_file(
+                            self.catalog.status = match crate::ha_launcher::documents::export_file(
                                 &self.home,
                                 self.catalog.config.profile,
                                 &path,
@@ -6775,9 +6863,11 @@ impl Launcher {
             Some(Action::FmExportSelected) => {
                 if let Some(rel) = self.catalog.fm_selected.iter().next().cloned() {
                     let game_home = self.catalog.config.game_home(&self.home);
-                    match crate::document_store::resolve_fm_path(&self.home, &game_home, &rel) {
+                    match crate::ha_launcher::document_store::resolve_fm_path(
+                        &self.home, &game_home, &rel,
+                    ) {
                         Ok(path) => {
-                            self.catalog.status = match crate::documents::export_file(
+                            self.catalog.status = match crate::ha_launcher::documents::export_file(
                                 &self.home,
                                 self.catalog.config.profile,
                                 &path,
@@ -6795,7 +6885,7 @@ impl Launcher {
             Some(Action::FmCloseModal) => {
                 self.catalog.fm_modal = None;
                 self.catalog.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
             }
             None => {}
         }
@@ -6804,7 +6894,7 @@ impl Launcher {
 
     fn toggle_bundled_mod(&mut self, id: &'static str) -> Result<()> {
         let game = self.catalog.config.game_home(&self.home);
-        let mut list = horizon_client::mod_list::ModList::load(&game);
+        let mut list = crate::ha_launcher::client::mod_list::ModList::load(&game);
         let enabled = list.enabled.contains(id) && !list.disabled.contains(id);
         if enabled {
             list.enabled.remove(id);
@@ -6814,7 +6904,10 @@ impl Launcher {
             list.enabled.insert(id.into());
         }
         std::fs::create_dir_all(&game)?;
-        std::fs::write(game.join(horizon_client::mod_list::FILE), list.serialize())?;
+        std::fs::write(
+            game.join(crate::ha_launcher::client::mod_list::FILE),
+            list.serialize(),
+        )?;
         self.catalog.refresh(&self.home);
         self.catalog.status = format!(
             "Bundled {id} {}. Applies on Play; settings are in Options > Mods.",
@@ -6827,20 +6920,27 @@ impl Launcher {
         Ok(())
     }
 
-    fn modify_game_settings(&mut self, f: impl FnOnce(&mut horizon_client::settings::Settings)) {
+    fn modify_game_settings(
+        &mut self,
+        f: impl FnOnce(&mut crate::ha_launcher::client::settings::Settings),
+    ) {
         let game_home = self.catalog.config.game_home(&self.home);
         let _ = std::fs::create_dir_all(&game_home);
         let path = game_home.join("options.txt");
-        let mut s = horizon_client::settings::Settings::load(&path);
+        let mut s = crate::ha_launcher::client::settings::Settings::load(&path);
         f(&mut s);
         s.save(&path);
     }
 
-    fn modify_touch_settings(&mut self, f: impl FnOnce(&mut horizon_client::touch::Settings)) {
+    fn modify_touch_settings(
+        &mut self,
+        f: impl FnOnce(&mut crate::ha_launcher::client::touch::Settings),
+    ) {
         let game_home = self.catalog.config.game_home(&self.home);
         let _ = std::fs::create_dir_all(&game_home);
-        let mut t =
-            horizon_client::touch::Settings::load_from(&game_home.join("horizon-touch.json"));
+        let mut t = crate::ha_launcher::client::touch::Settings::load_from(
+            &game_home.join("horizon-touch.json"),
+        );
         f(&mut t);
         if !t.is_default_preset() {
             let _ = t.save_replace_preset(&game_home);
@@ -6854,10 +6954,10 @@ impl Launcher {
         match action {
             Action::RenderScaleDelta(_) => {
                 let next_pct = (25.0 + t * 75.0).round() as u32;
-                let scale = crate::display::RenderScale::new(next_pct);
+                let scale = crate::ha_launcher::display::RenderScale::new(next_pct);
                 self.catalog.config.render_scale = scale;
                 let _ = self.catalog.config.save(&self.home);
-                crate::display::set_scale(scale);
+                crate::ha_launcher::display::set_scale(scale);
                 self.modify_game_settings(|s| {
                     s.horizon.resolution_scale = next_pct;
                 });
@@ -6907,7 +7007,7 @@ impl Launcher {
         let (Some(r), Some(gui)) = (&self.renderer, &self.gui) else {
             return 1.0;
         };
-        let mut batch = HudBatch::new([r.config.width, r.config.height]);
+        let mut batch = HudBatch::scratch([r.config.width, r.config.height]);
         Ui::mobile(&gui.atlas, &mut batch, (0.0, 0.0)).density
     }
 
@@ -6939,13 +7039,13 @@ impl Launcher {
             let _ = std::env::set_current_dir(&game_home);
             if let (Some(tc), Some(gui)) = (&mut self.control_editor, &self.gui) {
                 tc.viewport(rw, rh);
-                let mut b = HudBatch::new([rw, rh]);
+                let mut b = HudBatch::scratch([rw, rh]);
                 let norm = [
                     (t.location.x as f32 / rw as f32).clamp(0.0, 1.0),
                     (t.location.y as f32 / rh as f32).clamp(0.0, 1.0),
                 ];
                 let ended = matches!(t.phase, TouchPhase::Ended | TouchPhase::Cancelled);
-                let closed = horizon_client::touch_ui::touch_hud_editor(
+                let closed = crate::ha_launcher::client::touch_ui::touch_hud_editor(
                     tc,
                     &mut b,
                     &gui.atlas,
@@ -6962,7 +7062,7 @@ impl Launcher {
                     } else {
                         ed.save_name_input.clone()
                     };
-                    crate::platform::show(&text);
+                    crate::ha_launcher::platform::show(&text);
                 }
                 if ended || closed {
                     let _ = tc.settings.save_to(&game_home.join("horizon-touch.json"));
@@ -7066,7 +7166,7 @@ impl Launcher {
         let out = match key.physical_key {
             PhysicalKey::Code(KeyCode::Backspace) => Some(Output::Backspace),
             PhysicalKey::Code(KeyCode::Enter) => {
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 Some(Output::Enter)
             }
             _ => key.text.map(|s| Output::Text(s.into())),

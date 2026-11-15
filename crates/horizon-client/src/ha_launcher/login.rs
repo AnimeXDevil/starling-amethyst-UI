@@ -1,28 +1,28 @@
 //! Native account panel; authentication is shared with the desktop launcher.
 use super::pages::{Action, button};
-use crate::account::{self, Account, Accounts, Secrets, SignIn, SignInState};
-use horizon_client::ui_theme::{Face, Icon, Ui, color};
+use crate::ha_launcher::account::{self, Account, Accounts, Secrets, SignIn, SignInState};
+use crate::ha_launcher::client::ui_theme::{Face, Icon, Ui, color};
 
 fn login_surface() -> u32 {
-    horizon_client::ui_theme::active_theme().surface
+    crate::ha_launcher::client::ui_theme::active_theme().surface
 }
 fn login_surface_high() -> u32 {
-    horizon_client::ui_theme::active_theme().surface_bright
+    crate::ha_launcher::client::ui_theme::active_theme().surface_bright
 }
 fn login_border() -> u32 {
-    horizon_client::ui_theme::active_theme().border
+    crate::ha_launcher::client::ui_theme::active_theme().border
 }
 fn login_text() -> u32 {
-    horizon_client::ui_theme::active_theme().text_primary
+    crate::ha_launcher::client::ui_theme::active_theme().text_primary
 }
 fn login_muted() -> u32 {
-    horizon_client::ui_theme::active_theme().text_muted
+    crate::ha_launcher::client::ui_theme::active_theme().text_muted
 }
 fn login_accent() -> u32 {
-    horizon_client::ui_theme::active_theme().accent
+    crate::ha_launcher::client::ui_theme::active_theme().accent
 }
 fn login_accent_soft() -> u32 {
-    horizon_client::ui_theme::active_theme().accent_soft
+    crate::ha_launcher::client::ui_theme::active_theme().accent_soft
 }
 
 pub(super) struct Login {
@@ -191,7 +191,11 @@ impl Login {
             _ => None,
         }
     }
-    pub fn edit(&mut self, field: Option<&str>, output: &horizon_client::osk::Output) -> bool {
+    pub fn edit(
+        &mut self,
+        field: Option<&str>,
+        output: &crate::ha_launcher::client::osk::Output,
+    ) -> bool {
         let value = match field {
             Some("ely_username") => &mut self.username,
             Some("ely_password") => &mut self.password,
@@ -199,10 +203,12 @@ impl Login {
             _ => return false,
         };
         match output {
-            horizon_client::osk::Output::Text(text) if value.len() + text.len() <= 1024 => {
+            crate::ha_launcher::client::osk::Output::Text(text)
+                if value.len() + text.len() <= 1024 =>
+            {
                 value.push_str(text);
             }
-            horizon_client::osk::Output::Backspace => {
+            crate::ha_launcher::client::osk::Output::Backspace => {
                 value.pop();
             }
             _ => {}
@@ -226,7 +232,7 @@ impl Login {
     }
     pub fn copy_code(&mut self) {
         if let Some(SignInState::Code(code)) = &self.state {
-            self.message = if crate::platform::copy_login_code(&code.user_code) {
+            self.message = if crate::ha_launcher::platform::copy_login_code(&code.user_code) {
                 "Code copied. Paste it on the Microsoft page.".into()
             } else {
                 "Could not copy the code. Try again.".into()
@@ -243,13 +249,15 @@ impl Login {
                 .map(String::from)
                 .unwrap_or_else(|| code.verification_uri.clone());
             self.copy_code();
-            if let Err(e) = crate::platform::open_login_url(&url) {
+            if let Err(e) = crate::ha_launcher::platform::open_login_url(&url) {
                 self.message = e;
             }
         }
     }
     pub fn review_app(&mut self) {
-        if let Err(e) = crate::platform::open_login_url("https://aka.ms/mce-reviewappid") {
+        if let Err(e) =
+            crate::ha_launcher::platform::open_login_url("https://aka.ms/mce-reviewappid")
+        {
             self.message = e;
         }
     }
@@ -331,14 +339,14 @@ impl Login {
         let x = (ui.w - w) * 0.5;
         let mut y = (ui.h - h) * 0.5 + (1.0 - modal_t) * 14.0;
         if editing.is_some()
-            && let Some(bottom_px) = crate::native_ime::viewport_bottom()
+            && let Some(bottom_px) = crate::ha_launcher::native_ime::viewport_bottom()
         {
             let ime_top_dp = bottom_px as f32 / ui.density;
             if ime_top_dp < ui.h - 16.0 {
                 y = y.min((ime_top_dp - h - 8.0).max(6.0));
             }
         }
-        let theme = horizon_client::ui_theme::active_theme();
+        let theme = crate::ha_launcher::client::ui_theme::active_theme();
         ui.fill(
             0.0,
             0.0,

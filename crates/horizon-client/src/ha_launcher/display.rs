@@ -53,74 +53,30 @@ pub fn set_scale(scale: RenderScale) {
     REQUESTED_SCALE.store(scale.percent(), std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The launcher draws at the window's own size. Horizon Android lowered its own resolution with
+/// the game's (its winit drew a smaller surface scaled up); Starling's game scales its own frame,
+/// and its winit has no such surface.
 #[cfg(target_os = "android")]
-fn desired(window: &winit::window::Window) -> Option<[u32; 2]> {
-    let scale = RenderScale::new(REQUESTED_SCALE.load(std::sync::atomic::Ordering::Relaxed));
-    crate::native_ime::refresh_bounds();
-    let current = window.inner_size();
-    let physical = window.outer_size();
-    if physical.width == 0 || physical.height == 0 {
-        return None;
-    }
-    let [_, _, width, height] =
-        winit::platform::android::native_content_rect([physical.width, physical.height]);
-    let view = [width.max(1), height.max(1)];
-    let size = scale.buffer_size(view);
-    winit::platform::android::set_native_input_scale([
-        size[0] as f64 / view[0] as f64,
-        size[1] as f64 / view[1] as f64,
-    ]);
-    if size == [current.width, current.height] {
-        None
-    } else {
-        Some(size)
-    }
+pub fn prepare(_window: &winit::window::Window) -> Result<Option<[u32; 2]>, String> {
+    Ok(None)
 }
 
-#[cfg(target_os = "android")]
-fn set_render_size(window: &winit::window::Window, size: [u32; 2]) -> Result<[u32; 2], String> {
-    use winit::platform::android::WindowExtAndroid;
-    let native = REQUESTED_SCALE.load(std::sync::atomic::Ordering::Relaxed) == 100;
-    let physical = window.outer_size();
-    let rect = winit::platform::android::native_content_rect([physical.width, physical.height]);
-    let target = if native && rect == [0, 0, physical.width, physical.height] {
-        [0, 0]
-    } else {
-        size
-    };
-    let actual = window
-        .set_render_size(winit::dpi::PhysicalSize::new(target[0], target[1]))
-        .map_err(|e| e.to_string())?;
-    Ok([actual.width, actual.height])
-}
-
-/// Set logical dimensions before a renderer recreates its native surface.
-#[cfg(target_os = "android")]
-pub fn prepare(window: &winit::window::Window) -> Result<Option<[u32; 2]>, String> {
-    desired(window)
-        .map(|size| set_render_size(window, size))
-        .transpose()
-}
-
-/// Update the logical frame target; native presentation keeps its real dimensions.
+/// Some Android firmware updates the native window without delivering a matching Resized event:
+/// the renderer follows the window's size.
 #[cfg(target_os = "android")]
 pub fn apply(
     window: &winit::window::Window,
-    renderer: &mut horizon_client::gfx::Renderer,
+    renderer: &mut crate::ha_launcher::game::Renderer,
 ) -> Result<(), String> {
     if renderer.suspended {
         return Ok(());
     }
-    let size = if let Some(size) = desired(window) {
-        set_render_size(window, size)?
-    } else {
-        let size = window.inner_size();
-        [size.width, size.height]
-    };
-    // Some Android firmware updates the native window without delivering a
-    // matching Resized event. Reconcile even at 100%, where no scale changes.
-    if size[0] > 0 && size[1] > 0 && size != [renderer.config.width, renderer.config.height] {
-        renderer.resize(size[0], size[1]);
+    let size = window.inner_size();
+    if size.width > 0
+        && size.height > 0
+        && [size.width, size.height] != [renderer.config.width, renderer.config.height]
+    {
+        renderer.resize(size.width, size.height);
     }
     Ok(())
 }

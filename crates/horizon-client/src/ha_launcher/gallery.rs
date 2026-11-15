@@ -1,5 +1,5 @@
 //! Publish F2 PNGs through MediaStore; no broad storage access on Android 10+.
-use horizon_client::Result;
+use crate::ha_launcher::client::Result;
 use jni::{
     JNIEnv, JavaVM,
     objects::{GlobalRef, JObject, JValue},
@@ -38,7 +38,7 @@ pub fn save(file: &Path) -> std::result::Result<(), String> {
     save_file(file, false)
 }
 fn save_file(file: &Path, report: bool) -> std::result::Result<(), String> {
-    let request = crate::platform::with_context(|env, activity| {
+    let request = crate::ha_launcher::platform::with_context(|env, activity| {
         let sdk = env
             .get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?
             .i()?;

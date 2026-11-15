@@ -1,5 +1,5 @@
 //! Android system input and platform services, called from the Rust client.
-use horizon_client::osk::Output;
+use crate::ha_launcher::client::osk::Output;
 use jni::{
     JNIEnv, JavaVM,
     objects::{GlobalRef, JObject, JValue},
@@ -15,7 +15,7 @@ thread_local! {
 }
 
 fn with_vibrator(f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::Result<()>) {
-    crate::APP.with(|slot| {
+    crate::ha_launcher::APP.with(|slot| {
         let app = slot.borrow();
         let Some(app) = app.as_ref() else {
             return;
@@ -62,7 +62,7 @@ fn with_vibrator(f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::R
         }
     });
 }
-pub fn vibrate(pulse: horizon_client::gamepad::Pulse) {
+pub fn vibrate(pulse: crate::ha_launcher::client::gamepad::Pulse) {
     let amplitude = (pulse.strong.max(pulse.weak).clamp(0.0, 1.0) * 255.0).round() as i32;
     if amplitude == 0 || pulse.millis == 0 {
         return;
@@ -115,8 +115,8 @@ fn cancel_gamepad_vibration() {
 
 /// Use the vibrator advertised by the active InputDevice, never an unrelated pad.
 /// Unsupported USB/Bluetooth firmware retains the existing phone feedback.
-fn vibrate_gamepad(pulse: horizon_client::gamepad::Pulse, amplitude: i32) -> bool {
-    let Some(id) = horizon_client::android_runtime::active_gamepad_id() else {
+fn vibrate_gamepad(pulse: crate::ha_launcher::client::gamepad::Pulse, amplitude: i32) -> bool {
+    let Some(id) = crate::ha_launcher::client::android_runtime::active_gamepad_id() else {
         return false;
     };
     with_context(|env, _| {
@@ -201,7 +201,7 @@ fn vibrate_gamepad(pulse: horizon_client::gamepad::Pulse, amplitude: i32) -> boo
 pub(crate) fn with_context<R>(
     f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::Result<R>,
 ) -> Option<R> {
-    crate::APP.with(|slot| {
+    crate::ha_launcher::APP.with(|slot| {
         let app = slot.borrow();
         let app = app.as_ref()?;
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
@@ -266,7 +266,7 @@ pub fn clipboard_get() -> Option<String> {
     })
 }
 
-pub fn set_orientation(orientation: crate::catalog::Orientation) {
+pub fn set_orientation(orientation: crate::ha_launcher::catalog::Orientation) {
     with_context(|env, activity| {
         env.call_method(
             activity,
@@ -295,51 +295,22 @@ pub fn cache_dir() -> Option<std::path::PathBuf> {
 pub fn open_repository() -> bool {
     open_url("https://github.com/Vasysik/horizon-android")
 }
-/// Browse our SAF directory through the system file manager, never a private path.
+/// Browse one of the launcher's folders in the system's file manager: Starling's provider
+/// (GameFolderProvider) shows the game folder, the reports are the app's own diagnostics.
 pub fn open_documents(id: &str) -> bool {
-    with_context(|env, activity| {
-        let package = env
-            .call_method(activity, "getPackageName", "()Ljava/lang/String;", &[])?
-            .l()?;
-        let package: String = env.get_string((&package).into())?.into();
-        let authority = JObject::from(env.new_string(format!("{package}.documents"))?);
-        let document = JObject::from(env.new_string(id)?);
-        let uri = env
-            .call_static_method(
-                "android/provider/DocumentsContract",
-                "buildDocumentUri",
-                "(Ljava/lang/String;Ljava/lang/String;)Landroid/net/Uri;",
-                &[JValue::Object(&authority), JValue::Object(&document)],
-            )?
-            .l()?;
-        let action = JObject::from(env.new_string("android.intent.action.VIEW")?);
-        let intent = env.new_object(
-            "android/content/Intent",
-            "(Ljava/lang/String;)V",
-            &[JValue::Object(&action)],
-        )?;
-        let mime = JObject::from(env.new_string("vnd.android.document/directory")?);
-        env.call_method(
-            &intent,
-            "setDataAndType",
-            "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;",
-            &[JValue::Object(&uri), JValue::Object(&mime)],
-        )?;
-        env.call_method(
-            &intent,
-            "addFlags",
-            "(I)Landroid/content/Intent;",
-            &[JValue::Int(3)],
-        )?;
-        env.call_method(
-            activity,
-            "startActivity",
-            "(Landroid/content/Intent;)V",
-            &[JValue::Object(&intent)],
-        )?;
-        Ok(())
-    })
-    .is_some()
+    let path = if id == "reports" {
+        crate::ha_launcher::client::logging::private_home().join("performance")
+    } else {
+        match crate::ha_launcher::document_store::path_of(
+            &crate::ha_launcher::backend::data_dir(),
+            id,
+        ) {
+            Some(path) => path,
+            None => return false,
+        }
+    };
+    let _ = std::fs::create_dir_all(&path);
+    crate::ha_launcher::client::platform::open_folder(&path) == Some(true)
 }
 pub fn open_url(url: &str) -> bool {
     if !url.starts_with("https://") && !url.starts_with("http://") {
@@ -475,12 +446,12 @@ pub fn finish() {
 }
 
 pub fn capture_mouse(capture: bool) -> bool {
-    crate::native_ime::capture_mouse(capture)
+    crate::ha_launcher::native_ime::capture_mouse(capture)
 }
 
 pub fn show_secret(text: &str) {
     MULTILINE.with(|mode| mode.set(false));
-    if crate::native_ime::show_secret(text) {
+    if crate::ha_launcher::native_ime::show_secret(text) {
         EDIT.with(|e| *e.borrow_mut() = Some(text.into()));
     }
 }
@@ -493,7 +464,7 @@ pub fn show_multiline(text: &str) {
 }
 fn show_editor(text: &str, multiline: bool) {
     MULTILINE.with(|mode| mode.set(multiline));
-    if crate::native_ime::show(text) {
+    if crate::ha_launcher::native_ime::show(text) {
         EDIT.with(|e| *e.borrow_mut() = Some(text.into()));
     } else {
         log::warn!("Android system keyboard is unavailable");
@@ -501,7 +472,7 @@ fn show_editor(text: &str, multiline: bool) {
 }
 pub fn hide() {
     EDIT.with(|e| *e.borrow_mut() = None);
-    crate::native_ime::hide();
+    crate::ha_launcher::native_ime::hide();
 }
 
 pub fn poll() -> Vec<Output> {
@@ -510,27 +481,47 @@ pub fn poll() -> Vec<Output> {
         let Some(old) = edit.as_mut() else {
             return vec![];
         };
-        let Some(new) = crate::native_ime::text() else {
+        let Some(new) = crate::ha_launcher::native_ime::text() else {
             return vec![];
         };
-        if new == *old {
-            return vec![];
+        let mut out = Vec::new();
+        if new != *old {
+            // Starling's editor sends the whole text: what changed is a run of backspaces over
+            // the old text's end, then the new end.
+            let common = old
+                .chars()
+                .zip(new.chars())
+                .take_while(|(a, b)| a == b)
+                .count();
+            out.extend((common..old.chars().count()).map(|_| Output::Backspace));
+            let rest: String = new.chars().skip(common).collect();
+            if !rest.is_empty() {
+                out.push(Output::Text(rest));
+            }
+            *old = new;
         }
-        let out =
-            horizon_client::ime_edit::editor_changes(old, &new, MULTILINE.with(|mode| mode.get()));
-        *old = new;
+        for key in crate::ha_launcher::native_ime::take_keys() {
+            use crate::ha_launcher::native_ime::Key;
+            out.push(match key {
+                Key::Enter => Output::Enter,
+                Key::Back => Output::Close,
+                Key::Backspace => Output::Backspace,
+            });
+        }
         out
     })
 }
 
 /// Field hit tests use the same GUI coordinates as the touch menus.
 pub fn field_at(p: [f32; 2]) -> bool {
-    horizon_client::widgets::last_targets().iter().any(|t| {
-        let [x, y, w, h] = t.rect;
-        t.kind == horizon_client::widgets::Kind::Field
-            && (x..x + w).contains(&p[0])
-            && (y..y + h).contains(&p[1])
-    })
+    crate::ha_launcher::client::widgets::last_targets()
+        .iter()
+        .any(|t| {
+            let [x, y, w, h] = t.rect;
+            t.kind == crate::ha_launcher::client::widgets::Kind::Field
+                && (x..x + w).contains(&p[0])
+                && (y..y + h).contains(&p[1])
+        })
 }
 
 /// Only Microsoft's device-code verification pages can be opened by the login panel.
@@ -572,7 +563,7 @@ pub fn open_login_url(url: &str) -> Result<(), String> {
     if !fixed && !authorize && !verification {
         return Err("Unexpected Microsoft sign-in URL.".into());
     }
-    crate::APP.with(|slot| {
+    crate::ha_launcher::APP.with(|slot| {
         let app = slot.borrow();
         let app = app.as_ref().ok_or("Android activity unavailable")?;
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.map_err(|e| e.to_string())?;
@@ -688,13 +679,12 @@ pub fn poll_gamepad_connections() {
         LAST_IDS.with(|c| *c.borrow_mut() = Some((values.clone(), controllers.clone())));
         Ok((values, controllers))
     });
-    if let Some((ids, controllers)) = ids {
-        winit::platform::android::set_native_input_devices(&ids);
-        horizon_client::android_runtime::retain_gamepads(&ids);
-        if horizon_client::android_runtime::active_gamepad_id().is_none() {
+    // Starling's input hook tells the controllers apart itself (android.rs).
+    if let Some((ids, _controllers)) = ids {
+        crate::ha_launcher::client::android_runtime::retain_gamepads(&ids);
+        if crate::ha_launcher::client::android_runtime::active_gamepad_id().is_none() {
             cancel_gamepad_vibration();
         }
-        winit::platform::android::set_native_gamepads(&controllers);
     }
 }
 

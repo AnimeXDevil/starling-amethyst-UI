@@ -3,8 +3,8 @@ use super::{
     Launcher,
     pages::{Action, button},
 };
-use crate::catalog::RendererMode;
-use horizon_client::ui_theme::{Face, Ui};
+use crate::ha_launcher::catalog::RendererMode;
+use crate::ha_launcher::client::ui_theme::{Face, Ui};
 
 pub(super) enum Kind {
     Aspect,
@@ -28,7 +28,7 @@ pub(super) struct Chooser {
 }
 impl Launcher {
     pub(super) fn open_chooser(&mut self, kind: Kind) {
-        crate::platform::hide();
+        crate::ha_launcher::platform::hide();
         self.catalog.editing = None;
         let device = if matches!(kind, Kind::Renderer) {
             self.renderer.as_ref().map(|r| {
@@ -46,10 +46,10 @@ impl Launcher {
                 "Aspect ratio",
                 "Fits the entire picture without stretching. Touch coordinates follow the picture. Portrait swaps width and height.",
                 [
-                    crate::display::Aspect::Native,
-                    crate::display::Aspect::Wide,
-                    crate::display::Aspect::Classic,
-                    crate::display::Aspect::Square,
+                    crate::ha_launcher::display::Aspect::Native,
+                    crate::ha_launcher::display::Aspect::Wide,
+                    crate::ha_launcher::display::Aspect::Classic,
+                    crate::ha_launcher::display::Aspect::Square,
                 ]
                 .into_iter()
                 .map(|a| {
@@ -102,7 +102,7 @@ impl Launcher {
             Kind::DisplayHz => (
                 "Display refresh rate",
                 "An Android display preference, not a game FPS cap. Unsupported rates may be ignored.",
-                crate::device_preferences::DISPLAY_RATES
+                crate::ha_launcher::device_preferences::DISPLAY_RATES
                     .into_iter()
                     .map(|hz| {
                         (
@@ -119,7 +119,7 @@ impl Launcher {
                     .collect(),
             ),
             Kind::RenderScale => {
-                let mut choices: Vec<_> = crate::display::RenderScale::PRESETS
+                let mut choices: Vec<_> = crate::ha_launcher::display::RenderScale::PRESETS
                     .into_iter()
                     .map(|percent| {
                         (
@@ -129,7 +129,7 @@ impl Launcher {
                             } else {
                                 "Lower resolution for the whole picture".into()
                             },
-                            Action::ChooseRenderScale(crate::display::RenderScale::new(percent)),
+                            Action::ChooseRenderScale(crate::ha_launcher::display::RenderScale::new(percent)),
                             c.render_scale.percent() == percent,
                         )
                     })
@@ -149,7 +149,7 @@ impl Launcher {
             Kind::InputHost => (
                 "Input mode",
                 "Mouse mode uses a physical keyboard. Touch mode keeps the Android keyboard.",
-                crate::catalog::InputHost::ALL
+                crate::ha_launcher::catalog::InputHost::ALL
                     .into_iter()
                     .map(|mode| {
                         (
@@ -164,7 +164,7 @@ impl Launcher {
             Kind::Orientation => (
                 "Screen orientation",
                 "Applies to the launcher and game. Does not change touch bindings.",
-                crate::catalog::Orientation::ALL
+                crate::ha_launcher::catalog::Orientation::ALL
                     .into_iter()
                     .map(|mode| {
                         (
@@ -280,11 +280,11 @@ impl Launcher {
             ),
             Kind::ControlProfile => {
                 let game_home = c.game_home(&self.home);
-                let touch = horizon_client::touch::Settings::load_from(
+                let touch = crate::ha_launcher::client::touch::Settings::load_from(
                     &game_home.join("horizon-touch.json"),
                 );
                 let style = touch.control_style;
-                let presets = horizon_client::touch::Settings::list_presets(&game_home, style);
+                let presets = crate::ha_launcher::client::touch::Settings::list_presets(&game_home, style);
                 let choices = presets
                     .into_iter()
                     .enumerate()
@@ -305,16 +305,16 @@ impl Launcher {
                     .collect();
                 (
                     match style {
-                        horizon_client::touch::ControlStyle::Mcpe => "MCPE Control Presets",
-                        horizon_client::touch::ControlStyle::GoyControl => {
+                        crate::ha_launcher::client::touch::ControlStyle::Mcpe => "MCPE Control Presets",
+                        crate::ha_launcher::client::touch::ControlStyle::GoyControl => {
                             "GoyControl Control Presets"
                         }
                     },
                     match style {
-                        horizon_client::touch::ControlStyle::Mcpe => {
+                        crate::ha_launcher::client::touch::ControlStyle::Mcpe => {
                             "Independent MCPE presets stored in controls/mcpe/. Default is protected."
                         }
-                        horizon_client::touch::ControlStyle::GoyControl => {
+                        crate::ha_launcher::client::touch::ControlStyle::GoyControl => {
                             "Independent GoyControl presets stored in controls/goycontrol/. Default is protected."
                         }
                     },
@@ -375,7 +375,7 @@ impl Chooser {
     }
     pub fn draw(&mut self, ui: &mut Ui, targets: &mut Vec<([f32; 4], Action)>, modal_anim: f32) {
         let (w, h) = (ui.w, ui.h);
-        let theme = horizon_client::ui_theme::active_theme();
+        let theme = crate::ha_launcher::client::ui_theme::active_theme();
         let slide = (1.0 - modal_anim.clamp(0.0, 1.0)) * 16.0;
         targets.clear();
         ui.draw_theme_background(0.0, 0.0, w, h, &theme);

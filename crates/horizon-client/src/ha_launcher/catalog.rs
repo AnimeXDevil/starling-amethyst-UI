@@ -1,5 +1,5 @@
 //! Mobile launcher state. Browser operations reuse the desktop backend unchanged.
-use crate::browser::{self, Kind, Project, Query, Source, installed::Installed};
+use crate::ha_launcher::browser::{self, Kind, Project, Query, Source, installed::Installed};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -60,25 +60,29 @@ impl RendererMode {
 #[serde(default)]
 pub struct Config {
     pub profile: u32,
+    /// Starling: the app opens straight into this instance, past the launcher; the Launcher
+    /// button of the title screen and the pause menu comes back here.
+    #[serde(default)]
+    pub open_directly: bool,
     pub proxy: Option<String>,
     pub name: String,
     pub server: String,
     #[serde(skip)]
     pub microsoft_client_id: String,
     pub renderer: RendererMode,
-    pub render_scale: crate::display::RenderScale,
+    pub render_scale: crate::ha_launcher::display::RenderScale,
     pub orientation: Orientation,
     #[serde(flatten)]
-    pub screen: crate::display::ScreenPreferences,
+    pub screen: crate::ha_launcher::display::ScreenPreferences,
     pub input_host: InputHost,
     pub keypad_controls: bool,
     pub record_performance: bool,
     pub worker_limit: u32,
     pub cache_budget_mib: u32,
     #[serde(flatten)]
-    pub device: crate::device_preferences::Settings,
-    pub shader_source: crate::shader_catalog::Origin,
-    pub mod_source: crate::shader_catalog::Origin,
+    pub device: crate::ha_launcher::device_preferences::Settings,
+    pub shader_source: crate::ha_launcher::shader_catalog::Origin,
+    pub mod_source: crate::ha_launcher::shader_catalog::Origin,
     #[serde(default)]
     pub ui_scale_percent: u32,
     #[serde(default)]
@@ -106,14 +110,14 @@ pub struct Config {
     #[serde(default)]
     pub preset_edit_mode: String,
     #[serde(default)]
-    pub theme: horizon_client::ui_theme::LauncherThemeConfig,
+    pub theme: crate::ha_launcher::client::ui_theme::LauncherThemeConfig,
 }
 
 fn default_true() -> bool {
     true
 }
 
-pub use horizon_client::android_gamepad::InputMode as InputHost;
+pub use crate::ha_launcher::client::android_gamepad::InputMode as InputHost;
 
 /// Android ActivityInfo orientations, independent of the device's natural axis.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,7 +169,7 @@ impl Config {
         }
         // Ignore saved app registrations while this dev build uses the fixed ID.
         config.microsoft_client_id =
-            crate::account::client_id().unwrap_or_else(|| MICROSOFT_CLIENT_ID.into());
+            crate::ha_launcher::account::client_id().unwrap_or_else(|| MICROSOFT_CLIENT_ID.into());
         if value.get("renderer").is_none() && value["gpu_batching"].as_bool() == Some(true) {
             config.renderer = RendererMode::Vulkan;
         }
@@ -176,13 +180,13 @@ impl Config {
         config.device.migrate_missing(&value, &legacy);
         config.name = truncate_player_name(&config.name);
         config.theme.sanitize();
-        horizon_client::ui_theme::set_active_theme(config.theme.resolve());
-        horizon_client::ui_theme::motion::set_reduced_motion(
+        crate::ha_launcher::client::ui_theme::set_active_theme(config.theme.resolve());
+        crate::ha_launcher::client::ui_theme::motion::set_reduced_motion(
             config.disable_launcher_animations
                 || config.super_perf_mode
                 || config.battery_perf_mode,
         );
-        horizon_client::ui_theme::motion::set_game_animations_disabled(
+        crate::ha_launcher::client::ui_theme::motion::set_game_animations_disabled(
             config.disable_game_animations,
         );
         config
@@ -247,14 +251,14 @@ impl Config {
         }
     }
     pub fn apply_experimental_to_game(&self, home: &Path) {
-        horizon_client::android_runtime::set_experimental_leaf_culling(
+        crate::ha_launcher::client::android_runtime::set_experimental_leaf_culling(
             self.experimental_leaf_culling,
         );
         let game = self.game_home(home);
         let _ = std::fs::create_dir_all(&game);
         let options_path = game.join("options.txt");
-        let mut settings = horizon_client::settings::Settings::load(&options_path);
-        horizon_client::ui_theme::motion::set_game_animations_disabled(
+        let mut settings = crate::ha_launcher::client::settings::Settings::load(&options_path);
+        crate::ha_launcher::client::ui_theme::motion::set_game_animations_disabled(
             self.disable_game_animations,
         );
         if self.disable_game_animations {
@@ -292,7 +296,7 @@ impl Config {
         settings.horizon.resolution_scale = self.render_scale.percent().clamp(25, 100);
         settings.save(&options_path);
         let touch_path = game.join("horizon-touch.json");
-        let mut touch_cfg = horizon_client::touch::Settings::load_from(&touch_path);
+        let mut touch_cfg = crate::ha_launcher::client::touch::Settings::load_from(&touch_path);
         touch_cfg.disable_game_animations = self.disable_game_animations;
         touch_cfg.resolution_scale_percent = self.render_scale.percent().clamp(25, 100);
         let _ = touch_cfg.save_to(&touch_path);
@@ -334,7 +338,7 @@ impl Page {
     }
 }
 enum Reply {
-    Done(String, horizon_client::content_files::Kind),
+    Done(String, crate::ha_launcher::client::content_files::Kind),
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -512,12 +516,12 @@ impl InstalledFilter {
             Self::Shaders => "Shaders",
         }
     }
-    pub fn matches(self, kind: horizon_client::content_files::Kind) -> bool {
+    pub fn matches(self, kind: crate::ha_launcher::client::content_files::Kind) -> bool {
         match self {
             Self::All => true,
-            Self::Mods => kind == horizon_client::content_files::Kind::Mods,
-            Self::Packs => kind == horizon_client::content_files::Kind::Packs,
-            Self::Shaders => kind == horizon_client::content_files::Kind::Shaders,
+            Self::Mods => kind == crate::ha_launcher::client::content_files::Kind::Mods,
+            Self::Packs => kind == crate::ha_launcher::client::content_files::Kind::Packs,
+            Self::Shaders => kind == crate::ha_launcher::client::content_files::Kind::Shaders,
         }
     }
 }
@@ -555,7 +559,7 @@ pub enum FmModal {
     ConfirmDelete { paths: Vec<String> },
     Rename { target_rel: String },
     NewFolder,
-    Details(crate::document_store::FmFileDetails),
+    Details(crate::ha_launcher::document_store::FmFileDetails),
 }
 
 pub fn format_file_size(bytes: u64) -> String {
@@ -580,7 +584,7 @@ pub struct Catalog {
     pub fm_current_dir: String,
     pub fm_back_stack: Vec<String>,
     pub fm_forward_stack: Vec<String>,
-    pub fm_entries: Vec<crate::document_store::FmEntry>,
+    pub fm_entries: Vec<crate::ha_launcher::document_store::FmEntry>,
     pub fm_selected: std::collections::BTreeSet<String>,
     pub fm_clipboard: Option<(Vec<PathBuf>, bool)>,
     pub fm_modal: Option<FmModal>,
@@ -612,11 +616,14 @@ pub struct Catalog {
     worker: Option<mpsc::Receiver<Result<Reply, String>>>,
     search_worker: Option<mpsc::Receiver<Result<Vec<Project>, String>>>,
     icon_worker: Option<mpsc::Receiver<IconData>>,
-    searches: crate::search_queue::Queue<(Page, browser::SourceId, String, usize), Vec<Project>>,
+    searches: crate::ha_launcher::search_queue::Queue<
+        (Page, browser::SourceId, String, usize),
+        Vec<Project>,
+    >,
 }
 #[derive(Clone)]
 pub struct LocalItem {
-    pub kind: horizon_client::content_files::Kind,
+    pub kind: crate::ha_launcher::client::content_files::Kind,
     pub file: String,
     pub title: String,
     pub enabled: bool,
@@ -671,12 +678,15 @@ impl Catalog {
             worker: None,
             search_worker: None,
             icon_worker: None,
-            searches: crate::search_queue::Queue::new(),
+            searches: crate::ha_launcher::search_queue::Queue::new(),
         };
         result.refresh(home);
         result
     }
-    pub fn show_installed(&mut self, kind: Option<horizon_client::content_files::Kind>) {
+    pub fn show_installed(
+        &mut self,
+        kind: Option<crate::ha_launcher::client::content_files::Kind>,
+    ) {
         self.searches.cancel_interest();
         self.page = Page::Installed;
         self.scroll = 0.0;
@@ -684,13 +694,15 @@ impl Catalog {
         if let Some(k) = kind {
             self.installed_sub_tab = InstalledSubTab::Library;
             self.installed_filter = match k {
-                horizon_client::content_files::Kind::Mods => InstalledFilter::Mods,
-                horizon_client::content_files::Kind::Packs => InstalledFilter::Packs,
-                horizon_client::content_files::Kind::Shaders => InstalledFilter::Shaders,
+                crate::ha_launcher::client::content_files::Kind::Mods => InstalledFilter::Mods,
+                crate::ha_launcher::client::content_files::Kind::Packs => InstalledFilter::Packs,
+                crate::ha_launcher::client::content_files::Kind::Shaders => {
+                    InstalledFilter::Shaders
+                }
             };
         }
         self.sections = [true; 3];
-        if let Some(i) = horizon_client::content_files::Kind::ALL
+        if let Some(i) = crate::ha_launcher::client::content_files::Kind::ALL
             .iter()
             .position(|k| Some(*k) == kind)
         {
@@ -706,11 +718,12 @@ impl Catalog {
             .filter(|e| game.join(&e.file).exists())
             .map(|e| (e.source, e.project.clone()))
             .collect();
-        let on = horizon_client::mod_list::ModList::load(&game);
+        let on = crate::ha_launcher::client::mod_list::ModList::load(&game);
         self.bundled_enabled = on.enabled.difference(&on.disabled).cloned().collect();
-        let settings = horizon_client::settings::Settings::load(&game.join("options.txt"));
+        let settings =
+            crate::ha_launcher::client::settings::Settings::load(&game.join("options.txt"));
         self.local.clear();
-        for kind in horizon_client::content_files::Kind::ALL {
+        for kind in crate::ha_launcher::client::content_files::Kind::ALL {
             let dir = game.join(kind.folder());
             if std::fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink()) {
                 continue;
@@ -720,30 +733,30 @@ impl Catalog {
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let valid = horizon_client::content_files::plain_name(&name)
+                let valid = crate::ha_launcher::client::content_files::plain_name(&name)
                     && (kind.accepts(&name)
-                        || (kind == horizon_client::content_files::Kind::Mods
+                        || (kind == crate::ha_launcher::client::content_files::Kind::Mods
                             && name.to_ascii_lowercase().ends_with(".jar")));
                 if !valid {
                     continue;
                 }
                 let enabled = match kind {
-                    horizon_client::content_files::Kind::Packs => {
+                    crate::ha_launcher::client::content_files::Kind::Packs => {
                         settings.resource_packs.contains(&format!("file/{name}"))
                     }
-                    horizon_client::content_files::Kind::Shaders => {
+                    crate::ha_launcher::client::content_files::Kind::Shaders => {
                         settings.horizon.shader_pack == name
                     }
-                    horizon_client::content_files::Kind::Mods => name
+                    crate::ha_launcher::client::content_files::Kind::Mods => name
                         .strip_suffix(".hmod")
                         .or_else(|| name.strip_suffix(".jar"))
                         .is_some_and(|id| on.enabled.contains(id)),
                 };
                 let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 let badge = match kind {
-                    horizon_client::content_files::Kind::Mods => "MOD",
-                    horizon_client::content_files::Kind::Packs => "PACK",
-                    horizon_client::content_files::Kind::Shaders => "SHADER",
+                    crate::ha_launcher::client::content_files::Kind::Mods => "MOD",
+                    crate::ha_launcher::client::content_files::Kind::Packs => "PACK",
+                    crate::ha_launcher::client::content_files::Kind::Shaders => "SHADER",
                 };
                 let ext_tag = if name.ends_with(".hmod") {
                     "Horizon Mod (.hmod)"
@@ -751,7 +764,7 @@ impl Catalog {
                     "Java Mod (.jar)"
                 } else if name.ends_with(".hshader") {
                     "Horizon Shader (.hshader)"
-                } else if kind == horizon_client::content_files::Kind::Shaders {
+                } else if kind == crate::ha_launcher::client::content_files::Kind::Shaders {
                     "Shader Pack (.zip)"
                 } else {
                     "Resource Pack (.zip)"
@@ -808,7 +821,7 @@ impl Catalog {
                 file_name
             );
             self.local.push(LocalItem {
-                kind: horizon_client::content_files::Kind::Mods,
+                kind: crate::ha_launcher::client::content_files::Kind::Mods,
                 file: e.file.clone(),
                 title: format!("{} ({})", e.title, e.version),
                 enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
@@ -829,7 +842,7 @@ impl Catalog {
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if !horizon_client::content_files::plain_name(&name)
+                if !crate::ha_launcher::client::content_files::plain_name(&name)
                     || (!name.ends_with(".hnmod")
                         && !name.ends_with(".hmod")
                         && !name.ends_with(".jar"))
@@ -851,7 +864,7 @@ impl Catalog {
                     .unwrap_or(&name);
                 let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 self.local.push(LocalItem {
-                    kind: horizon_client::content_files::Kind::Mods,
+                    kind: crate::ha_launcher::client::content_files::Kind::Mods,
                     file: rel,
                     title: mod_id.to_owned(),
                     enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
@@ -865,12 +878,12 @@ impl Catalog {
             }
         }
         // Include enabled built-in Horizon mods (ANDROID_BUNDLED) in Installed > Mods.
-        for &(b_id, b_title, b_desc) in &horizon_client::mod_list::ANDROID_BUNDLED {
+        for &(b_id, b_title, b_desc) in &crate::ha_launcher::client::mod_list::ANDROID_BUNDLED {
             if on.enabled.contains(b_id) && !on.disabled.contains(b_id) {
                 let b_file = format!("builtin:{b_id}");
                 if !self.local.iter().any(|item| item.file == b_file) {
                     self.local.push(LocalItem {
-                        kind: horizon_client::content_files::Kind::Mods,
+                        kind: crate::ha_launcher::client::content_files::Kind::Mods,
                         file: b_file,
                         title: b_title.to_owned(),
                         enabled: true,
@@ -921,7 +934,7 @@ impl Catalog {
 
     pub fn refresh_fm(&mut self, home: &Path) {
         let game = self.config.game_home(home);
-        match crate::document_store::list_fm_dir(home, &game, &self.fm_current_dir) {
+        match crate::ha_launcher::document_store::list_fm_dir(home, &game, &self.fm_current_dir) {
             Ok(entries) => {
                 self.fm_selected
                     .retain(|sel| entries.iter().any(|e| &e.rel_path == sel));
@@ -930,8 +943,8 @@ impl Catalog {
             Err(_) => {
                 self.fm_current_dir.clear();
                 self.fm_selected.clear();
-                self.fm_entries =
-                    crate::document_store::list_fm_dir(home, &game, "").unwrap_or_default();
+                self.fm_entries = crate::ha_launcher::document_store::list_fm_dir(home, &game, "")
+                    .unwrap_or_default();
             }
         }
     }
@@ -992,11 +1005,11 @@ impl Catalog {
         let game = self.config.game_home(home);
         let mut paths = Vec::new();
         for rel in &self.fm_selected {
-            if is_cut && crate::document_store::is_protected_root_folder(rel) {
+            if is_cut && crate::ha_launcher::document_store::is_protected_root_folder(rel) {
                 self.status = format!("Built-in root folder '{rel}' cannot be moved.");
                 return;
             }
-            match crate::document_store::resolve_fm_path(home, &game, rel) {
+            match crate::ha_launcher::document_store::resolve_fm_path(home, &game, rel) {
                 Ok(p) => paths.push(p),
                 Err(e) => {
                     self.status = e;
@@ -1018,7 +1031,13 @@ impl Catalog {
             return;
         };
         let game = self.config.game_home(home);
-        match crate::document_store::fm_paste(home, &game, &sources, is_cut, &self.fm_current_dir) {
+        match crate::ha_launcher::document_store::fm_paste(
+            home,
+            &game,
+            &sources,
+            is_cut,
+            &self.fm_current_dir,
+        ) {
             Ok(count) => {
                 if is_cut {
                     self.fm_clipboard = None;
@@ -1042,7 +1061,7 @@ impl Catalog {
             return;
         };
         let game = self.config.game_home(home);
-        match crate::document_store::fm_delete(home, &game, &paths) {
+        match crate::ha_launcher::document_store::fm_delete(home, &game, &paths) {
             Ok(count) => {
                 self.fm_selected.clear();
                 self.status = format!("Deleted {count} item(s).");
@@ -1060,12 +1079,12 @@ impl Catalog {
         };
         let game = self.config.game_home(home);
         let new_name = self.fm_input_text.trim().to_owned();
-        match crate::document_store::fm_rename(home, &game, &target_rel, &new_name) {
+        match crate::ha_launcher::document_store::fm_rename(home, &game, &target_rel, &new_name) {
             Ok(_) => {
                 self.fm_modal = None;
                 self.editing = None;
                 self.fm_selected.clear();
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.status = format!("Renamed to '{new_name}'.");
                 self.refresh(home);
             }
@@ -1081,11 +1100,16 @@ impl Catalog {
         }
         let game = self.config.game_home(home);
         let folder_name = self.fm_input_text.trim().to_owned();
-        match crate::document_store::fm_mkdir(home, &game, &self.fm_current_dir, &folder_name) {
+        match crate::ha_launcher::document_store::fm_mkdir(
+            home,
+            &game,
+            &self.fm_current_dir,
+            &folder_name,
+        ) {
             Ok(_) => {
                 self.fm_modal = None;
                 self.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.status = format!("Created folder '{folder_name}'.");
                 self.refresh(home);
             }
@@ -1143,7 +1167,7 @@ impl Catalog {
             .any(|(source, id)| *source == project.source && *id == project.id)
             || (project.kind == Kind::Mod
                 && self.local.iter().any(|item| {
-                    item.kind == horizon_client::content_files::Kind::Mods
+                    item.kind == crate::ha_launcher::client::content_files::Kind::Mods
                         && (item.file == format!("{}.hmod", project.id)
                             || item.file == format!("{}.jar", project.slug)
                             || item.file == format!("horizon-mods/{}", project.id)
@@ -1301,9 +1325,9 @@ impl Catalog {
         // for their PFP and description.
         let mut tasks: Vec<(String, String, Option<String>, Kind)> = Vec::new();
         if self.page == Page::Mods
-            && self.config.mod_source == crate::shader_catalog::Origin::Horizon
+            && self.config.mod_source == crate::ha_launcher::shader_catalog::Origin::Horizon
         {
-            for (id, title, _) in horizon_client::mod_list::ANDROID_BUNDLED {
+            for (id, title, _) in crate::ha_launcher::client::mod_list::ANDROID_BUNDLED {
                 if !self.icons.contains_key(id) {
                     tasks.push((id.to_owned(), title.to_owned(), None, Kind::Mod));
                 }
@@ -1340,7 +1364,7 @@ impl Catalog {
                 }
                 if let Some(url) = icon_url
                     && let Ok(path) = browser::images::fetch(&home, &url, browser::images::ROW)
-                    && let Ok((w, h, rgba)) = horizon_client::hud::decode(&path)
+                    && let Ok((w, h, rgba)) = crate::ha_launcher::client::hud::decode(&path)
                 {
                     let _ = tx.send((id, w, h, rgba, found_summary));
                 }
@@ -1504,14 +1528,14 @@ impl Catalog {
             if need_icon
                 && let Some(url) = icon_url
                 && let Ok(path) = browser::images::fetch(&home, &url, browser::images::ROW)
-                && let Ok((w, h, rgba)) = horizon_client::hud::decode(&path)
+                && let Ok((w, h, rgba)) = crate::ha_launcher::client::hud::decode(&path)
             {
                 let _ = tx.send(ModalUpdate::Icon(project.id.clone(), w, h, rgba));
             }
 
             for (idx, img) in gallery.into_iter().take(3).enumerate() {
                 if let Ok(path) = browser::images::fetch(&home, &img.url, 240)
-                    && let Ok((w, h, rgba)) = horizon_client::hud::decode(&path)
+                    && let Ok((w, h, rgba)) = crate::ha_launcher::client::hud::decode(&path)
                 {
                     let label = if img.title.trim().is_empty() {
                         format!("Screenshot {}", idx + 1)
@@ -1567,12 +1591,12 @@ impl Catalog {
     fn show_results(&mut self, items: Vec<Project>) {
         self.status = if self.page == Page::Shaders
             && items.is_empty()
-            && self.config.shader_source == crate::shader_catalog::Origin::Horizon
+            && self.config.shader_source == crate::ha_launcher::shader_catalog::Origin::Horizon
         {
             "No Horizon shader packs match this search. Try another query or import a .hshader."
                 .into()
         } else if self.page == Page::Mods
-            && self.config.mod_source == crate::shader_catalog::Origin::Modrinth
+            && self.config.mod_source == crate::ha_launcher::shader_catalog::Origin::Modrinth
         {
             format!(
                 "{} Java mods - browsing only; this Rust client cannot run Java loaders",
@@ -1655,7 +1679,7 @@ impl Catalog {
             let stage = dir.join("import.partial");
             std::fs::write(&stage, bytes).map_err(|e| e.to_string())?;
             let result = (|| {
-                let package = horizon_mods::Package::read(&stage)?;
+                let package = horizon_mod_package::Package::read(&stage)?;
                 let destination = dir.join(format!("{}.hmod", package.manifest.id));
                 if destination.exists() {
                     std::fs::copy(&destination, destination.with_extension("hmod.previous"))
@@ -1668,7 +1692,7 @@ impl Catalog {
                         "Installed {}. Enable it in Installed after reviewing its capabilities in game Mods.",
                         package.manifest.name
                     ),
-                    horizon_client::content_files::Kind::Mods,
+                    crate::ha_launcher::client::content_files::Kind::Mods,
                 ))
             })();
             let _ = std::fs::remove_file(stage);
@@ -1731,7 +1755,12 @@ impl Catalog {
             let count = if project.kind == Kind::Shader
                 && project.source == browser::SourceId::Modrinth
             {
-                crate::shader_catalog::install(source.as_ref(), &project, &game, &report)?
+                crate::ha_launcher::shader_catalog::install(
+                    source.as_ref(),
+                    &project,
+                    &game,
+                    &report,
+                )?
             } else {
                 match browser::installed::install(source.as_ref(), &project, true, &game, &report) {
                     Ok(entries) => entries.len(),
@@ -1753,9 +1782,9 @@ impl Catalog {
             Ok(Reply::Done(
                 format!("Installed {count} item(s). Open Play to load this profile."),
                 match project.kind {
-                    Kind::Mod => horizon_client::content_files::Kind::Mods,
-                    Kind::Shader => horizon_client::content_files::Kind::Shaders,
-                    _ => horizon_client::content_files::Kind::Packs,
+                    Kind::Mod => crate::ha_launcher::client::content_files::Kind::Mods,
+                    Kind::Shader => crate::ha_launcher::client::content_files::Kind::Shaders,
+                    _ => crate::ha_launcher::client::content_files::Kind::Packs,
                 },
             ))
         });
@@ -1766,14 +1795,14 @@ impl Catalog {
         };
         let game = self.config.game_home(home);
         let path = game.join("options.txt");
-        let mut settings = horizon_client::settings::Settings::load(&path);
+        let mut settings = crate::ha_launcher::client::settings::Settings::load(&path);
         match item.kind {
-            horizon_client::content_files::Kind::Mods => {
+            crate::ha_launcher::client::content_files::Kind::Mods => {
                 if !cfg!(target_pointer_width = "64") {
                     self.status = "Sandboxed code mods require a 64-bit APK".into();
                     return;
                 }
-                let mut on = horizon_client::mod_list::ModList::load(&game);
+                let mut on = crate::ha_launcher::client::mod_list::ModList::load(&game);
                 if let Some(bid) = item.file.strip_prefix("builtin:") {
                     if item.enabled {
                         on.enabled.remove(bid);
@@ -1804,7 +1833,7 @@ impl Catalog {
                 }
                 on.save(&game);
             }
-            horizon_client::content_files::Kind::Packs => {
+            crate::ha_launcher::client::content_files::Kind::Packs => {
                 let id = format!("file/{}", item.file);
                 if item.enabled {
                     settings.resource_packs.retain(|p| p != &id);
@@ -1813,7 +1842,7 @@ impl Catalog {
                 }
                 settings.save(&path);
             }
-            horizon_client::content_files::Kind::Shaders => {
+            crate::ha_launcher::client::content_files::Kind::Shaders => {
                 settings.horizon.shader_pack = if item.enabled {
                     String::new()
                 } else {
@@ -1832,7 +1861,7 @@ impl Catalog {
         let game = self.config.game_home(home);
         let result = (|| -> Result<(), String> {
             if let Some(bid) = item.file.strip_prefix("builtin:") {
-                let mut on = horizon_client::mod_list::ModList::load(&game);
+                let mut on = crate::ha_launcher::client::mod_list::ModList::load(&game);
                 on.enabled.remove(bid);
                 on.disabled.insert(bid.to_owned());
                 on.save(&game);
@@ -1854,7 +1883,7 @@ impl Catalog {
                 let mut installed = Installed::load(&game);
                 installed.entries.retain(|e| e.file != item.file);
                 installed.save(&game)?;
-                let mut on = horizon_client::mod_list::ModList::load(&game);
+                let mut on = crate::ha_launcher::client::mod_list::ModList::load(&game);
                 let id = item
                     .file
                     .strip_prefix("horizon-native-mods/")
@@ -1869,7 +1898,7 @@ impl Catalog {
                 on.save(&game);
                 return Ok(());
             }
-            if !horizon_client::content_files::plain_name(&item.file) {
+            if !crate::ha_launcher::client::content_files::plain_name(&item.file) {
                 return Err("Invalid content filename".into());
             }
             let dir = game.join(item.kind.folder());
@@ -1893,20 +1922,20 @@ impl Catalog {
             installed.entries.retain(|e| e.file != relative);
             installed.save(&game)?;
             let path = game.join("options.txt");
-            let mut settings = horizon_client::settings::Settings::load(&path);
-            if item.kind == horizon_client::content_files::Kind::Packs {
+            let mut settings = crate::ha_launcher::client::settings::Settings::load(&path);
+            if item.kind == crate::ha_launcher::client::content_files::Kind::Packs {
                 settings
                     .resource_packs
                     .retain(|p| p != &format!("file/{}", item.file));
             }
-            if item.kind == horizon_client::content_files::Kind::Shaders
+            if item.kind == crate::ha_launcher::client::content_files::Kind::Shaders
                 && settings.horizon.shader_pack == item.file
             {
                 settings.horizon.shader_pack.clear();
             }
             settings.save(&path);
-            if item.kind == horizon_client::content_files::Kind::Mods {
-                let mut on = horizon_client::mod_list::ModList::load(&game);
+            if item.kind == crate::ha_launcher::client::content_files::Kind::Mods {
+                let mut on = crate::ha_launcher::client::mod_list::ModList::load(&game);
                 if let Some(id) = item
                     .file
                     .strip_suffix(".hmod")
@@ -1924,8 +1953,8 @@ impl Catalog {
         };
         self.refresh(home);
     }
-    pub fn edit(&mut self, out: horizon_client::osk::Output, home: &Path) {
-        use horizon_client::osk::Output;
+    pub fn edit(&mut self, out: crate::ha_launcher::client::osk::Output, home: &Path) {
+        use crate::ha_launcher::client::osk::Output;
         let is_name = self.editing == Some("name");
         let is_profile_name = self.editing == Some("profile_name");
         let is_theme_field = matches!(
@@ -1940,7 +1969,7 @@ impl Catalog {
             )
         );
         if is_theme_field {
-            self.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
+            self.config.theme.preset = crate::ha_launcher::client::ui_theme::ThemePreset::Custom;
         }
         let field = match self.editing {
             Some("name") => &mut self.config.name,
@@ -1996,10 +2025,10 @@ impl Catalog {
                     self.scroll = 0.0;
                     return;
                 } else if self.editing == Some("render_scale") {
-                    match crate::display::RenderScale::parse(&self.render_scale_text) {
+                    match crate::ha_launcher::display::RenderScale::parse(&self.render_scale_text) {
                         Ok(scale) => {
                             self.config.render_scale = scale;
-                            crate::display::set_scale(scale);
+                            crate::ha_launcher::display::set_scale(scale);
                         }
                         Err(error) => {
                             self.status = error.into();
@@ -2015,17 +2044,17 @@ impl Catalog {
                     {
                         self.editing = Some("profile_desc");
                         let _ = self.config.save(home);
-                        crate::platform::show(&self.config.custom_profile_desc);
+                        crate::ha_launcher::platform::show(&self.config.custom_profile_desc);
                         self.status =
                             "Step 2/2: Edit preset description and press Enter to save.".into();
                         return;
                     }
                     let game_home = self.config.game_home(home);
-                    let clean = horizon_client::touch::Settings::sanitize_profile_name(
+                    let clean = crate::ha_launcher::client::touch::Settings::sanitize_profile_name(
                         &self.config.custom_profile_name,
                     );
                     self.config.custom_profile_name = clean.clone();
-                    let mut touch = horizon_client::touch::Settings::load_from(
+                    let mut touch = crate::ha_launcher::client::touch::Settings::load_from(
                         &game_home.join("horizon-touch.json"),
                     );
                     touch.active_profile = clean.clone();
@@ -2034,7 +2063,7 @@ impl Catalog {
                         format!("Saved controls as '{clean}' in controlmap/{clean}.json.");
                 } else if self.editing == Some("profile_desc") {
                     let game_home = self.config.game_home(home);
-                    let mut touch = horizon_client::touch::Settings::load_from(
+                    let mut touch = crate::ha_launcher::client::touch::Settings::load_from(
                         &game_home.join("horizon-touch.json"),
                     );
                     let name = self.config.custom_profile_name.trim().to_owned();
@@ -2069,10 +2098,14 @@ impl Catalog {
                 }
                 if is_theme_field {
                     self.config.theme.sanitize();
-                    horizon_client::ui_theme::set_active_theme(self.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::set_active_theme(
+                        self.config.theme.resolve(),
+                    );
                     self.status = "Custom theme color applied and saved.".into();
                 } else {
-                    horizon_client::ui_theme::set_active_theme(self.config.theme.resolve());
+                    crate::ha_launcher::client::ui_theme::set_active_theme(
+                        self.config.theme.resolve(),
+                    );
                 }
                 self.editing = None;
                 let _ = self.config.save(home);

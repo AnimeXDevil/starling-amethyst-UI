@@ -1138,6 +1138,11 @@ impl Loading {
     fn menu_action(&mut self, event_loop: &dyn EventLoopCtl, action: Action) {
         match action {
             Action::Quit => event_loop.exit(),
+            Action::Launcher => {
+                #[cfg(target_os = "android")]
+                crate::ha_launcher::back_to_launcher();
+                event_loop.exit();
+            }
             Action::Options => self.open_menu_options(Page::Main),
             Action::Accessibility => self.open_menu_options(Page::Accessibility),
             Action::Language => self.open_menu_options(Page::Language),

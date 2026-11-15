@@ -1,5 +1,5 @@
 //! Explicit classic shader downloads; native .hshader files keep the registry path.
-use crate::browser::{self, Kind, Project, Source, SourceId, Version, installed};
+use crate::ha_launcher::browser::{self, Kind, Project, Source, SourceId, Version, installed};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
@@ -53,7 +53,7 @@ pub fn install(
         );
     }
     let file = v.file().ok_or("Shader file is missing")?;
-    if file.size > horizon_client::content_files::MAX_INPUT {
+    if file.size > crate::ha_launcher::client::content_files::MAX_INPUT {
         return Err("Shader ZIP exceeds 256 MiB".into());
     }
     let name = browser::safe_name(&file.name).ok_or("Unsafe shader file name")?;
@@ -87,9 +87,9 @@ pub fn install(
         .join(format!("shader-{stamp}"));
     let result = (|| {
         let path = source.fetch(file, &stage, &|f| progress(&project.title, f))?;
-        let native = horizon_client::content_files::validate(
+        let native = crate::ha_launcher::client::content_files::validate(
             &path,
-            horizon_client::content_files::Kind::Shaders,
+            crate::ha_launcher::client::content_files::Kind::Shaders,
             name,
             || false,
         )

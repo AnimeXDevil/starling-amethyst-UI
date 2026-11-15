@@ -114,6 +114,11 @@ winit = { version = "0.30.13", features = ["android-native-activity"] }
 jni = "0.21.1"
 # The mods, resource packs and shader packs catalog (game/mod_catalog.rs).
 starling-catalog = { path = "../starling-catalog" }
+# Horizon Android's launcher (ha_launcher/): the accounts it lists and signs in, the links it
+# checks, and the skins it reads and draws in the wardrobe.
+starling-account = { path = "../starling-account" }
+url = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
 [target.'cfg(windows)'.dependencies]
 # DirectX 12, where Vulkan has no adapter or device, or by choice (`graphicsApi`, graphics.rs).

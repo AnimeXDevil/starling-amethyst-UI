@@ -3,18 +3,18 @@ use super::{
     login::Login,
     pages::{Action, button},
 };
-use crate::{
+use crate::ha_launcher::client::{
+    hud::rgba,
+    skin_head::{self, HeadSkin},
+    ui_theme::{Face, Ui},
+};
+use crate::ha_launcher::{
     account::{Accounts, Provider},
     skins::{
         self, Model, cloud,
         library::{Kind, Library},
         preview,
     },
-};
-use horizon_client::{
-    hud::rgba,
-    skin_head::{self, HeadSkin},
-    ui_theme::{Face, Ui},
 };
 use std::{
     path::{Path, PathBuf},
@@ -113,7 +113,7 @@ impl Wardrobe {
             use std::io::Read;
             let result = (|| {
                 let url = "https://assets.mojang.com/SkinTemplates/steve.png";
-                let agent = crate::proxy::agent(
+                let agent = crate::ha_launcher::proxy::agent(
                     ureq::AgentBuilder::new()
                         .timeout_connect(std::time::Duration::from_secs(10))
                         .timeout_read(std::time::Duration::from_secs(15)),
@@ -249,7 +249,7 @@ impl Wardrobe {
         self.preview();
     }
     pub fn select(&mut self, index: usize) {
-        if self.damaged || crate::documents::busy() {
+        if self.damaged || crate::ha_launcher::documents::busy() {
             return;
         }
         if let Some(entry) = self.library.entries.get(index).cloned() {
@@ -268,13 +268,14 @@ impl Wardrobe {
         if self.damaged {
             return;
         }
-        self.note = match crate::documents::begin_appearance(self.root.clone(), self.kind()) {
-            Ok(()) => "Choose a PNG image in Android Files.".into(),
-            Err(error) => error,
-        };
+        self.note =
+            match crate::ha_launcher::documents::begin_appearance(self.root.clone(), self.kind()) {
+                Ok(()) => "Choose a PNG image in Android Files.".into(),
+                Err(error) => error,
+            };
     }
     pub fn use_cloud(&mut self) {
-        if self.damaged || crate::documents::busy() {
+        if self.damaged || crate::ha_launcher::documents::busy() {
             return;
         }
         let selection = self.library.selections.entry(self.key.clone()).or_default();
@@ -293,7 +294,7 @@ impl Wardrobe {
         self.save();
     }
     pub fn model(&mut self) {
-        if self.damaged || crate::documents::busy() {
+        if self.damaged || crate::ha_launcher::documents::busy() {
             return;
         }
         let selection = self.library.selections.entry(self.key.clone()).or_default();
@@ -305,7 +306,7 @@ impl Wardrobe {
         self.save();
     }
     pub fn hide_cape(&mut self) {
-        if self.damaged || crate::documents::busy() {
+        if self.damaged || crate::ha_launcher::documents::busy() {
             return;
         }
         let selection = self.library.selections.entry(self.key.clone()).or_default();
@@ -324,7 +325,8 @@ impl Wardrobe {
             self.note =
                 "Ely.by cloud skins are managed at ely.by. Custom capes can be applied locally."
                     .into();
-            if let Err(error) = crate::platform::open_login_url("https://ely.by/skins") {
+            if let Err(error) = crate::ha_launcher::platform::open_login_url("https://ely.by/skins")
+            {
                 self.note = error;
             }
             return;
@@ -511,7 +513,7 @@ impl Wardrobe {
     pub fn is_animating(&self) -> bool {
         let now = std::time::Instant::now();
         self.worker.is_some()
-            || crate::documents::busy()
+            || crate::ha_launcher::documents::busy()
             || self
                 .tab_changed_at
                 .is_some_and(|t| now.duration_since(t).as_secs_f32() < 0.22)
@@ -586,7 +588,7 @@ impl Wardrobe {
         w: f32,
         top: f32,
     ) {
-        use horizon_client::ui_theme::{Icon, active_theme, motion};
+        use crate::ha_launcher::client::ui_theme::{Icon, active_theme, motion};
         let theme = active_theme();
         let now = std::time::Instant::now();
         let tab_t = motion::ease_out_cubic(motion::progress(self.tab_changed_at, now, 0.20));
@@ -905,7 +907,7 @@ impl Wardrobe {
         );
         let detail_sub = if self.worker.is_some() {
             "Synchronizing with account service..."
-        } else if crate::documents::busy() {
+        } else if crate::ha_launcher::documents::busy() {
             "Waiting for Android file picker..."
         } else if self.capes {
             "Import a 64×32 PNG cape or select below"

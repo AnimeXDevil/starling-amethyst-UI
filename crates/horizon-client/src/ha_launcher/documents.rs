@@ -1,5 +1,5 @@
 //! SAF selection, bounded background imports and explicit collision choices.
-use horizon_client::{
+use crate::ha_launcher::client::{
     Result,
     content_files::{self, Kind},
     hud::{HudAtlas, HudBatch, rgba},
@@ -20,7 +20,7 @@ use std::{
 
 struct Request {
     kind: Kind,
-    appearance: Option<crate::skins::library::Kind>,
+    appearance: Option<crate::ha_launcher::skins::library::Kind>,
     target_dir: Option<PathBuf>,
     home: PathBuf,
     cache: PathBuf,
@@ -94,7 +94,7 @@ fn imported(text: impl Into<String>, kind: Kind) {
     });
 }
 pub fn poll() -> Option<Notice> {
-    if crate::document_provider::take_changes() {
+    if crate::ha_launcher::document_provider::take_changes() {
         return Some(Notice {
             text: "Content files changed. Reload packs to apply.".into(),
             changed: true,
@@ -112,8 +112,8 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         return Err("Finish or cancel the current import first".into());
     }
     CANCEL.store(false, Ordering::Relaxed);
-    crate::platform::hide();
-    let cache = crate::platform::cache_dir()
+    crate::ha_launcher::platform::hide();
+    let cache = crate::ha_launcher::platform::cache_dir()
         .ok_or("Could not access the Android import cache")?
         .join("content-imports");
     STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
@@ -123,7 +123,7 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         home,
         cache,
     });
-    if !crate::native_ime::pick_document() {
+    if !crate::ha_launcher::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
     }
@@ -136,14 +136,14 @@ pub fn picker_failed(error: &str) {
 }
 pub fn begin_appearance(
     home: PathBuf,
-    kind: crate::skins::library::Kind,
+    kind: crate::ha_launcher::skins::library::Kind,
 ) -> std::result::Result<(), String> {
     if busy() {
         return Err("Finish or cancel the current import first".into());
     }
     CANCEL.store(false, Ordering::Relaxed);
-    crate::platform::hide();
-    let cache = crate::platform::cache_dir()
+    crate::ha_launcher::platform::hide();
+    let cache = crate::ha_launcher::platform::cache_dir()
         .ok_or("Could not access Android's import cache")?
         .join("appearance-imports");
     STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
@@ -153,7 +153,7 @@ pub fn begin_appearance(
         home,
         cache,
     });
-    if !crate::native_ime::pick_document() {
+    if !crate::ha_launcher::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
     }
@@ -167,8 +167,8 @@ pub fn begin_into_dir(target_dir: PathBuf) -> std::result::Result<(), String> {
         return Err("Finish or cancel the current import first".into());
     }
     CANCEL.store(false, Ordering::Relaxed);
-    crate::platform::hide();
-    let cache = crate::platform::cache_dir()
+    crate::ha_launcher::platform::hide();
+    let cache = crate::ha_launcher::platform::cache_dir()
         .ok_or("Could not access the Android import cache")?
         .join("file-manager-imports");
     STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
@@ -178,7 +178,7 @@ pub fn begin_into_dir(target_dir: PathBuf) -> std::result::Result<(), String> {
         home: PathBuf::new(),
         cache,
     });
-    if !crate::native_ime::pick_document() {
+    if !crate::ha_launcher::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
     }
@@ -201,7 +201,7 @@ pub fn export_file(
         .and_then(|s| s.to_str())
         .ok_or("Invalid filename")?;
     if file_name.to_ascii_lowercase().ends_with(".png") {
-        let _ = crate::gallery::save(file_path);
+        let _ = crate::ha_launcher::gallery::save(file_path);
         return Ok(format!(
             "Exporting '{file_name}' to Pictures/HorizonAndroid..."
         ));
@@ -212,19 +212,19 @@ pub fn export_file(
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
     let saf_folder = if rel_str.contains("horizon-mods") {
-        crate::document_store::folder_id(profile, "mods")
+        crate::ha_launcher::document_store::folder_id(profile, "mods")
     } else if rel_str.contains("resourcepacks") {
-        crate::document_store::folder_id(profile, "packs")
+        crate::ha_launcher::document_store::folder_id(profile, "packs")
     } else if rel_str.contains("shaderpacks") {
-        crate::document_store::folder_id(profile, "shaders")
+        crate::ha_launcher::document_store::folder_id(profile, "shaders")
     } else if rel_str.contains("saves") {
-        crate::document_store::folder_id(profile, "worlds")
+        crate::ha_launcher::document_store::folder_id(profile, "worlds")
     } else if rel_str.contains("performance") {
         "reports".into()
     } else {
-        crate::document_store::ROOT.into()
+        crate::ha_launcher::document_store::ROOT.into()
     };
-    if crate::platform::open_documents(&saf_folder) {
+    if crate::ha_launcher::platform::open_documents(&saf_folder) {
         Ok(format!(
             "Opened '{file_name}' in Android Files for sharing/export."
         ))
@@ -234,11 +234,9 @@ pub fn export_file(
         ))
     }
 }
-/// Called by the approved Activity result bridge, never from a game tick.
-/// Keep a conventional JNI export as well as explicit registration: Android
-/// may restore a picker result before the IME bridge has been initialized.
-#[unsafe(export_name = "Java_dev_horizon_android_HorizonActivity_nativeDocumentResult")]
-pub extern "system" fn document_result(
+/// Called by the approved Activity result bridge, never from a game tick:
+/// `StarlingActivity.nativeDocumentResult` (android_lib.rs).
+pub fn document_result(
     mut env: JNIEnv<'_>,
     activity: JObject<'_>,
     request: i32,
@@ -286,8 +284,12 @@ pub extern "system" fn document_result(
                 } else {
                     "import.zip"
                 };
-                let opened =
-                    crate::document_bridge::open(&mut env, activity.as_obj(), &uri, fallback);
+                let opened = crate::ha_launcher::document_bridge::open(
+                    &mut env,
+                    activity.as_obj(),
+                    &uri,
+                    fallback,
+                );
                 if opened.is_err() {
                     let _ = env.exception_clear();
                 }
@@ -306,7 +308,7 @@ pub extern "system" fn document_result(
 }
 fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()> {
     if let Some(target_dir) = request.target_dir {
-        crate::document_store::validate_entry_name(&name)?;
+        crate::ha_launcher::document_store::validate_entry_name(&name)?;
         std::fs::create_dir_all(&target_dir)?;
         if std::fs::symlink_metadata(&target_dir)?
             .file_type()
@@ -337,7 +339,8 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             if CANCEL.load(Ordering::Relaxed) {
                 return Err("Import cancelled".into());
             }
-            let dest = crate::document_store::unique_destination_path(&target_dir, &name)?;
+            let dest =
+                crate::ha_launcher::document_store::unique_destination_path(&target_dir, &name)?;
             let final_name = dest
                 .file_name()
                 .unwrap_or_default()
@@ -365,12 +368,12 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         }
         let mut bytes = Vec::new();
         input
-            .take(crate::skins::MAX_IMPORT_BYTES as u64 + 1)
+            .take(crate::ha_launcher::skins::MAX_IMPORT_BYTES as u64 + 1)
             .read_to_end(&mut bytes)?;
         if CANCEL.load(Ordering::Relaxed) {
             return Err("Import cancelled".into());
         }
-        let mut library = crate::skins::library::Library::load(&request.home)?;
+        let mut library = crate::ha_launcher::skins::library::Library::load(&request.home)?;
         library.import(&request.home, &name, kind, &bytes)?;
         notice(
             "PNG added to the local gallery. Select it to apply locally.",
@@ -420,7 +423,10 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             CANCEL.load(Ordering::Relaxed)
         })?;
         let name = if request.kind == Kind::Mods {
-            format!("{}.hmod", horizon_mods::Package::read(&staged)?.manifest.id)
+            format!(
+                "{}.hmod",
+                horizon_mod_package::Package::read(&staged)?.manifest.id
+            )
         } else if native_shader || name.to_ascii_lowercase().ends_with(".hshader") {
             let pack = horizon_shader_api::Pack::read(&staged)?;
             horizon_shader_api::check(&pack).map_err(|e| format!("Invalid shader pack: {e:?}"))?;

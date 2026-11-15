@@ -1,6 +1,6 @@
 //! A native Rust installer and version screen, sharing the game's Vulkan renderer.
-use crate::catalog::{Catalog, Page};
-use crate::game;
+use crate::ha_launcher::catalog::{Catalog, Page};
+use crate::ha_launcher::game::{self, Renderer};
 #[path = "chooser.rs"]
 mod chooser;
 #[path = "launcher_gesture.rs"]
@@ -11,9 +11,8 @@ mod login;
 mod pages;
 #[path = "wardrobe.rs"]
 mod wardrobe;
-use horizon_client::{
+use crate::ha_launcher::client::{
     Result,
-    gfx::Renderer,
     hud::{HudAtlas, HudBatch},
     ui_theme::{Face, Ui},
 };
@@ -32,26 +31,25 @@ use winit::{
 struct PreparedAccount {
     key: String,
     file: PathBuf,
-    appearance: crate::skins::cloud::Cache,
+    appearance: crate::ha_launcher::skins::cloud::Cache,
 }
 pub(super) struct Launcher {
     home: PathBuf,
-    controller_edges: horizon_client::gamepad::Edges,
-    controller_repeat: Option<(horizon_client::gamepad::Button, Instant, bool)>,
+    controller_edges: crate::ha_launcher::client::gamepad::Edges,
+    controller_repeat: Option<(crate::ha_launcher::client::gamepad::Button, Instant, bool)>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     gui: Option<game::UiResources>,
-    pub(super) audio: Option<horizon_client::audio::Audio>,
-    game: Option<Box<dyn ApplicationHandler>>,
+    pub(super) audio: Option<crate::ha_launcher::client::audio::Audio>,
     cursor: (f64, f64),
     mouse_down: bool,
     feedback: Option<(pages::Action, Instant)>,
-    install: Arc<Mutex<horizon_client::official_install::InstallProgress>>,
+    install: Arc<Mutex<crate::ha_launcher::client::official_install::InstallProgress>>,
     install_paused: Arc<std::sync::atomic::AtomicBool>,
     install_cancelled: Arc<std::sync::atomic::AtomicBool>,
-    install_transfer: crate::catalog::TransferTracker,
+    install_transfer: crate::ha_launcher::catalog::TransferTracker,
     pub(super) anim: pages::AnimState,
-    pub(super) control_editor: Option<horizon_client::touch::TouchControls>,
+    pub(super) control_editor: Option<crate::ha_launcher::client::touch::TouchControls>,
     worker: Option<mpsc::Receiver<std::result::Result<(), String>>>,
     error: Option<String>,
     catalog: Catalog,
@@ -86,9 +84,9 @@ impl Launcher {
         );
     }
 
-    fn edit_text(&mut self, output: horizon_client::osk::Output) {
+    fn edit_text(&mut self, output: crate::ha_launcher::client::osk::Output) {
         if let Some(tc) = &mut self.control_editor
-            && horizon_client::touch_ui::apply_editor_or_preset_output(
+            && crate::ha_launcher::client::touch_ui::apply_editor_or_preset_output(
                 tc.editor.as_mut(),
                 None,
                 &output,
@@ -96,18 +94,19 @@ impl Launcher {
         {
             let game_home = self.catalog.config.game_home(&self.home);
             let _ = tc.settings.save_to(&game_home.join("horizon-touch.json"));
-            if horizon_client::touch_ui::output_dismisses(&output) {
-                crate::platform::hide();
+            if crate::ha_launcher::client::touch_ui::output_dismisses(&output) {
+                crate::ha_launcher::platform::hide();
             }
             return;
         }
         if self.login.edit(self.catalog.editing, &output) {
             if matches!(
                 output,
-                horizon_client::osk::Output::Enter | horizon_client::osk::Output::Close
+                crate::ha_launcher::client::osk::Output::Enter
+                    | crate::ha_launcher::client::osk::Output::Close
             ) {
                 self.catalog.editing = None;
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
             }
         } else {
             self.catalog.edit(output, &self.home);
@@ -120,12 +119,14 @@ impl Launcher {
         let cleanup_home = home.clone();
         std::thread::spawn(move || {
             if let Err(error) =
-                horizon_client::official_install::cleanup_completed_downloads(&cleanup_home)
+                crate::ha_launcher::client::official_install::cleanup_completed_downloads(
+                    &cleanup_home,
+                )
             {
                 log::warn!("Could not clean completed Minecraft downloads: {error}");
             }
-            if horizon_client::official_install::ready(&cleanup_home) {
-                let _ = horizon_client::android_resources::repair_structure_transforms(
+            if crate::ha_launcher::client::official_install::ready(&cleanup_home) {
+                let _ = crate::ha_launcher::client::android_resources::repair_structure_transforms(
                     &cleanup_home.join("engine-data.zip"),
                     &cleanup_home
                         .join(".local/horizon-client")
@@ -134,40 +135,41 @@ impl Launcher {
             }
         });
         let mut catalog = Catalog::new(&home);
-        if crate::diagnostics::previous_unclean(&home) {
-            catalog.status = crate::diagnostics::summary(&home);
+        if crate::ha_launcher::diagnostics::previous_unclean(&home) {
+            catalog.status = crate::ha_launcher::diagnostics::summary(&home);
         }
-        horizon_client::android_runtime::graphics_startup::configure(home.clone());
-        if horizon_client::android_runtime::graphics_startup::recover(&home) {
-            catalog.config.renderer = crate::catalog::RendererMode::VulkanCompatibility;
+        crate::ha_launcher::client::android_runtime::graphics_startup::configure(home.clone());
+        if crate::ha_launcher::client::android_runtime::graphics_startup::recover(&home) {
+            catalog.config.renderer =
+                crate::ha_launcher::catalog::RendererMode::VulkanCompatibility;
             if let Err(error) = catalog.config.save(&home) {
                 log::warn!("Could not save graphics recovery choice: {error}");
             }
             catalog.status = "Previous Vulkan startup was interrupted. Using Vulkan compatibility; you can change Rendering mode in Settings.".into();
         }
-        crate::configure_input_mode(catalog.config.input_host);
-        crate::device_runtime::configure(catalog.config.device);
-        horizon_client::ui_theme::set_ui_scale_percent(catalog.config.ui_scale_percent);
-        horizon_client::ui_theme::motion::set_launcher_animations_disabled(
+        crate::ha_launcher::configure_input_mode(catalog.config.input_host);
+        crate::ha_launcher::device_runtime::configure(catalog.config.device);
+        crate::ha_launcher::client::ui_theme::set_ui_scale_percent(catalog.config.ui_scale_percent);
+        crate::ha_launcher::client::ui_theme::motion::set_launcher_animations_disabled(
             catalog.config.disable_launcher_animations,
         );
-        horizon_client::ui_theme::motion::set_game_animations_disabled(
+        crate::ha_launcher::client::ui_theme::motion::set_game_animations_disabled(
             catalog.config.disable_game_animations,
         );
         // First run: ensure independent MCPE and GoyControl storage directories exist,
         // and initialize MCPE Controls as the default active control system on fresh installs.
         let game_home = catalog.config.game_home(&home);
-        horizon_client::touch::Settings::ensure_system_storage(
+        crate::ha_launcher::client::touch::Settings::ensure_system_storage(
             &game_home,
-            horizon_client::touch::ControlStyle::Mcpe,
+            crate::ha_launcher::client::touch::ControlStyle::Mcpe,
         );
-        horizon_client::touch::Settings::ensure_system_storage(
+        crate::ha_launcher::client::touch::Settings::ensure_system_storage(
             &game_home,
-            horizon_client::touch::ControlStyle::GoyControl,
+            crate::ha_launcher::client::touch::ControlStyle::GoyControl,
         );
         let touch_file = game_home.join("horizon-touch.json");
         if !touch_file.exists() {
-            let touch = horizon_client::touch::Settings::default_mcpe();
+            let touch = crate::ha_launcher::client::touch::Settings::default_mcpe();
             if let Some(dir) = touch_file.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
@@ -176,7 +178,10 @@ impl Launcher {
             }
         }
         // Pre-warm Microsoft session in background at startup so pressing Play doesn't stall.
-        let prewarm_session_worker = if crate::account::Accounts::load().selected().is_some() {
+        let prewarm_session_worker = if crate::ha_launcher::account::Accounts::load()
+            .selected()
+            .is_some()
+        {
             let id = catalog.config.microsoft_client_id.clone();
             let game_home = catalog.config.game_home(&home);
             let wardrobe_home = home.join("wardrobe");
@@ -185,9 +190,10 @@ impl Launcher {
                 let res = (|| {
                     let (account, secrets) = login::Login::session(&id)?
                         .ok_or("The selected account changed. Choose Play again.")?;
-                    let appearance = crate::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
-                        .unwrap_or_default();
-                    let file = crate::account::write_session_file(
+                    let appearance =
+                        crate::ha_launcher::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
+                            .unwrap_or_default();
+                    let file = crate::ha_launcher::account::write_session_file(
                         &game_home.join("sessions"),
                         &account,
                         &secrets,
@@ -221,7 +227,6 @@ impl Launcher {
             renderer: None,
             gui: None,
             audio: None,
-            game: None,
             cursor: (0.0, 0.0),
             mouse_down: false,
             feedback: None,
@@ -253,79 +258,34 @@ impl Launcher {
         }
     }
 
-    fn restore_launcher(&mut self, events: &ActiveEventLoop) {
-        if !horizon_client::android_runtime::take_launcher_return() {
-            return;
-        }
-        if let Some(mut game) = self.game.take() {
-            game.exiting(events);
-            drop(game);
-        }
-        crate::game::android_reset_bundled_mods();
-        crate::document_store::set_game_active(false);
-        crate::performance::stop();
-        let _ = crate::platform::capture_mouse(false);
-        crate::platform::hide();
-        horizon_client::auth::clear_current();
-        self.session_ready = false;
-        self.prepared_session = None;
-        self.launching = false;
-        self.launch_pending_tick = false;
-        horizon_client::discord_presence::stop();
-        horizon_client::ui_theme::reset_atlas();
-        self.cursor = (0.0, 0.0);
-        self.drag = None;
-        self.chooser = None;
-        self.exit_confirmation = false;
-        self.focus = None;
-        self.pending_focus = None;
-        if let Err(error) = std::env::set_current_dir(&self.home) {
-            self.fail(error);
-            return;
-        }
-        horizon_client::android_runtime::clear_gamepads();
-        self.controller_edges = Default::default();
-        self.controller_repeat = None;
-        self.catalog.config.input_host = horizon_client::android_runtime::input_mode();
-        self.catalog.refresh(&self.home);
-        self.login.refresh_status();
-        crate::diagnostics::heartbeat("returned_to_launcher", || serde_json::json!({}));
-        self.catalog.page = Page::Play;
-        if let Ok(message) = std::fs::read_to_string(self.home.join("android-error.txt")) {
-            self.error = Some(message);
-        }
-        if let Err(error) = self.open(events) {
-            self.fail(error);
-            events.exit();
-        }
-    }
     pub(super) fn configure_screen(&self) {
-        crate::native_ime::configure_screen(
+        crate::ha_launcher::native_ime::configure_screen(
             self.catalog.config.screen.immersive,
             self.catalog.config.screen.avoid_cutout,
-        );
-        winit::platform::android::set_native_content_aspect(
-            self.catalog.config.screen.aspect.ratio(),
         );
     }
     fn fail(&mut self, error: impl std::fmt::Display) {
         log::error!("{error}");
         self.launching = false;
         self.launch_pending_tick = false;
-        crate::diagnostics::record_error(&error.to_string());
+        crate::ha_launcher::diagnostics::record_error(&error.to_string());
         self.error = Some(error.to_string());
         let _ = std::fs::write(self.home.join("android-error.txt"), error.to_string());
     }
 
     fn open(&mut self, events: &ActiveEventLoop) -> Result<()> {
-        crate::platform::set_orientation(self.catalog.config.orientation);
+        crate::ha_launcher::platform::set_orientation(self.catalog.config.orientation);
         self.configure_screen();
-        horizon_client::ui_theme::set_android_dpi(crate::platform::display_density());
-        horizon_client::ui_theme::set_ui_scale_percent(self.catalog.config.ui_scale_percent);
-        crate::display::set_scale(self.catalog.config.render_scale);
-        horizon_client::android_runtime::configure_gpu(false);
+        crate::ha_launcher::client::ui_theme::set_android_dpi(
+            crate::ha_launcher::platform::display_density(),
+        );
+        crate::ha_launcher::client::ui_theme::set_ui_scale_percent(
+            self.catalog.config.ui_scale_percent,
+        );
+        crate::ha_launcher::display::set_scale(self.catalog.config.render_scale);
+        crate::ha_launcher::client::android_runtime::configure_gpu(false);
         if let (Some(renderer), Some(window)) = (&mut self.renderer, &self.window) {
-            if let Some(size) = crate::display::prepare(window)? {
+            if let Some(size) = crate::ha_launcher::display::prepare(window)? {
                 renderer.resize(size[0], size[1]);
             }
             renderer.recreate_surface()?;
@@ -333,41 +293,48 @@ impl Launcher {
             renderer.resize(size.width, size.height);
             return Ok(());
         }
-        let window = Arc::new(
-            events.create_window(Window::default_attributes().with_title("Horizon Android"))?,
-        );
-        crate::display::prepare(&window)?;
-        let vanilla_dir = self
-            .home
-            .join(".local/horizon-client")
-            .join(horizon_core::VANILLA_VERSION);
-        let atlas_root = if vanilla_dir.join("assets/minecraft/textures/gui").is_dir() {
-            vanilla_dir
-        } else {
-            self.home.join("installer")
-        };
-        // Discover the adapter limit before packing any shared sprites.
+        let window =
+            Arc::new(events.create_window(Window::default_attributes().with_title("Starling"))?);
+        crate::ha_launcher::display::prepare(&window)?;
+        // Starling's prepared resources, when there are any yet: the launcher shows before the
+        // first preparing, with the theme's own faces (the boot screen's atlas).
+        let resources = crate::ha_launcher::client::logging::private_home().join("resources");
+        let source = resources
+            .join("assets/minecraft/textures/gui")
+            .is_dir()
+            .then(|| {
+                crate::ha_launcher::client::resource_source::ResourceSource::directory(resources)
+            });
         let mut renderer = game::loading_renderer(
             window.clone(),
             false,
             None,
             None,
             None,
-            if self.catalog.config.renderer == crate::catalog::RendererMode::OpenGl {
-                horizon_client::graphics::GraphicsApi::OpenGl
+            if self.catalog.config.renderer == crate::ha_launcher::catalog::RendererMode::OpenGl {
+                crate::ha_launcher::client::graphics::GraphicsApi::OpenGl
             } else {
-                horizon_client::graphics::GraphicsApi::Auto
+                crate::ha_launcher::client::graphics::GraphicsApi::Auto
             },
         )?;
+        let atlas = source
+            .as_ref()
+            .and_then(|source| match HudAtlas::build(source) {
+                Ok(atlas) => Some(atlas),
+                Err(error) => {
+                    log::warn!("Launcher: the resources' GUI atlas: {error}");
+                    None
+                }
+            })
+            .unwrap_or_else(HudAtlas::boot);
         let gui = game::UiResources {
-            atlas: HudAtlas::build(&atlas_root)?,
-            panorama: Arc::new(horizon_client::gfx::panorama::Faces {
-                size: 1,
-                pixels: [0u8; 4].repeat(6),
-            }),
-            sounds: Some(horizon_client::sound_events::SoundRegistry::load(
-                &atlas_root,
-            )),
+            atlas,
+            panorama: Arc::new(crate::ha_launcher::client::gfx::panorama::Faces::colour([
+                0, 0, 0, 255,
+            ])),
+            sounds: source
+                .as_ref()
+                .map(crate::ha_launcher::client::sound_events::SoundRegistry::load),
         };
         renderer.set_loading_ui(&gui.atlas, gui.panorama.as_ref())?;
         self.renderer = Some(renderer);
@@ -377,11 +344,11 @@ impl Launcher {
     }
 
     fn request_back(&mut self) {
-        if crate::platform::active() && self.control_editor.is_some() {
-            crate::platform::hide();
+        if crate::ha_launcher::platform::active() && self.control_editor.is_some() {
+            crate::ha_launcher::platform::hide();
             return;
         }
-        crate::platform::hide();
+        crate::ha_launcher::platform::hide();
         if let Some(tc) = &mut self.control_editor {
             let game_home = self.catalog.config.game_home(&self.home);
             if tc.request_editor_back() {
@@ -407,19 +374,22 @@ impl Launcher {
         } else if self.chooser.take().is_some() {
             // Back dismisses the current dialog, including the exit question.
         } else if self.catalog.page == Page::Installed
-            && self.catalog.installed_sub_tab == crate::catalog::InstalledSubTab::FileManager
+            && self.catalog.installed_sub_tab
+                == crate::ha_launcher::catalog::InstalledSubTab::FileManager
             && self.catalog.fm_back(&self.home)
         {
             // Back in File Manager pops the directory history stack.
         } else if self.catalog.page == Page::Settings
-            && self.catalog.settings_category != crate::catalog::SettingsCategory::Overview
+            && self.catalog.settings_category
+                != crate::ha_launcher::catalog::SettingsCategory::Overview
         {
-            self.catalog.settings_category =
-                if self.catalog.settings_category == crate::catalog::SettingsCategory::Theme {
-                    crate::catalog::SettingsCategory::Launcher
-                } else {
-                    crate::catalog::SettingsCategory::Overview
-                };
+            self.catalog.settings_category = if self.catalog.settings_category
+                == crate::ha_launcher::catalog::SettingsCategory::Theme
+            {
+                crate::ha_launcher::catalog::SettingsCategory::Launcher
+            } else {
+                crate::ha_launcher::catalog::SettingsCategory::Overview
+            };
             self.catalog.scroll = 0.0;
             self.anim.trigger_page_transition();
         } else if self.catalog.editing.take().is_none() {
@@ -447,23 +417,29 @@ impl Launcher {
         if self.login.pending() {
             return Ok(());
         }
-        crate::diagnostics::heartbeat(
+        crate::ha_launcher::diagnostics::heartbeat(
             "play_requested",
             || serde_json::json!({"renderer":self.catalog.config.renderer.label(),"resolution_percent":self.catalog.config.render_scale.percent()}),
         );
-        horizon_client::android_runtime::configure_worker_limit(self.catalog.config.worker_limit);
-        horizon_client::android_runtime::configure_cache_budget(
+        crate::ha_launcher::client::android_runtime::configure_worker_limit(
+            self.catalog.config.worker_limit,
+        );
+        crate::ha_launcher::client::android_runtime::configure_cache_budget(
             self.catalog.config.cache_budget_mib,
         );
-        crate::configure_input_mode(self.catalog.config.input_host);
-        crate::device_runtime::configure(self.catalog.config.device);
-        if horizon_client::official_install::ready(&self.home) {
+        crate::ha_launcher::configure_input_mode(self.catalog.config.input_host);
+        crate::ha_launcher::device_runtime::configure(self.catalog.config.device);
+        if crate::ha_launcher::client::official_install::ready(&self.home) {
             if !self.launching {
                 self.launching = true;
                 self.error = None;
                 self.catalog.status = "Launching Minecraft 26.3...".into();
                 let game_home = self.catalog.config.game_home(&self.home);
-                if !self.session_ready && crate::account::Accounts::load().selected().is_some() {
+                if !self.session_ready
+                    && crate::ha_launcher::account::Accounts::load()
+                        .selected()
+                        .is_some()
+                {
                     let id = self.catalog.config.microsoft_client_id.clone();
                     let wardrobe_home = self.home.join("wardrobe");
                     let (sender, receiver) = mpsc::channel();
@@ -473,10 +449,13 @@ impl Launcher {
                         let result = (|| {
                             let (account, secrets) = login::Login::session(&id)?
                                 .ok_or("The selected account changed. Choose Play again.")?;
-                            let appearance =
-                                crate::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
-                                    .unwrap_or_default();
-                            let file = crate::account::write_session_file(
+                            let appearance = crate::ha_launcher::skins::cloud::fetch(
+                                &account,
+                                &secrets,
+                                &wardrobe_home,
+                            )
+                            .unwrap_or_default();
+                            let file = crate::ha_launcher::account::write_session_file(
                                 &game_home.join("sessions"),
                                 &account,
                                 &secrets,
@@ -504,14 +483,14 @@ impl Launcher {
                 }
                 return Ok(());
             }
-            horizon_client::android_resources::repair_structure_transforms(
+            crate::ha_launcher::client::android_resources::repair_structure_transforms(
                 &self.home.join("engine-data.zip"),
                 &self
                     .home
                     .join(".local/horizon-client")
                     .join(horizon_core::VANILLA_VERSION),
             )?;
-            crate::platform::hide();
+            crate::ha_launcher::platform::hide();
             self.catalog.config.save(&self.home)?;
             self.catalog.config.apply_experimental_to_game(&self.home);
             // Migrate the earlier launcher preset once; subsequent edits belong to Key Binds.
@@ -524,7 +503,7 @@ impl Launcher {
                 if let Some(dir) = keypad_path.parent() {
                     std::fs::create_dir_all(dir)?;
                 }
-                horizon_client::keypad::Settings {
+                crate::ha_launcher::client::keypad::Settings {
                     enabled: true,
                     ..Default::default()
                 }
@@ -532,7 +511,11 @@ impl Launcher {
             }
             self.catalog.config.keypad_controls = false;
             let game_home = self.catalog.config.game_home(&self.home);
-            if !self.session_ready && crate::account::Accounts::load().selected().is_some() {
+            if !self.session_ready
+                && crate::ha_launcher::account::Accounts::load()
+                    .selected()
+                    .is_some()
+            {
                 let id = self.catalog.config.microsoft_client_id.clone();
                 let wardrobe_home = self.home.join("wardrobe");
                 let (sender, receiver) = mpsc::channel();
@@ -542,10 +525,13 @@ impl Launcher {
                     let result = (|| {
                         let (account, secrets) = login::Login::session(&id)?
                             .ok_or("The selected account changed. Choose Play again.")?;
-                        let appearance =
-                            crate::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
-                                .unwrap_or_default();
-                        let file = crate::account::write_session_file(
+                        let appearance = crate::ha_launcher::skins::cloud::fetch(
+                            &account,
+                            &secrets,
+                            &wardrobe_home,
+                        )
+                        .unwrap_or_default();
+                        let file = crate::ha_launcher::account::write_session_file(
                             &game_home.join("sessions"),
                             &account,
                             &secrets,
@@ -566,113 +552,28 @@ impl Launcher {
             }
             self.session_ready = false;
             std::fs::create_dir_all(&game_home)?;
-            if crate::account::Accounts::load().selected().is_none() {
+            if crate::ha_launcher::account::Accounts::load()
+                .selected()
+                .is_none()
+            {
                 self.wardrobe
                     .prepare_game(&self.catalog.config.name, &game_home)?;
             }
-            let extra_arguments = if crate::PUBLIC_BUILD {
-                Vec::new()
-            } else {
-                match std::fs::read(self.home.join("android-launch.json")) {
-                    Ok(bytes) => serde_json::from_slice::<Vec<String>>(&bytes)?,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-                    Err(e) => return Err(e.into()),
-                }
-            };
-
-            self.audio = None;
             self.error = None;
             let _ = std::fs::remove_file(self.home.join("android-error.txt"));
-            if self.catalog.config.record_performance || self.catalog.config.device.gpu_profile {
-                crate::performance::start(
-                    &self.home,
-                    serde_json::json!({
-                        "renderer": self.catalog.config.renderer.label(),
-                        "resolution_percent": self.catalog.config.render_scale.percent(),
-                        "source_commit": option_env!("HORIZON_ANDROID_BUILD_COMMIT"),
-                        "source_dirty": option_env!("HORIZON_ANDROID_BUILD_DIRTY"),
-                        "performance_recording": self.catalog.config.record_performance,
-                        "gpu_profiling": self.catalog.config.device.gpu_profile,
-                    }),
-                )?;
-            }
             // The A press that launches the game must not accept its first menu too.
-            horizon_client::android_runtime::clear_gamepads();
+            crate::ha_launcher::client::android_runtime::clear_gamepads();
             self.controller_edges = Default::default();
             self.controller_repeat = None;
-            let request = crate::game_launch::LaunchRequest {
-                resources: self
-                    .home
-                    .join(".local/horizon-client")
-                    .join(horizon_core::VANILLA_VERSION),
-                game_home,
-                session_file: self.prepared_session.take(),
-                offline_name: crate::catalog::truncate_player_name(&self.catalog.config.name),
-                server: self.catalog.config.server.clone(),
-                control_socket: (!crate::PUBLIC_BUILD).then(|| self.home.join("control.json")),
-                extra_arguments,
-                open_gl: self.catalog.config.renderer == crate::catalog::RendererMode::OpenGl,
-                gpu_batching: self.catalog.config.renderer == crate::catalog::RendererMode::Vulkan,
-            };
-            crate::document_store::set_game_active(true);
-            let game = match crate::game_launch::start(request) {
-                Ok(game) => game,
-                Err(error) => {
-                    crate::document_store::set_game_active(false);
-                    crate::performance::stop();
-                    return Err(error);
-                }
-            };
-            // Android has one native window; release its surface before handing it over.
-            self.renderer = None;
-            self.window = None;
-            self.gui = None;
-            horizon_client::ui_theme::reset_atlas();
-            self.game = Some(game);
-            self.game.as_mut().unwrap().resumed(events);
+            // Starling runs the game in a process of its own: the app starts again into it, in
+            // the instance just saved (ha_launcher::play).
+            crate::ha_launcher::play();
         } else {
-            if !self.home.join("engine-data.zip").is_file() {
-                return Err(
-                    "This APK is missing its engine data. Install a complete build.".into(),
-                );
-            }
-            self.error = None;
-            *self
-                .install
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Default::default();
-            self.install_paused
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            self.install_cancelled
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            self.install_transfer.reset();
-            let home = self.home.clone();
-            let install = self.install.clone();
-            let paused = self.install_paused.clone();
-            let cancelled = self.install_cancelled.clone();
-            let (sender, receiver) = mpsc::channel();
-            self.worker = Some(receiver);
-            std::thread::spawn(move || {
-                let result =
-                    horizon_client::official_install::install_with_progress(&home, |update| {
-                        while paused.load(std::sync::atomic::Ordering::Relaxed)
-                            && !cancelled.load(std::sync::atomic::Ordering::Relaxed)
-                        {
-                            std::thread::sleep(Duration::from_millis(50));
-                        }
-                        let mut current = install
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        let done = if current.stage == update.stage {
-                            current.done.max(update.done)
-                        } else {
-                            update.done
-                        };
-                        *current =
-                            horizon_client::official_install::InstallProgress { done, ..update };
-                    });
-                let _ = sender.send(result.map_err(|e| e.to_string()));
-            });
+            // Starling's game fetches the official files and prepares them itself, on its setup
+            // screen: Play starts it there.
+            crate::ha_launcher::platform::hide();
+            self.catalog.config.save(&self.home)?;
+            crate::ha_launcher::play();
         }
         Ok(())
     }
@@ -681,38 +582,27 @@ impl Launcher {
 impl ApplicationHandler for Launcher {
     fn resumed(&mut self, events: &ActiveEventLoop) {
         self.configure_screen();
-        if let Some(game) = &mut self.game {
-            return game.resumed(events);
-        }
         if let Err(error) = self.open(events) {
             self.fail(error);
             events.exit();
         }
     }
     fn suspended(&mut self, events: &ActiveEventLoop) {
-        crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
-        if let Some(game) = &mut self.game {
-            return game.suspended(events);
-        }
+        crate::ha_launcher::diagnostics::heartbeat("suspended", || serde_json::json!({}));
         self.drag = None;
         if let Some(renderer) = &mut self.renderer {
             renderer.suspend_surface();
         }
     }
     fn window_event(&mut self, events: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if crate::documents::handle_event(&event) {
+        if crate::ha_launcher::documents::handle_event(&event) {
             return;
         }
         if matches!(event, WindowEvent::Resized(_)) {
-            let _ = crate::native_ime::viewport_bottom();
+            let _ = crate::ha_launcher::native_ime::viewport_bottom();
         }
         if matches!(event, WindowEvent::Focused(true)) {
             self.configure_screen();
-        }
-        if let Some(game) = &mut self.game {
-            game.window_event(events, id, event);
-            self.restore_launcher(events);
-            return;
         }
         let result = match event {
             WindowEvent::CloseRequested => {
@@ -733,8 +623,10 @@ impl ApplicationHandler for Launcher {
             }
             WindowEvent::Touch(touch) => self.touch_event(events, touch),
             WindowEvent::Focused(false) => {
-                crate::diagnostics::heartbeat("launcher_background", || serde_json::json!({}));
-                horizon_client::android_runtime::clear_gamepads();
+                crate::ha_launcher::diagnostics::heartbeat("launcher_background", || {
+                    serde_json::json!({})
+                });
+                crate::ha_launcher::client::android_runtime::clear_gamepads();
                 self.controller_repeat = None;
                 self.mouse_down = false;
                 self.drag = None;
@@ -794,7 +686,7 @@ impl ApplicationHandler for Launcher {
                 }
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
-                self.edit_text(horizon_client::osk::Output::Text(text));
+                self.edit_text(crate::ha_launcher::client::osk::Output::Text(text));
                 Ok(())
             }
             _ => Ok(()),
@@ -808,22 +700,10 @@ impl ApplicationHandler for Launcher {
             self.mouse_down = false;
             self.drag = None;
         }
-        if let Some(game) = &mut self.game {
-            game.device_event(events, id, event);
-        } else {
-            horizon_client::android_runtime::gamepad_event(
-                winit::platform::android::native_device_id(id),
-                &event,
-            );
-        }
+        let _ = (events, id);
     }
     fn about_to_wait(&mut self, events: &ActiveEventLoop) {
-        if let Some(game) = &mut self.game {
-            game.about_to_wait(events);
-            self.restore_launcher(events);
-            return;
-        }
-        crate::diagnostics::heartbeat("launcher", || serde_json::json!({}));
+        crate::ha_launcher::diagnostics::heartbeat("launcher", || serde_json::json!({}));
         if let Some(result) = self
             .diagnostic_export
             .as_ref()
@@ -832,7 +712,9 @@ impl ApplicationHandler for Launcher {
             self.diagnostic_export = None;
             self.catalog.status = match result {
                 Ok(name) => {
-                    let _ = crate::platform::open_documents("reports");
+                    // The share sheet, as the game's Diagnostics opens it: the report is in the
+                    // app's own files, which the player can't reach otherwise.
+                    let _ = crate::android::share_diagnostic(&name);
                     format!(
                         "Saved {name} in Reports. Review the ZIP before sharing; nothing was uploaded."
                     )
@@ -840,14 +722,16 @@ impl ApplicationHandler for Launcher {
                 Err(error) => format!("Diagnostic export failed: {error}"),
             };
         }
-        crate::platform::poll_gamepad_connections();
+        crate::ha_launcher::platform::poll_gamepad_connections();
         if let Err(error) = self.controller_frame(events) {
             self.fail(error);
         }
         if let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer)
-            && let Err(error) = crate::display::apply(window, renderer)
+            && let Err(error) = crate::ha_launcher::display::apply(window, renderer)
         {
-            crate::display::set_scale(crate::display::RenderScale::default());
+            crate::ha_launcher::display::set_scale(
+                crate::ha_launcher::display::RenderScale::default(),
+            );
             self.fail(error);
         }
         if let Some(result) = self.worker.as_ref().and_then(|w| w.try_recv().ok()) {
@@ -870,11 +754,11 @@ impl ApplicationHandler for Launcher {
             } else {
                 ed.save_name_input.clone()
             };
-            crate::platform::show(&text);
+            crate::ha_launcher::platform::show(&text);
         }
-        for out in crate::platform::poll() {
-            if matches!(out, horizon_client::osk::Output::Enter) {
-                crate::platform::hide();
+        for out in crate::ha_launcher::platform::poll() {
+            if matches!(out, crate::ha_launcher::client::osk::Output::Enter) {
+                crate::ha_launcher::platform::hide();
             }
             self.edit_text(out);
         }
@@ -883,7 +767,7 @@ impl ApplicationHandler for Launcher {
         }
         self.catalog.poll(&self.home);
         self.wardrobe.poll();
-        if let Some(notice) = crate::documents::poll() {
+        if let Some(notice) = crate::ha_launcher::documents::poll() {
             self.wardrobe.reload();
             self.catalog.status = notice.text;
             if notice.changed {
@@ -891,7 +775,7 @@ impl ApplicationHandler for Launcher {
                 self.catalog.show_installed(notice.kind);
             }
         }
-        for result in crate::gallery::poll() {
+        for result in crate::ha_launcher::gallery::poll() {
             self.catalog.status = result.unwrap_or_else(|e| format!("File export failed: {e}"));
         }
         if self.login.poll() {
@@ -907,7 +791,7 @@ impl ApplicationHandler for Launcher {
             match result {
                 Ok(prepared) => {
                     // Only the current selection may publish the game handoff.
-                    if crate::account::Accounts::load()
+                    if crate::ha_launcher::account::Accounts::load()
                         .selected()
                         .is_none_or(|a| a.key() != prepared.key)
                     {
@@ -925,8 +809,8 @@ impl ApplicationHandler for Launcher {
                                 prepared.appearance.cape.as_deref(),
                             )
                         });
-                        let appearance =
-                            crate::skins::library::Library::load(&root).and_then(|library| {
+                        let appearance = crate::ha_launcher::skins::library::Library::load(&root)
+                            .and_then(|library| {
                                 library.prepare_game(
                                     &root,
                                     &prepared.key,
@@ -967,9 +851,6 @@ impl ApplicationHandler for Launcher {
             if let Err(error) = self.action(events) {
                 self.fail(error);
             }
-            if self.game.is_some() {
-                return;
-            }
         }
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -1000,18 +881,14 @@ impl ApplicationHandler for Launcher {
             Instant::now() + Duration::from_millis(frame_ms),
         ));
     }
-    fn exiting(&mut self, events: &ActiveEventLoop) {
-        if let Some(game) = &mut self.game {
-            game.exiting(events);
-        }
-    }
+    fn exiting(&mut self, _events: &ActiveEventLoop) {}
 }
 
 impl Launcher {
     fn controller_frame(&mut self, events: &ActiveEventLoop) -> Result<()> {
-        use horizon_client::gamepad::Button;
+        use crate::ha_launcher::client::gamepad::Button;
         use winit::keyboard::{Key, NamedKey};
-        let mut state = horizon_client::android_runtime::gamepad_state();
+        let mut state = crate::ha_launcher::client::android_runtime::gamepad_state();
         for (b, held) in [
             (Button::DPadLeft, state.left[0] < -0.55),
             (Button::DPadRight, state.left[0] > 0.55),
@@ -1052,7 +929,7 @@ impl Launcher {
             } else if b == Button::South {
                 self.activate(events)?;
             } else if b == Button::East {
-                crate::platform::hide();
+                crate::ha_launcher::platform::hide();
                 self.catalog.editing = None;
                 if self.chooser.take().is_none() {
                     if self.login.visible {

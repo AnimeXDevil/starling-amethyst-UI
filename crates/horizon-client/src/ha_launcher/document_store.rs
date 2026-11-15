@@ -73,6 +73,10 @@ fn shareable_report(name: &str) -> bool {
         || (name.starts_with("horizon-controls-") && name.ends_with(".json"))
         || name.ends_with(".jsonl")
 }
+/// The folder or file a document ID names, for the system's file manager.
+pub fn path_of(home: &Path, id: &str) -> Option<PathBuf> {
+    resolve(home, id).ok().map(|doc| doc.path)
+}
 fn resolve(home: &Path, id: &str) -> io::Result<Document> {
     let mut parts = id.split('/');
     let first = parts.next().ok_or_else(invalid)?;
