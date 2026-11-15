@@ -149,3 +149,12 @@ fn symlinked_homes_share_the_reentrant_lock() {
     drop(second);
     fs::remove_dir_all(root).unwrap();
 }
+
+/// Android's shared storage answers a file lock with ENOSYS: the catalog installs there anyway
+/// (Starling's catalog refused every install with "Function not implemented (os error 38)").
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn a_filesystem_without_file_locks_does_not_refuse_the_install() {
+    assert!(locks_unsupported(&io::Error::from_raw_os_error(38)));
+    assert!(!locks_unsupported(&io::Error::from_raw_os_error(13)));
+}

@@ -332,7 +332,12 @@ pub(super) fn hold(out: &Path) -> io::Result<()> {
                 .create(true)
                 .truncate(false)
                 .open(use_path(out))?;
-            file.lock_shared()?;
+            // Unlocked where the filesystem keeps no locks (Android's shared storage), as `build`.
+            if let Err(e) = file.lock_shared()
+                && e.kind() != io::ErrorKind::Unsupported
+            {
+                return Err(e);
+            }
             held.push((out.into(), file));
             held.len() - 1
         }
@@ -394,6 +399,10 @@ fn remove_unused(out: &Path) -> io::Result<()> {
         match lock.try_lock() {
             Ok(()) => {}
             Err(fs::TryLockError::WouldBlock) => return Ok(()),
+            // Without file locks nothing tells whether another game uses it: it stays.
+            Err(fs::TryLockError::Error(e)) if e.kind() == io::ErrorKind::Unsupported => {
+                return Ok(());
+            }
             Err(fs::TryLockError::Error(e)) => return Err(e),
         }
     }
