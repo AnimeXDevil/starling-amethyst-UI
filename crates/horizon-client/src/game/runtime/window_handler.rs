@@ -16,6 +16,21 @@ impl Game<'_> {
 /// A key, a modifier, a click, the wheel, the pointer or the input method. Resize and close are
 /// not, so a person can still close the window. A modifier change counts: `reconcile` would
 /// release a Shift or Ctrl the run holds.
+/// `event`'s key without the modifiers held (winit's modifier supplement). Starling: Android's winit has
+/// none, and the logical key is the nearest; a function apart so `window_event`, which mods target, has no
+/// cfg in its body (horizon-mixins refuses one).
+fn key_without_modifiers(event: &winit::event::KeyEvent) -> winit::keyboard::Key {
+    #[cfg(not(target_os = "android"))]
+    {
+        use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+        event.key_without_modifiers()
+    }
+    #[cfg(target_os = "android")]
+    {
+        event.logical_key.clone()
+    }
+}
+
 fn is_input(event: &WindowEvent) -> bool {
     matches!(
         event,
@@ -424,16 +439,10 @@ impl ApplicationHandler for Game<'_> {
                 PhysicalKey::Code(code) => horizon_client::keybinds::key_name(code),
                 PhysicalKey::Unidentified(_) => None,
             };
-            #[cfg(not(target_os = "android"))]
-            let unmodified = {
-                use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
-                event.key_without_modifiers()
-            };
-            // Starling: Android's winit has no modifier supplement; the logical key is the nearest.
-            #[cfg(target_os = "android")]
-            let unmodified = event.logical_key.clone();
-            let layout_key =
-                horizon_client::keybinds::layout_key_name(event.physical_key, &unmodified);
+            let layout_key = horizon_client::keybinds::layout_key_name(
+                event.physical_key,
+                &key_without_modifiers(&event),
+            );
             let raw_code = horizon_client::keybinds::raw_key_code(event.physical_key);
             let action = match (event.state, event.repeat) {
                 (winit::event::ElementState::Released, _) => mod_api::KeyAction::Release,

@@ -44,6 +44,9 @@ CALLS = (
 # chat's completion, a camera's own eye height, the bounds of a dimension lower than the overworld, a
 # world's own set of mods and the note about preparing them when a mod calls `content_root` again.
 CHANGED = (
+    # The inventory tweaks' menu test is in extras' mouse_tweaks since the fork split game::tweaks.
+    (r"\bsuper::tweaks::tweak_menu\b", "super::extras::mouse_tweaks::tweak_menu"),
+    (r"\bcrate::game::tweaks::tweak_menu\b", "crate::game::extras::mouse_tweaks::tweak_menu"),
     (r"GuestUse::Entity\(Hand::Main\)", "GuestUse::Entity(Hand::Main, _)"),
     # A text's hover is shared now.
     (r"(\bhover:\s*Some\(\s*)Box::new\(", r"\1std::sync::Arc::new("),
@@ -533,11 +536,21 @@ def relocate(target, tree):
     return f"{found[0]}::{spelled}::{name}" if kind else f"{found[0]}::{name}"
 
 
+# Game files the fork split under another module name, by what a mod's `[[module]]` inside them reaches: the
+# inventory tweaks' sort buttons (`SORT_BUTTON`, `draw_sort_buttons`) are in extras/sorting.rs since 2026-11.
+MOVED_FILES = {
+    "crates/horizon-client/src/game/tweaks.rs": "crates/horizon-client/src/game/interface/extras/sorting.rs",
+    "crates/horizon-client/src/game/interface/tweaks.rs": "crates/horizon-client/src/game/interface/extras/sorting.rs",
+}
+
+
 def relocate_file(path, tree, source):
     """A `[[module]]`'s destination file when it moved: the file the module its old path names is in
     now (Horizon moved the game's files into area folders, keeping their module paths)."""
     if (source / path).exists() or not path.endswith(".rs"):
         return path
+    if path in MOVED_FILES and (source / MOVED_FILES[path]).exists():
+        return MOVED_FILES[path]
     for crate, root in CRATES.items():
         folder = root.rsplit("/", 1)[0] + "/"
         if not path.startswith(folder):

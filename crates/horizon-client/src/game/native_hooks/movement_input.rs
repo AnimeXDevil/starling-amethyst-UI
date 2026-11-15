@@ -19,6 +19,8 @@ impl Game<'_> {
         &self,
         mut keys: horizon_client::sprint::Keys,
     ) -> horizon_client::sprint::Keys {
+        // Starling: the old hook first, for the mods made for it (native_compat.rs).
+        keys = self.old_movement_keys(keys);
         if !mod_api::__private::enabled_listened(mod_api::HookId::MovementInput) {
             return keys;
         }

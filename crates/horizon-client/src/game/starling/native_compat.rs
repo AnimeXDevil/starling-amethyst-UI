@@ -80,6 +80,40 @@ impl Game<'_> {
     pub(in crate::game) fn native_frame(&mut self, elapsed: Duration) {
         let _ = elapsed;
     }
+    /// Local player movement input, after reading it and before applying it, as Horizon's hook had it:
+    /// the axes and the jump and sneak keys, which the mod may change. The fork's
+    /// `native_movement_input` takes one `MovementInputCall` now.
+    pub(in crate::game) fn native_movement_input_old(
+        &self,
+        forward: &mut f32,
+        strafe: &mut f32,
+        jump: &mut bool,
+        sneak: &mut bool,
+    ) {
+        let _ = (forward, strafe, jump, sneak);
+    }
+    /// `native_movement_input_old` over the keys, as Horizon applied it: a changed axis sets its keys
+    /// and the analog vector (the fork's `mod_movement_keys` does the same for its own hook after it).
+    pub(in crate::game) fn old_movement_keys(
+        &self,
+        mut keys: horizon_client::sprint::Keys,
+    ) -> horizon_client::sprint::Keys {
+        let [mut strafe, mut forward] = keys.direction();
+        let original = [strafe, forward];
+        self.native_movement_input_old(&mut forward, &mut strafe, &mut keys.jump, &mut keys.shift);
+        if [strafe, forward] != original {
+            if forward != original[1] {
+                keys.forward = forward > 0.0;
+                keys.backward = forward < 0.0;
+            }
+            if strafe != original[0] {
+                keys.left = strafe > 0.0;
+                keys.right = strafe < 0.0;
+            }
+            keys.analog = Some([strafe, forward]);
+        }
+        keys
+    }
     /// The HUD (not drawn under F1), after the minimap: place a box with
     /// `corners.place` (boxes stack away from their edge) and draw it with
     /// `native_fill` and `native_text`. Skip a corner `native_corner_shown`

@@ -131,6 +131,11 @@ for mod in "$@"; do
   check_tree "$work/stage" "$out/logs/$mod.check.log" "$flags"
   code=$?
   record "$mod" "$out/logs/$mod.check.log" $((SECONDS - start)) $code
+  # The errors in full (which call, which argument): cargo replays them from its cache, in seconds.
+  if [ $code != 0 ]; then
+    # shellcheck disable=SC2086
+    (cd "$build" && timeout 600 cargo ndk -t arm64-v8a check -p horizon-android $flags) > "$out/logs/$mod.full.log" 2>&1
+  fi
 done
 echo "hnmod_compat: $(grep -c $'\tok\t' "$out/check.tsv") ok (the control included)," \
   "$(grep -c $'\tfail\t' "$out/check.tsv") fail, $(grep -c $'\tapply-fail\t' "$out/check.tsv") apply-fail"
