@@ -44,9 +44,13 @@ CALLS = (
 # chat's completion, a camera's own eye height, the bounds of a dimension lower than the overworld, a
 # world's own set of mods and the note about preparing them when a mod calls `content_root` again.
 CHANGED = (
+    # The main hand's key was a string (its item and components); it is the stack now.
+    (r"\.main_hand_key\(\)", ".main_hand_key_old()"),
     # The inventory tweaks' menu test is in extras' mouse_tweaks since the fork split game::tweaks.
     (r"\bsuper::tweaks::tweak_menu\b", "super::extras::mouse_tweaks::tweak_menu"),
     (r"\bcrate::game::tweaks::tweak_menu\b", "crate::game::extras::mouse_tweaks::tweak_menu"),
+    # A mod's module inside the old tweaks file is in extras/sorting.rs now (MOVED_FILES).
+    (r"\bcrate::game::tweaks::", "crate::game::extras::sorting::"),
     (r"GuestUse::Entity\(Hand::Main\)", "GuestUse::Entity(Hand::Main, _)"),
     # A text's hover is shared now.
     (r"(\bhover:\s*Some\(\s*)Box::new\(", r"\1std::sync::Arc::new("),
@@ -230,6 +234,10 @@ OLD_SHAPES = (
     # now), and the inventory screen's slot of a menu's.
     (".menu_click(", 3, ".menu_click_old("),
     ("Game::menu_slot(", 2, "Game::menu_slot_old("),
+    # Who wears the item, which the fork's unbreaking roll takes now: the player, as before.
+    (".durability_loss(", 2, ".durability_loss_old("),
+    # The title's draw takes the render phases' callback now.
+    (".draw_with_items(", 6, ".draw_with_items_old("),
     # Inventory.add, the stack that did not fit back: `give` takes an item key and a count now.
     (".give(", 1, ".add_stack_to_inventory("),
 )

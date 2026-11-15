@@ -80,6 +80,17 @@ impl Game<'_> {
     pub(in crate::game) fn native_frame(&mut self, elapsed: Duration) {
         let _ = elapsed;
     }
+    /// `durability_loss` as the mods made for Horizon's API call it: the player wears the item (the
+    /// fork's unbreaking roll takes the wearer now).
+    pub(in crate::game) fn durability_loss_old(&mut self, stack: &ItemStack, amount: u32) -> u32 {
+        self.durability_loss(stack, amount, super::durability::Wearer::Player)
+    }
+    /// A key for the main-hand stack (`destroyingItem`): its item and components, as Horizon's
+    /// `main_hand_key` gave it (the fork's gives the stack).
+    pub(in crate::game) fn main_hand_key_old(&self) -> String {
+        self.main_hand_key()
+            .map_or(String::new(), |s| format!("{} {:?}", s.item, s.extra))
+    }
     /// Local player movement input, after reading it and before applying it, as Horizon's hook had it:
     /// the axes and the jump and sneak keys, which the mod may change. The fork's
     /// `native_movement_input` takes one `MovementInputCall` now.
