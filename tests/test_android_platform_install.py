@@ -1,0 +1,59 @@
+"""The phone installs what the desktop's mod host installs before the engine starts.
+
+On the desktop, horizon-mod-host's `main_with` (crates/horizon-mod-host/src/loading.rs) installs the engine's
+seal, the mods' instrumentation, the engine platform socket and the render points before `entry::start`. Android
+starts the engine from horizon-android instead (android_lib.rs `install_platform`, run by `android::main` right
+before `entry::start`). Sync 7 shipped an APK without them: it stopped at start, "engine platform socket is not
+installed". A sync that adds an install to `main_with` fails here until the phone does it too.
+"""
+
+import re
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+HOST = ROOT / "crates/horizon-mod-host/src/loading.rs"
+ANDROID_LIB = ROOT / "crates/horizon-client/src/android_lib.rs"
+ANDROID = ROOT / "crates/horizon-client/src/android.rs"
+# What the host installs that the phone has no use for: the wasm runtime (no wasm mods on a phone) and the
+# installed native libraries' runtime (the phone's mods are compiled into the game).
+DESKTOP_ONLY = {"horizon_mod_wasm", "Runtime::load"}
+
+
+def function(text: str, name: str) -> str:
+    """The body of `fn name`, braces included."""
+    start = text.index("{", text.index(f"fn {name}("))
+    depth, i = 0, start
+    while True:
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        if depth == 0:
+            return text[start : i + 1]
+        i += 1
+
+
+def installs(body: str) -> list[str]:
+    """Each `install_*`, `initialize()` or `install()` call, by its last two path segments."""
+    calls = re.findall(r"((?:\w+::)*(?:install\w*|initialize))\s*\(", body)
+    return [
+        "::".join(call.split("::")[-2:])
+        for call in calls
+        if not any(skip in call for skip in DESKTOP_ONLY) and call.split("::")[-1] != "install_parts"
+    ]
+
+
+class AndroidPlatformInstall(unittest.TestCase):
+    def test_android_installs_what_the_mod_host_installs_in_its_order(self):
+        host = installs(function(HOST.read_text(encoding="utf-8"), "main_with").split("entry::start")[0])
+        phone = installs(function(ANDROID_LIB.read_text(encoding="utf-8"), "install_platform"))
+        self.assertTrue(host, "main_with installs nothing before entry::start: read loading.rs again")
+        self.assertEqual(phone, host)
+
+    def test_android_main_runs_the_installs_before_the_engine_starts(self):
+        main = function(ANDROID.read_text(encoding="utf-8"), "main")
+        self.assertIn("platform()", main)
+        self.assertLess(main.index("platform()"), main.index("entry::start("))
+        self.assertIn("android::main(app, install_platform)", ANDROID_LIB.read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()
