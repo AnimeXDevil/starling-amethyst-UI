@@ -1405,7 +1405,10 @@ fn a_resize_to_the_chats_own_size_keeps_its_suggestions() {
     screen.set_text(&m, &c, "/gamemode ", 10, 10);
     assert!(screen.suggestions_visible());
     screen.resize(&m, &c, 600, 360);
-    assert!(screen.suggestions_visible(), "the same size changes nothing");
+    assert!(
+        screen.suggestions_visible(),
+        "the same size changes nothing"
+    );
     screen.resize(&m, &c, 640, 360);
     assert!(
         !screen.suggestions_visible(),

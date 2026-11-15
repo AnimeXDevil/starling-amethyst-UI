@@ -2261,8 +2261,20 @@ mod keyboard_tap_tests {
 
     #[test]
     fn a_tap_beside_a_known_text_box_puts_the_keyboard_away_and_one_on_it_brings_it_back() {
-        assert!(!wanted("creative", Some(false), false, Some("creative"), true));
-        assert!(wanted("creative", Some(true), false, Some("creative"), false));
+        assert!(!wanted(
+            "creative",
+            Some(false),
+            false,
+            Some("creative"),
+            true
+        ));
+        assert!(wanted(
+            "creative",
+            Some(true),
+            false,
+            Some("creative"),
+            false
+        ));
     }
 
     #[test]

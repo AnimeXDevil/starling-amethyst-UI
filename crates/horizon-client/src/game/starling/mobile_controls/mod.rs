@@ -1924,8 +1924,7 @@ impl Game<'_> {
                     );
                 }
                 // A tap that opened a screen did not tap its focused box (Create New World's name).
-                let opened =
-                    self.keyboard_after_tap(t, [t.location.x as f32, t.location.y as f32]);
+                let opened = self.keyboard_after_tap(t, [t.location.x as f32, t.location.y as f32]);
                 if (field && !opened) || self.sign_edit.is_some() {
                     self.android_show_keyboard();
                 }
