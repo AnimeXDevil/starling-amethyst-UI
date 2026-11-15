@@ -245,6 +245,22 @@ impl Game<'_> {
     pub(in crate::game) fn native_settings_click(&mut self, mod_id: &str, button: usize) {
         let _ = (mod_id, button);
     }
+    /// A message from `player`'s client on `channel` (`mod_id:name`), within the caps
+    /// (old_mod_net.rs): check `channel`, and treat `data` as the player's own bytes, checked by
+    /// nothing. Runs in the host's tick after it arrives. Server-side.
+    pub(in crate::game) fn native_net_from_client(
+        &mut self,
+        player: u128,
+        channel: &str,
+        data: &[u8],
+    ) {
+        let _ = (player, channel, data);
+    }
+    /// A message from the server on `channel` (`mod_id:name`), whose `data` is the sender's own
+    /// bytes. The window's game only.
+    pub(in crate::game) fn native_net_from_server(&mut self, channel: &str, data: &[u8]) {
+        let _ = (channel, data);
+    }
 }
 
 /// Set at the end of an old hook's body: a mod's injection that left it early (its cancel) never
@@ -814,33 +830,23 @@ impl Game<'_> {
     pub(in crate::game) fn native_screen_title(&self) -> Option<String> {
         self.screen_title()
     }
-    /// Sends `data` on `channel` to the server.
+    /// Sends `data` on `channel` (`mod_id:name`) to the server, as the old mod messages go
+    /// (old_mod_net.rs): an error on a server that doesn't carry them.
     pub(in crate::game) fn native_net_send_to_server(
         &mut self,
         channel: &str,
         data: &[u8],
     ) -> Result<(), String> {
-        // The fork replaced the mod_net channel with declared payloads (payload_transport.rs):
-        // the old call goes out on the payload of that name, which a mod made for the old API
-        // has not declared, so it is refused unless one did.
-        self.send_payload_to_server(
-            &mod_api::PayloadId(channel.into()),
-            mod_api::PayloadBytes(data.to_vec()),
-        )
-        .map(|_| ())
-        .map_err(|error| format!("{error:?}"))
+        self.old_net_send_to_server(channel, data)
     }
-    /// Sends `data` on `channel` to `player`.
+    /// Sends `data` on `channel` to `player`'s client at the tick's end (old_mod_net.rs).
     pub(in crate::game) fn native_net_send_to_player(
         &mut self,
         player: u128,
         channel: &str,
         data: &[u8],
     ) -> Result<(), String> {
-        // The fork's payloads go to a player by its live reference, which the old call (a UUID)
-        // does not give: refused, as for a player who left.
-        let _ = (player, channel, data);
-        Err("this game sends mod messages to players by payload declarations only".into())
+        self.old_net_send_to_player(player, channel, data)
     }
     /// An image for the mod's own screen.
     pub(in crate::game) fn native_mod_image(

@@ -2714,6 +2714,8 @@ impl Game<'_> {
         for (player, name) in players {
             self.native_player_logged_out(player, &name);
         }
+        // Starling: no tick follows to send what they said (old_mod_net.rs).
+        self.flush_old_mod_net();
     }
     /// The mobs from index `from` on are new in the world.
     pub(super) fn native_mobs_joined(&mut self, from: usize, natural: bool) {

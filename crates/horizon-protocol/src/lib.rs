@@ -18,6 +18,8 @@ pub mod ids;
 pub mod item;
 pub mod menu_extra;
 pub mod mod_list;
+// Starling: the old mod messages, for the website's mods made for them (game/starling/old_mod_net.rs).
+pub mod mod_net;
 pub mod packets;
 pub mod passage_sync;
 pub mod payload_negotiation;

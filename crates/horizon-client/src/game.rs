@@ -1744,6 +1744,8 @@ struct Game<'a> {
     stats_overlay: perf::Perf,
     /// Starling's performance test: draw choices and each setup's averages (perf_lab.rs).
     perf_lab: perf_lab::PerfLab,
+    /// Starling: the old mod messages, for the mods made for them (old_mod_net.rs).
+    old_mod_net: old_mod_net::OldModNet,
     /// Files handed to the game from outside (game/imports.rs).
     imports: imports::Imports,
     /// The offer of the Starling folder in shared storage (game/files_offer.rs).
@@ -11289,6 +11291,7 @@ impl<'a> Game<'a> {
             frame_graph: Default::default(),
             stats_overlay: Default::default(),
             perf_lab: Default::default(),
+            old_mod_net: Default::default(),
             imports: Default::default(),
             #[cfg(target_os = "android")]
             files_offer: Default::default(),

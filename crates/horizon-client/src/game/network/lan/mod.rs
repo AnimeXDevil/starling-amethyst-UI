@@ -2903,6 +2903,8 @@ impl Game<'_> {
         if self.lan.as_ref().is_some_and(|host| !host.quiet.is_empty()) {
             self.run_quiet_commands();
         }
+        // Starling: the old mod messages from players (old_mod_net.rs).
+        self.run_old_mod_net();
         if self
             .lan
             .as_ref()
@@ -2953,6 +2955,7 @@ impl Game<'_> {
         }
         drop(holding);
         self.flush_attachment_sync();
+        self.flush_old_mod_net();
         self.flush_far_terrain();
         if let Some(host) = self.lan.as_ref() {
             lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));

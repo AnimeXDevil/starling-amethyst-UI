@@ -5291,7 +5291,7 @@ impl OptionsUi {
                         Act::DiagnosticsOpen => events.push(Event::DiagnosticsOpen),
                         Act::DiagnosticsRecord => events.push(Event::DiagnosticsRecord),
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
-                        Act::PerfLab(i) => events.push(Event::PerfLab(i)),
+                        Act::PerfLab(i) => events.push(Event::PerfLab(*i)),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }

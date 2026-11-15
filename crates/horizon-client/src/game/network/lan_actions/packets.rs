@@ -824,6 +824,10 @@ impl Game<'_> {
             {
                 self.guest_book_settings(conn, &p.data)
             }
+            // Starling: the old mod messages (old_mod_net.rs).
+            S::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
+                self.guest_old_mod_net(conn, &p.data)
+            }
             S::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
                 self.guest_recipe_transfer(conn, &p.data);
             }

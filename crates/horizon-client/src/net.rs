@@ -89,6 +89,8 @@ pub enum Event {
     Brand(String),
     /// The server runs mods' quiet commands (`horizon_protocol::quiet`).
     QuietCommands,
+    /// Starling: the server carries the old mod messages (`horizon_protocol::mod_net`).
+    ModNet,
     /// The server supports private custom recipe-book synchronization.
     CustomBooks,
     /// The server samples far terrain for this client (`lod_net`).
@@ -161,6 +163,7 @@ impl Event {
                 s.capacity()
             }
             Self::QuietCommands
+            | Self::ModNet
             | Self::CustomBooks
             | Self::Reconfiguring
             | Self::ClearDialog
@@ -1567,6 +1570,8 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &ingress::Producer<Event>) 
         let _ = send.send(Event::Brand(brand));
     } else if payload.channel == horizon_protocol::quiet::CHANNEL {
         let _ = send.send(Event::QuietCommands);
+    } else if payload.channel == horizon_protocol::mod_net::CHANNEL {
+        let _ = send.send(Event::ModNet);
     } else if payload.channel == horizon_protocol::custom_book::CHANNEL {
         let _ = send.send(Event::CustomBooks);
     } else if payload.channel == crate::lod_net::CHANNEL

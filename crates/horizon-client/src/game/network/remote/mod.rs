@@ -483,6 +483,8 @@ pub(super) struct Remote {
     pub(super) features: std::sync::Arc<[String]>,
     /// The server announced it runs mods' quiet commands.
     pub quiet_commands: bool,
+    /// Starling: the server announced it carries the old mod messages (old_mod_net.rs).
+    pub mod_net: bool,
     /// The server advertised private custom recipe-book synchronization.
     pub custom_books: bool,
     /// The synced attachments the server sent, by holder.
@@ -1283,6 +1285,7 @@ impl Game<'_> {
             recipe_viewer: Default::default(),
             features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
+            mod_net: false,
             custom_books: false,
             logged_out: false,
             attachments: HashMap::new(),
@@ -1573,6 +1576,7 @@ impl Game<'_> {
             recipe_viewer: Default::default(),
             features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
+            mod_net: false,
             custom_books: false,
             attachments: HashMap::new(),
             far_terrain: None,
@@ -2707,6 +2711,11 @@ impl Game<'_> {
                         remote.quiet_commands = true;
                     }
                 }
+                Event::ModNet => {
+                    if let Some(remote) = &mut self.remote {
+                        remote.mod_net = true;
+                    }
+                }
                 Event::CustomBooks => {
                     if let Some(remote) = &mut self.remote {
                         remote.custom_books = true;
@@ -2734,6 +2743,7 @@ impl Game<'_> {
                         remote.viewed.clear();
                         remote.far_terrain = None;
                         remote.quiet_commands = false;
+                        remote.mod_net = false;
                         remote.custom_books = false;
                     }
                     if let Some(remote) = &self.remote {
@@ -4003,6 +4013,10 @@ impl Game<'_> {
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
+            }
+            // Starling: the old mod messages (old_mod_net.rs).
+            C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
+                self.remote_old_mod_net(&p.data);
             }
             // The passages of the chunks the server shows the window.
             C::CustomPayload(p) if p.channel == horizon_protocol::passage_sync::CHANNEL => {
@@ -7027,6 +7041,7 @@ impl Game<'_> {
         // Starling: client mods made for the old hooks tick on any server, single player's own
         // included (native_compat.rs).
         self.native_tick();
+        self.tick_old_mod_net();
         self.tick_book_snapshot_retry();
         // Far tiles the samplers asked for (`lod_net`).
         if let Some(r) = &self.remote {

@@ -654,6 +654,61 @@ def rebind(text, tree, hooks):
     return "".join(blocks)
 
 
+# Parameters Horizon folded into a tuple with another, by target: the old parameter's name, the
+# tuple's, the tuple's type and the old one's. A binding to the old parameter binds the tuple with
+# the tuple's type, and the helper takes the tuple where it took the old one: the calls it made with
+# it want the tuple now. The fork reads the frame's linear light beside the shading API there
+# (`line: (api, linear)`); horizon_physics hands `api` on to `shader_source`.
+FOLDED_PARAMETERS = {
+    "horizon_client_render::gfx::native_material::module": (
+        "api",
+        "line",
+        "(horizon_shader_api::Api, bool)",
+        "horizon_shader_api::Api",
+    ),
+}
+
+
+def fold(text, mod_dir):
+    """Each injection's bindings to a parameter Horizon folded into a tuple (FOLDED_PARAMETERS) bind
+    the tuple, and its helper (in `mod_dir`) takes the tuple; the manifest's new text."""
+    blocks = re.split(r"(?=^\[\[injection\]\])", text, flags=re.M)
+    for i, block in enumerate(blocks):
+        target = re.search(r'^\s*target\s*=\s*"([^"]*)"', block, re.M)
+        folded = target and FOLDED_PARAMETERS.get(target[1])
+        if not folded:
+            continue
+        old, tuple_name, tuple_ty, old_ty = folded
+        binding = re.compile(
+            r'\{\s*name\s*=\s*"(\w+)"\s*,\s*ty\s*=\s*"'
+            + re.escape(old_ty)
+            + r'"\s*,\s*value\s*=\s*"'
+            + old
+            + r'"\s*\}'
+        )
+        names = binding.findall(block)
+        if not names:
+            continue
+        blocks[i] = binding.sub(
+            lambda m: f'{{ name = "{m[1]}", ty = "{tuple_ty}", value = "{tuple_name}" }}', block
+        )
+        helper = re.search(r'^\s*helper\s*=\s*"([^"]*)"', block, re.M)
+        helper_file = mod_dir / helper[1] if helper else None
+        if helper_file and helper_file.is_file():
+            code_text = helper_file.read_text(encoding="utf-8", errors="surrogateescape")
+            new_code = code_text
+            for name in names:
+                new_code = re.sub(
+                    rf"\b{name}\s*:\s*{re.escape(old_ty)}(?=\s*[,)])",
+                    f"{name}: {tuple_ty}",
+                    new_code,
+                )
+            if new_code != code_text:
+                helper_file.write_text(new_code, encoding="utf-8", errors="surrogateescape")
+        print(f"native_mod_adapt: {mod_dir.name}: {target[1]}'s {old} is its {tuple_name} now")
+    return "".join(blocks)
+
+
 INCLUDE = re.compile(r'^include!\("([\w/]+\.rs)"\);\n', re.M)
 
 
@@ -711,6 +766,7 @@ def main():
             flags=re.M,
         )
         new = rebind(new, tree, hooks)
+        new = fold(new, manifest.parent)
         if new != old:
             manifest.write_text(new, encoding="utf-8")
             print(f"native_mod_adapt: {manifest.parent.name} pointed at where things went")
