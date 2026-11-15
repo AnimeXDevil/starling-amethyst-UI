@@ -78,6 +78,15 @@ pub struct TouchUi {
     pub keyboard: Option<Keyboard>,
     gesture: Option<(u64, [f32; 2], [f32; 2], bool)>,
     pointer_drag: Option<u64>,
+    /// A finger that landed on a slider of a list page and has not yet moved past the slop: it
+    /// scrolls the list, or takes the slider moving clearly sideways (`direct_pointer`).
+    slider_pending: Option<(u64, [f32; 2])>,
+    /// Where that finger landed, once it took the slider: the press the host owes it.
+    slider_press: Option<[f32; 2]>,
+    /// A slider takes a finger only once it moves clearly sideways (the Options pages, where a
+    /// list of sliders scrolls under the thumb), and `slider_slop` GUI pixels is how far it moves.
+    pub defer_sliders: bool,
+    pub slider_slop: f32,
     held_keys: BTreeMap<u64, KeyCode>,
     pub f3_latched: bool,
 }
@@ -127,6 +136,10 @@ impl Default for TouchUi {
             keyboard: None,
             gesture: None,
             pointer_drag: None,
+            slider_pending: None,
+            slider_press: None,
+            defer_sliders: false,
+            slider_slop: 4.0,
             held_keys: BTreeMap::new(),
             f3_latched: false,
         }
@@ -683,6 +696,7 @@ impl TouchUi {
     pub fn cancel(&mut self) {
         self.gesture = None;
         self.pointer_drag = None;
+        self.slider_pending = None;
         self.relative = None;
         self.relative_click = None;
         self.slider_gesture = None;
@@ -778,18 +792,38 @@ impl TouchUi {
         }
         None
     }
-    /// Sliders retain mouse dragging; list rows use scroll-or-tap gestures.
+    /// Sliders retain mouse dragging; list rows use scroll-or-tap gestures. With `defer_sliders` a
+    /// finger on a slider is a list's until it moves clearly sideways (more than twice as far
+    /// sideways as up or down, as `TouchPointer::prefer_slider` does); then it takes the slider
+    /// from where it landed (`take_slider_press`), and a tap or a scroll leaves the slider be.
     pub fn direct_pointer(&mut self, id: u64, p: [f32; 2], phase: TouchPhase, track: bool) -> bool {
-        if phase == TouchPhase::Started
-            && (track
-                || crate::widgets::last_targets().iter().any(|t| {
-                    let [x, y, w, h] = t.rect;
-                    matches!(t.kind, crate::widgets::Kind::Slider { .. })
-                        && (x..x + w).contains(&p[0])
-                        && (y..y + h).contains(&p[1])
-                }))
+        if phase == TouchPhase::Started {
+            let on_slider = crate::widgets::last_targets().iter().any(|t| {
+                let [x, y, w, h] = t.rect;
+                matches!(t.kind, crate::widgets::Kind::Slider { .. })
+                    && (x..x + w).contains(&p[0])
+                    && (y..y + h).contains(&p[1])
+            });
+            if track || (on_slider && !self.defer_sliders) {
+                self.pointer_drag = Some(id);
+            } else if on_slider && self.slider_pending.is_none() {
+                self.slider_pending = Some((id, p));
+            }
+        }
+        if let Some((owner, start)) = self.slider_pending
+            && owner == id
         {
-            self.pointer_drag = Some(id);
+            let (dx, dy) = (p[0] - start[0], p[1] - start[1]);
+            if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                self.slider_pending = None;
+            } else if dx.hypot(dy) > self.slider_slop {
+                self.slider_pending = None;
+                if dx.abs() > 2.0 * dy.abs() {
+                    self.gesture = None;
+                    self.pointer_drag = Some(id);
+                    self.slider_press = Some(start);
+                }
+            }
         }
         if self.pointer_drag == Some(id) {
             if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
@@ -798,6 +832,11 @@ impl TouchUi {
             return true;
         }
         false
+    }
+    /// Where the finger that just took a slider landed, in GUI pixels: the host presses there
+    /// before the finger's move, as the finger's own press would have.
+    pub fn take_slider_press(&mut self) -> Option<[f32; 2]> {
+        self.slider_press.take()
     }
     /// A drag scrolls; a tap clicks only on release. Never activate a row while scrolling it.
     pub fn gesture(&mut self, id: u64, p: [f32; 2], phase: TouchPhase) -> Gesture {
@@ -8337,6 +8376,36 @@ mod tests {
         ui.menu_direct_pointer = false;
         assert!(ui.compute_virtual_mouse_visibility(&controls, true, false, true, false));
         assert!(controls.settings.virtual_mouse_enabled);
+    }
+    #[test]
+    fn a_list_slider_scrolls_under_a_finger_moving_up_and_takes_one_moving_sideways() {
+        let mut ui = TouchUi::default();
+        crate::widgets::target_as(
+            [10., 50., 200., 20.],
+            crate::widgets::Kind::Slider {
+                value: 0.5,
+                track: [15., 190.],
+            },
+        );
+        crate::widgets::end_frame(crate::widgets::generation() + 1);
+        ui.defer_sliders = true;
+        // A tap: the slider is not taken, the gesture (a tap) decides.
+        assert!(!ui.direct_pointer(1, [100., 60.], TouchPhase::Started, false));
+        assert!(!ui.direct_pointer(1, [100., 60.], TouchPhase::Ended, false));
+        // A drag more up than sideways scrolls.
+        assert!(!ui.direct_pointer(2, [100., 60.], TouchPhase::Started, false));
+        assert!(!ui.direct_pointer(2, [110., 40.], TouchPhase::Moved, false));
+        assert!(!ui.direct_pointer(2, [130., 10.], TouchPhase::Moved, false));
+        assert!(ui.take_slider_press().is_none());
+        assert!(!ui.direct_pointer(2, [130., 10.], TouchPhase::Ended, false));
+        // A clearly sideways one takes the slider from where it landed.
+        assert!(!ui.direct_pointer(3, [100., 60.], TouchPhase::Started, false));
+        assert!(ui.direct_pointer(3, [120., 62.], TouchPhase::Moved, false));
+        assert_eq!(ui.take_slider_press(), Some([100., 60.]));
+        assert!(ui.direct_pointer(3, [150., 62.], TouchPhase::Ended, false));
+        // Without the deferral (other screens) the slider takes the finger at once.
+        ui.defer_sliders = false;
+        assert!(ui.direct_pointer(4, [100., 60.], TouchPhase::Started, false));
     }
     #[test]
     fn scrollbar_owns_drag_until_release_outside_track() {

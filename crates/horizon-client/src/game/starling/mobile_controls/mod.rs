@@ -1836,7 +1836,35 @@ impl Game<'_> {
             // Starling tracks list and slider presses through its window events.
         }
         let track = self.on_scrollbar([t.location.x as f32, t.location.y as f32]);
+        // A list of sliders scrolls under a thumb: a slider of the Options pages takes the finger
+        // only moving clearly sideways (`TouchPointer::prefer_slider`'s rule).
+        self.mobile.ui.defer_sliders = self.screen == Screen::Options;
+        self.mobile.ui.slider_slop = 12.0 / b.scale;
         let direct = self.mobile.ui.direct_pointer(t.id, p, t.phase, track);
+        if let Some(start) = self.mobile.ui.take_slider_press() {
+            self.handle_window_event(
+                events,
+                id,
+                WindowEvent::CursorMoved {
+                    device_id: t.device_id,
+                    position: winit::dpi::PhysicalPosition::new(
+                        f64::from(start[0] * b.scale),
+                        f64::from(start[1] * b.scale),
+                    ),
+                },
+                InputOrigin::User,
+            );
+            self.handle_window_event(
+                events,
+                id,
+                WindowEvent::MouseInput {
+                    device_id: t.device_id,
+                    button: MouseButton::Left,
+                    state: ElementState::Pressed,
+                },
+                InputOrigin::User,
+            );
+        }
         self.handle_window_event(
             events,
             id,
