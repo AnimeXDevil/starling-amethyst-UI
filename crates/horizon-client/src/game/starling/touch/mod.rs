@@ -1796,6 +1796,14 @@ impl Game<'_> {
             .map(|pixels| (pixels as f32 / scale).ceil())
     }
 
+    /// The width `draw_clear_of_cutout` lays out in on a frame `width` GUI pixels wide: between
+    /// the strips. What re-makes a screen at its draw's size (the chat's `resize`) takes it
+    /// too, or the screen is made again at each of two sizes in turn, every frame.
+    pub(in crate::game) fn width_between_cutouts(&self, width: f32, scale: f32) -> f32 {
+        let [left, _, right, _] = self.safe_gui_insets(scale);
+        (width - left - right).max(0.0)
+    }
+
     /// `draw` laid out on the part of `batch` between the camera cutout's strips at the left
     /// and right ([`Self::safe_gui_insets`]) as if that were the whole width, then moved in
     /// from the left with the controller targets it made: what keeps to an edge keeps to the
@@ -1812,7 +1820,7 @@ impl Game<'_> {
             horizon_client::widgets::targets_mark(),
             batch.width,
         );
-        batch.width = (width - left - right).max(0.0);
+        batch.width = self.width_between_cutouts(width, batch.scale);
         draw(batch, left);
         batch.width = width;
         batch.translate_since(start, left, 0.0);

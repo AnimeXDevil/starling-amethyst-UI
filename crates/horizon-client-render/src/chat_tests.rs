@@ -1342,3 +1342,77 @@ fn the_suggestion_list_asks_for_the_pointing_hand() {
     screen.draw(&m, (rect[0] - 1, rect[1] + 2), 0, 0);
     assert_eq!(crate::widgets::take_cursor(), crate::widgets::Cursor::Arrow);
 }
+
+/// The text the box's suggestion list offers, in the order it shows them.
+fn offered(screen: &ChatScreen) -> Vec<String> {
+    screen
+        .suggestions
+        .as_ref()
+        .map(|list| list.list.iter().map(|s| s.text.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// Typing a command completes it, as the on-screen keyboard's whole-text edit does (`set_text`):
+/// `/gamemode ` offers the modes and `/sa` the commands that start so, for a player who may use
+/// them (permission 2, single player with cheats on).
+#[test]
+fn the_chat_completes_commands_for_a_game_master() {
+    let font = font();
+    let m = Measure(&font);
+    let registries = Registries {
+        permission: 2,
+        ..Registries::default()
+    };
+    let c = Commands {
+        dispatcher: crate::command::vanilla::game_dispatcher(),
+        registries: &registries,
+    };
+    let mut screen = ChatScreen::new(&m, &c, "", false, 0, 640, 360, full());
+    screen.set_text(&m, &c, "/gamemode ", 10, 10);
+    let mut modes = offered(&screen);
+    modes.sort();
+    assert_eq!(modes, ["adventure", "creative", "spectator", "survival"]);
+    screen.set_text(&m, &c, "/sa", 3, 3);
+    assert!(offered(&screen).iter().any(|s| s == "say"));
+    // Without the permission the game masters' commands are not offered.
+    let player = Registries::default();
+    let c = Commands {
+        dispatcher: crate::command::vanilla::game_dispatcher(),
+        registries: &player,
+    };
+    screen.set_text(&m, &c, "/gamemode", 9, 9);
+    assert!(offered(&screen).is_empty());
+}
+
+/// The build and the draw both `resize` the chat, each to the size it lays out in. A resize to
+/// the size it has keeps the suggestions (as at each frame of a settled screen); a resize to
+/// another one makes the box again, with none. The two must therefore agree on the size, or the
+/// chat is made again at each frame and never shows a suggestion (a camera cutout's strips make
+/// the draw's width narrower than the frame's: `Game::width_between_cutouts`).
+#[test]
+fn a_resize_to_the_chats_own_size_keeps_its_suggestions() {
+    let font = font();
+    let m = Measure(&font);
+    let registries = Registries {
+        permission: 2,
+        ..Registries::default()
+    };
+    let c = Commands {
+        dispatcher: crate::command::vanilla::game_dispatcher(),
+        registries: &registries,
+    };
+    let mut screen = ChatScreen::new(&m, &c, "", false, 0, 600, 360, full());
+    screen.set_text(&m, &c, "/gamemode ", 10, 10);
+    assert!(screen.suggestions_visible());
+    screen.resize(&m, &c, 600, 360);
+    assert!(screen.suggestions_visible(), "the same size changes nothing");
+    screen.resize(&m, &c, 640, 360);
+    assert!(
+        !screen.suggestions_visible(),
+        "another size makes the box again"
+    );
+    assert_eq!(screen.value(), "/gamemode ", "with the text it held");
+    // The next edit completes again.
+    screen.set_text(&m, &c, "/gamemode s", 11, 11);
+    assert!(screen.suggestions_visible());
+}

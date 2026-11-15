@@ -616,7 +616,12 @@ impl Game<'_> {
 
     /// Re-makes the shown chat or command box at `(w, h)` when it was made at
     /// another size; at its own size it compares and changes nothing.
-    fn resize_text_screens(&mut self, w: f32, h: f32) {
+    ///
+    /// The chat is drawn between a camera cutout's strips (`draw_clear_of_cutout`), so it is
+    /// made at that width here too: at the full one, the build and the draw would re-make it in
+    /// turn at each frame, and a screen just made has no suggestions.
+    fn resize_text_screens(&mut self, w: f32, h: f32, scale: f32) {
+        let chat_width = self.width_between_cutouts(w, scale);
         let m = horizon_client::screen_draw::Measure(&self.gui.atlas.font);
         let c = horizon_client::chat::Commands {
             dispatcher: super::chat::chat_tree(&self.remote),
@@ -625,7 +630,7 @@ impl Game<'_> {
         match self.screen {
             Screen::Chat => {
                 if let Some(screen) = self.ui.chat_screen.as_mut() {
-                    screen.resize(&m, &c, w as i32, h as i32);
+                    screen.resize(&m, &c, chat_width as i32, h as i32);
                 }
             }
             Screen::CommandBlock => {
@@ -654,7 +659,7 @@ impl Game<'_> {
             Screen::CommandBlock => Some(self.command_block_screen.as_ref()?.cart()),
             _ => return None,
         };
-        self.resize_text_screens(w, h);
+        self.resize_text_screens(w, h, gui.scale as f32);
         let built = self.screen_state.build.current.as_ref().filter(|build| {
             build.screen == self.screen
                 && build.identity == identity
