@@ -17,6 +17,23 @@ pub const DIR: &str = "horizon-mods";
 /// Where the launcher installs native mods (`<id>.hmod`), beside [`DIR`]. They run only in a
 /// game the launcher built with them.
 pub const NATIVE_DIR: &str = "horizon-native-mods";
+
+/// Whether a compiled native build (Starling's Compile) is the one for the native mods on now.
+/// A build that says the SHA-256 of the request it was compiled from (`sent`) is current only for
+/// that same request (`request`), so a mod replaced under the same id (a new voice chat of the
+/// same id, with buttons the old one lacked) makes it out of date and Compile is offered again.
+/// A build from before builds said it, or with no request to compare, goes by the mods' ids.
+pub fn native_build_current(
+    sent: Option<&str>,
+    built: &BTreeSet<String>,
+    wanted: &BTreeSet<String>,
+    request: Option<&str>,
+) -> bool {
+    match (sent, request) {
+        (Some(sent), Some(request)) => sent == request,
+        _ => built == wanted,
+    }
+}
 /// Why a native mod installed in [`NATIVE_DIR`] doesn't run in this game.
 #[cfg(not(target_os = "android"))]
 pub const NOT_BUILT: &str = "Installed, not built into this game: build the game with it in the launcher (Settings > Native mods), then play the instance that build is in.";
@@ -514,6 +531,34 @@ impl ModList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A native mod replaced under the same id makes the build out of date; a build from before
+    /// builds said their request goes by the ids, as it always did.
+    #[test]
+    fn a_changed_native_mod_of_the_same_id_needs_a_new_compile() {
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<BTreeSet<_>>();
+        let voice = ids(&["voicechat"]);
+        assert!(native_build_current(
+            Some("aaa"),
+            &voice,
+            &voice,
+            Some("aaa")
+        ));
+        assert!(!native_build_current(
+            Some("aaa"),
+            &voice,
+            &voice,
+            Some("bbb")
+        ));
+        assert!(native_build_current(None, &voice, &voice, Some("bbb")));
+        assert!(!native_build_current(
+            None,
+            &voice,
+            &ids(&["voicechat", "wrench"]),
+            Some("bbb")
+        ));
+        assert!(native_build_current(Some("aaa"), &voice, &voice, None));
+    }
 
     #[test]
     fn round_trips_and_ignores_the_rest() {

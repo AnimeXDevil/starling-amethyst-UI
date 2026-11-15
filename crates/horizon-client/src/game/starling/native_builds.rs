@@ -224,10 +224,21 @@ fn loads(name: &str, version: &str) -> bool {
         && apk_stamp().is_some_and(|stamp| read(APK) == Some(stamp))
 }
 
-/// A build on the phone as the Mods page says it: its mods (build.json) and how long ago its
-/// library came.
+/// Beside a compiled build: the SHA-256 of the request it was compiled from (`bundles_body`), so a
+/// native mod replaced under the same id makes it out of date (`mod_list::native_build_current`).
+const SENT: &str = "sent.sha256";
+
+/// The SHA-256 of what Compile would send now, or None when there is nothing to send.
+fn request_digest() -> Option<String> {
+    let body = bundles_body().ok()?;
+    Some(Sha256::digest(&body).iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// A build on the phone as the Mods page says it: its mods (build.json), the request it was
+/// compiled from when it says it ([`SENT`]), and how long ago its library came.
 struct OnPhone {
     mods: BTreeSet<String>,
+    sent: Option<String>,
     age: Option<Duration>,
 }
 
@@ -245,14 +256,28 @@ fn on_phone(name: &str) -> OnPhone {
                 .collect()
         })
         .unwrap_or_default();
+    let sent = std::fs::read_to_string(folder.join(SENT))
+        .ok()
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty());
     let age = std::fs::metadata(folder.join(LIBRARY))
         .and_then(|m| m.modified())
         .ok()
         .and_then(|at| at.elapsed().ok());
-    OnPhone { mods, age }
+    OnPhone { mods, sent, age }
 }
 
 impl OnPhone {
+    /// Whether this build is the one for the native mods on now (`wanted`, sent as `request`).
+    fn current_for(&self, wanted: &BTreeSet<String>, request: Option<&str>) -> bool {
+        horizon_client::mod_list::native_build_current(
+            self.sent.as_deref(),
+            &self.mods,
+            wanted,
+            request,
+        )
+    }
+
     fn label(&self) -> String {
         mods_label(&self.mods.iter().cloned().collect::<Vec<_>>())
     }
@@ -292,8 +317,9 @@ fn folder_mods_on(off: &BTreeSet<String>) -> BTreeSet<String> {
         .collect()
 }
 
-/// A build on the phone with just the mods `wanted`, that loads at the next start.
-fn build_with(wanted: &BTreeSet<String>, version: &str) -> Option<String> {
+/// A build on the phone made from the mods `wanted` as they are now (`request`), that loads at
+/// the next start.
+fn build_with(wanted: &BTreeSet<String>, request: Option<&str>, version: &str) -> Option<String> {
     if wanted.is_empty() {
         return None;
     }
@@ -302,7 +328,7 @@ fn build_with(wanted: &BTreeSet<String>, version: &str) -> Option<String> {
         .flatten()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .find(|name| loads(name, version) && on_phone(name).mods == *wanted)
+        .find(|name| loads(name, version) && on_phone(name).current_for(wanted, request))
 }
 
 /// `v0.1.4__wrench__carryblock`'s mods as the card says them: "Wrench, Carryblock".
@@ -694,6 +720,12 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
         finished["build"].to_string().as_bytes(),
     )
     .map_err(|e| e.to_string())?;
+    // What it was compiled from: a mod replaced under the same id makes it out of date.
+    let sent: String = Sha256::digest(&body)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    std::fs::write(folder.join(SENT), sent).map_err(|e| e.to_string())?;
     if let Some(address) = &custom {
         std::fs::write(folder.join(CAME_FROM), releases::build_server_host(address))
             .map_err(|e| e.to_string())?;
@@ -786,7 +818,12 @@ impl Game<'_> {
             );
             game.lines.push((said, true));
         }
-        let in_next = next_build.map(|b| b.mods).unwrap_or_default();
+        // The next start's build is current only for the mods as they are now: one replaced under
+        // the same id needs a new Compile (`mod_list::native_build_current`).
+        let request = (!wanted.is_empty()).then(request_digest).flatten();
+        let next_current = next_build
+            .as_ref()
+            .is_some_and(|b| b.current_for(&wanted, request.as_deref()));
         if compiling {
             game.lines
                 .push((tr("starling.mods.native.compiling", &[]), false));
@@ -794,7 +831,7 @@ impl Game<'_> {
                 tr("starling.mods.native.show_compile", &[]),
                 NativeGameAct::ShowCompile,
             ));
-        } else if !wanted.is_empty() && (old.is_some() || wanted != in_next) {
+        } else if !wanted.is_empty() && (old.is_some() || !next_current) {
             if old.is_none() {
                 let key = if next_loads.is_some() {
                     "starling.mods.native.differs"
@@ -846,7 +883,11 @@ impl Game<'_> {
             let _ = std::fs::remove_file(dir().join("current"));
             let _ = std::fs::remove_file(dir().join("starts"));
         } else if let Some((version, _)) = crate::android::app_version()
-            && let Some(name) = build_with(&folder_mods_on(&mods.disabled), &version)
+            && let Some(name) = build_with(
+                &folder_mods_on(&mods.disabled),
+                request_digest().as_deref(),
+                &version,
+            )
             && chosen().as_deref() != Some(name.as_str())
         {
             let _ = std::fs::write(dir().join("current"), name);
