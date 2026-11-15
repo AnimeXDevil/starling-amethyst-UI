@@ -13,9 +13,13 @@ on:
         description: Also clippy and the Rust tests
         type: boolean
         default: true
+      compat:
+        description: Only the website mods' build check (hnmod-compat.yml), nothing else
+        type: boolean
+        default: false
 
 concurrency:
-  group: sync-check-${{ github.event_name }}
+  group: sync-check-${{ github.event_name }}-${{ inputs.compat }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +31,7 @@ env:
 
 jobs:
   python:
+    if: ${{ !inputs.compat }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -58,6 +63,7 @@ jobs:
           retention-days: 7
 
   check:
+    if: ${{ !inputs.compat }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -135,6 +141,7 @@ jobs:
           retention-days: 7
 
   android:
+    if: ${{ !inputs.compat }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -176,3 +183,9 @@ jobs:
           name: android-log
           path: android.log
           retention-days: 7
+
+  hnmod-compat:
+    if: ${{ inputs.compat }}
+    uses: ./.github/workflows/hnmod-compat.yml
+    with:
+      shards: '8'
