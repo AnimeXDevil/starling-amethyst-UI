@@ -123,9 +123,10 @@ jobs:
         run: |
           set +e
           cargo build -p horizon-mod-package --features runtime-process --example holder_actor > test.log 2>&1
-          cargo test --workspace --lib --bins --tests --no-fail-fast >> test.log 2>&1
+          # A test that hangs ends here, not at the job's timeout, so the log still uploads.
+          timeout 200m cargo test --workspace --lib --bins --tests --no-fail-fast >> test.log 2>&1
           code=$?
-          cargo test --workspace --doc --no-fail-fast >> test.log 2>&1 || code=1
+          timeout 30m cargo test --workspace --doc --no-fail-fast >> test.log 2>&1 || code=1
           {
             echo "## Rust tests: exit $code"
             echo '```'
@@ -207,15 +208,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: sync7-tests
+          cache-on-failure: true
       - name: Rust tests
         env:
           CARGO_PROFILE_DEV_DEBUG: 0
         run: |
           set +e
           cargo build -p horizon-mod-package --features runtime-process --example holder_actor > test.log 2>&1
-          cargo test --workspace --lib --bins --tests --no-fail-fast >> test.log 2>&1
+          # A test that hangs ends here, not at the job's timeout, so the log still uploads.
+          timeout 200m cargo test --workspace --lib --bins --tests --no-fail-fast >> test.log 2>&1
           code=$?
-          cargo test --workspace --doc --no-fail-fast >> test.log 2>&1 || code=1
+          timeout 30m cargo test --workspace --doc --no-fail-fast >> test.log 2>&1 || code=1
           {
             echo "## Rust tests: exit $code"
             echo '```'
