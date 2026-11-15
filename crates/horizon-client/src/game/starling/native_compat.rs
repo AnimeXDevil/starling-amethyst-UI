@@ -81,12 +81,14 @@ impl Game<'_> {
         let _ = elapsed;
     }
     /// `durability_loss` as the mods made for Horizon's API call it: the player wears the item (the
-    /// fork's unbreaking roll takes the wearer now).
+    /// fork's unbreaking roll takes the wearer now). Only mods call it.
+    #[allow(dead_code)]
     pub(in crate::game) fn durability_loss_old(&mut self, stack: &ItemStack, amount: u32) -> u32 {
         self.durability_loss(stack, amount, super::durability::Wearer::Player)
     }
     /// A key for the main-hand stack (`destroyingItem`): its item and components, as Horizon's
-    /// `main_hand_key` gave it (the fork's gives the stack).
+    /// `main_hand_key` gave it (the fork's gives the stack). Only mods call it.
+    #[allow(dead_code)]
     pub(in crate::game) fn main_hand_key_old(&self) -> String {
         self.main_hand_key()
             .map_or(String::new(), |s| format!("{} {:?}", s.item, s.extra))

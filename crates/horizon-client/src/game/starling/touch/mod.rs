@@ -1877,7 +1877,7 @@ impl Game<'_> {
         batch: &mut HudBatch,
         draw: impl FnOnce(&mut HudBatch, f32),
     ) {
-        let [left, _, right, _] = self.safe_gui_insets(batch.scale);
+        let [left, ..] = self.safe_gui_insets(batch.scale);
         let (start, targets, width) = (
             batch.vertices.len(),
             horizon_client::widgets::targets_mark(),
