@@ -139,6 +139,7 @@ fn emit(span: Span) {
     }
     if enabled()
         || HERE.with(Cell::get)
+        || timeline::on()
         || (RECORDING.load(Ordering::Relaxed) && DIAGNOSTIC_HERE.with(Cell::get))
     {
         push(span);
@@ -215,7 +216,7 @@ impl Drop for Guard {
             .map_or(ms, |(end, start)| (end - start).as_secs_f32() * 1000.0);
         DEPTH.with(|d| d.set(depth));
         timeline::span(name, started, elapsed, depth);
-        push(Span {
+        emit(Span {
             name,
             ms,
             cpu_ms,
@@ -304,7 +305,7 @@ impl Laps {
         let depth = DEPTH.with(Cell::get);
         timeline::span(name, *started, elapsed, depth);
         nest_since(*mark, depth);
-        push(Span {
+        emit(Span {
             name,
             ms,
             cpu_ms,

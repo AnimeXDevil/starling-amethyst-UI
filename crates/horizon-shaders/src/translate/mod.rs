@@ -413,8 +413,9 @@ fn translate(
     let mut samplers: BTreeMap<String, String> = BTreeMap::new();
     for stage in [&v, &f] {
         for (name, ty, at) in &stage.uniforms {
-            // Read through the compatibility profile's matrices instead (`rewrite`).
-            if scan::CORE_MATRICES.iter().any(|m| m.0 == name && m.1 == ty) {
+            // Read through the compatibility profile's matrices instead (`rewrite`), where this
+            // stage reads them so (`core_matrix`).
+            if stage.core_matrix(name).is_some() {
                 continue;
             }
             if let Some(old) = uniforms.insert(name.clone(), ty.clone())

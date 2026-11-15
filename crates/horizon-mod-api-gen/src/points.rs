@@ -1435,10 +1435,11 @@ mod tests {
         }
     }
 
-    /// Two functions whose paths snake-case to one name are refused at build, naming both:
-    /// `a::b_c` and `a_b::c` both give `game_a_b_c`.
+    /// Two functions whose paths snake-case to one name (`a::b_c` and `a_b::c` both give
+    /// `game_a_b_c`): the build warns, naming both, and leaves the second out instead of failing,
+    /// as Starling's old-API shims need.
     #[test]
-    fn engine_points_with_one_snake_cased_name_are_refused_naming_both() {
+    fn engine_points_with_one_snake_cased_name_keep_the_first() {
         let root =
             std::env::temp_dir().join(format!("horizon-points-clash-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1497,16 +1498,18 @@ name = 'horizon-world'
 name = 'horizon-mod-api-gen'
 ",
         );
-        let error = points_with(&root, &WireTypes::new()).unwrap_err();
-        assert!(
-            error.contains("horizon_client::game::a::b_c")
-                && error.contains("horizon_client::game::a_b::c")
-                && error.contains("game_a_b_c"),
-            "{error}"
-        );
-        // Without the second function the same tree is accepted.
+        let first = |root: &std::path::Path| {
+            let points = points_with(root, &WireTypes::new()).unwrap();
+            points
+                .into_iter()
+                .filter(|p| p.name == "game_a_b_c")
+                .map(|p| p.target)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(first(&root), ["horizon_client::game::a::b_c"]);
+        // Without the second function the tree has the same point.
         put("crates/horizon-client/src/game/a_b.rs", "");
-        assert!(points_with(&root, &WireTypes::new()).is_ok());
+        assert_eq!(first(&root), ["horizon_client::game::a::b_c"]);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
