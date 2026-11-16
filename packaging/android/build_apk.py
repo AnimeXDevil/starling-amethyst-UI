@@ -170,12 +170,12 @@ def wasm_std(out_file):
     run("cargo", "run", "--locked", "-p", "cargo-horizon-mod", "--", "wasm-std", out_file, cwd=ROOT)
 
 
-def assets(out, abi=ABI):
+def assets(out, abi=None):
     """The APK's assets/: prepare-kit.zip (PREPARE_KIT, with the paths horizon-prepare reads),
     lowbudget.zip, the skin the setup draws the menus with (packaging/lowbudget/pack, made by its
     make.py), StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
-    `out` for the release page), and on 64-bit horizon-wasm-std.wasm (`wasm_std`), which the game
-    puts in its own files to load wasm mods (32-bit Android loads none)."""
+    `out` for the release page), and for a 64-bit `abi` horizon-wasm-std.wasm (`wasm_std`), which the
+    game puts in its own files to load wasm mods (32-bit Android loads none)."""
     run(sys.executable, ROOT / "tools/build_android_exporters.py")
     folder = out / "assets"
     shutil.rmtree(folder, ignore_errors=True)

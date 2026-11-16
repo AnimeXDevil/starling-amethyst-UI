@@ -3,8 +3,11 @@
 On the desktop, horizon-mod-host's `main_with` (crates/horizon-mod-host/src/loading.rs) installs the engine's
 seal, the mods' instrumentation, the engine platform socket and the render points before `entry::start`. Android
 starts the engine from horizon-android instead (android_lib.rs `install_platform`, run by `android::main` right
-before `entry::start`). Sync 7 shipped an APK without them: it stopped at start, "engine platform socket is not
+before its `start`). Sync 7 shipped an APK without them: it stopped at start, "engine platform socket is not
 installed". A sync that adds an install to `main_with` fails here until the phone does it too.
+
+The phone's `start` (android_lib.rs) loads the code as `main_with` does, through the host's `load_code` and
+`code_runtime`, on 64-bit Android, where Wasmtime compiles wasm mods to the phone's code.
 """
 
 import re
@@ -15,13 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / "crates/horizon-mod-host/src/loading.rs"
 ANDROID_LIB = ROOT / "crates/horizon-client/src/android_lib.rs"
 ANDROID = ROOT / "crates/horizon-client/src/android.rs"
-# What the host installs that the phone has no use for: the wasm runtime (no wasm mods on a phone) and the
-# installed native libraries' runtime (the phone's mods are compiled into the game).
+# What the host installs that `install_platform` leaves out: the wasm runtime, which the phone's `start` loads
+# through `load_code`, and the installed native libraries' runtime (the phone's mods are compiled into the game).
 DESKTOP_ONLY = {"horizon_mod_wasm", "Runtime::load"}
 
 
 def function(text: str, name: str) -> str:
-    """The body of `fn name`, braces included."""
+    """The body of the first `fn name`, braces included."""
     start = text.index("{", text.index(f"fn {name}("))
     depth, i = 0, start
     while True:
@@ -51,8 +54,18 @@ class AndroidPlatformInstall(unittest.TestCase):
     def test_android_main_runs_the_installs_before_the_engine_starts(self):
         main = function(ANDROID.read_text(encoding="utf-8"), "main")
         self.assertIn("platform()", main)
-        self.assertLess(main.index("platform()"), main.index("entry::start("))
-        self.assertIn("android::main(app, install_platform)", ANDROID_LIB.read_text(encoding="utf-8"))
+        self.assertLess(main.index("platform()"), main.index("start(crate::entry::prepare())"))
+        self.assertIn("android::main(app, install_platform, start)", ANDROID_LIB.read_text(encoding="utf-8"))
+
+    def test_android_starts_with_the_code_the_mod_host_loads(self):
+        lib = ANDROID_LIB.read_text(encoding="utf-8")
+        start = function(lib, "start")
+        self.assertIn("entry::start(", start)
+        self.assertIn("horizon_mod_host::load_code(", start)
+        self.assertIn("horizon_mod_host::code_runtime()", start)
+        main_with = function(HOST.read_text(encoding="utf-8"), "main_with")
+        self.assertIn("load_code(", main_with)
+        self.assertIn("code_runtime()", main_with)
 
 
 if __name__ == "__main__":
