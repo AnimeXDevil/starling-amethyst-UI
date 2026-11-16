@@ -164,6 +164,17 @@ const ENTITIES: [&str; 4] = [
     "gbuffers_basic",
 ];
 
+/// `gbuffers_damagedblock` and its fallbacks (2.3, the spec's table: it falls back to
+/// `gbuffers_terrain`, as in Iris). Without the chain a pack with no program of its own, Starling
+/// Visuals among them, drew no breaking cracks at all.
+const DAMAGED_BLOCK: [&str; 5] = [
+    "gbuffers_damagedblock",
+    "gbuffers_terrain",
+    "gbuffers_textured_lit",
+    "gbuffers_textured",
+    "gbuffers_basic",
+];
+
 /// `gbuffers_block` and its fallbacks (2.3).
 const BLOCK: [&str; 5] = [
     "gbuffers_block",
@@ -964,8 +975,11 @@ pub fn load_post(
     let damaged_block = inputs
         .entities
         .as_ref()
-        .and_then(|i| gbuffers(&["gbuffers_damagedblock"], Group::Gbuffers, i))
+        .and_then(|i| gbuffers(&DAMAGED_BLOCK, Group::Gbuffers, i))
         .map(|mut p| {
+            // A fallback draws as the cracks it stands for: the slot's name is what gives them
+            // their depth bias and their decal geometry (pack_post) and their `blend.*`.
+            p.name = "gbuffers_damagedblock".to_owned();
             p.blend = blend(properties, &p.name).unwrap_or(Some([
                 Factor::DstColor,
                 Factor::SrcColor,
@@ -3441,6 +3455,21 @@ blend.composite1.colortex3 = ONE ONE ONE ONE
         assert_eq!(
             (block.name.as_str(), block.blend),
             ("gbuffers_terrain", None)
+        );
+        // The breaking cracks fall back to gbuffers_terrain too, as in Iris, and draw in their
+        // own slot: its name (depth bias, decal geometry) and the cracks' multiply blend.
+        let cracks = post.damaged_block.as_ref().unwrap();
+        assert_eq!(
+            (cracks.name.as_str(), cracks.blend),
+            (
+                "gbuffers_damagedblock",
+                Some([
+                    Factor::DstColor,
+                    Factor::SrcColor,
+                    Factor::One,
+                    Factor::Zero
+                ])
+            )
         );
         // Translucent entity parts and particles blend; particles draw after deferred unless
         // the pack says otherwise, translucent entities before unless `separateEntityDraws`.

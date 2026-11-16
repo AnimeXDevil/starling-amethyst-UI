@@ -231,7 +231,12 @@ const SENT: &str = "sent.sha256";
 /// The SHA-256 of what Compile would send now, or None when there is nothing to send.
 fn request_digest() -> Option<String> {
     let body = bundles_body().ok()?;
-    Some(Sha256::digest(&body).iter().map(|b| format!("{b:02x}")).collect())
+    Some(
+        Sha256::digest(&body)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
 }
 
 /// A build on the phone as the Mods page says it: its mods (build.json), the request it was
