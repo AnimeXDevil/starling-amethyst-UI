@@ -1549,6 +1549,22 @@ impl HudAtlas {
         flags: &HashMap<String, TextureFlags>,
         limit: u32,
     ) -> Result<()> {
+        let shrink_rank = |(name, w, h, rgba): &PackedImage| {
+            let path = name.split_once(':').map_or(name.as_str(), |(_, path)| path);
+            let side = (*w).max(*h);
+            // The two standard skin layouts use at most 64×64 texels. The slots for
+            // runtime patches keep their own pixel coordinates.
+            if path.contains("font/")
+                || name.starts_with("horizon/")
+                || (path.starts_with("entity/player/") && side <= 64)
+                || side <= SMALLEST_SHRUNK_SIDE
+                || rgba.len() < (*w as usize * *h as usize * 4)
+            {
+                return None;
+            }
+            let interface = path.starts_with("gui/") || path.starts_with("ui/");
+            Some((interface, std::cmp::Reverse(side)))
+        };
         loop {
             let mut dimensions: Vec<PackedImage> = images
                 .iter()
@@ -1562,57 +1578,31 @@ impl HudAtlas {
                 })
                 .collect();
             dimensions.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
-            match Self::layout(&dimensions, limit) {
+            let error = match Self::layout(&dimensions, limit) {
                 Ok(_) => return Ok(()),
-                Err(error) => {
-                    // The interface's own textures wait until the rest is as small as it goes:
-                    // a phone whose GPU takes 4096 and whose default resources need 4108 rows
-                    // (the PowerVR GE8322) then fits them, instead of losing its packs.
-                    let mut changed = false;
-                    for interface in [false, true] {
-                        for (name, w, h, rgba) in images.iter_mut() {
-                            // Never the glyphs, and never the slots written at run time
-                            // (`slots`, all under `horizon/`), whose size is their own.
-                            if name.contains("font/")
-                                || name.starts_with("horizon/")
-                                || (*w).max(*h) <= SMALLEST_SHRUNK_SIDE
-                                || rgba.len() < (*w as usize * *h as usize * 4)
-                            {
-                                continue;
-                            }
-                            if (name.starts_with("gui/") || name.starts_with("ui/")) != interface {
-                                continue;
-                            }
-                            // Keep original GUI units and normalized UVs. Runtime patches
-                            // retain their full-size slots, so no coordinate remapping occurs.
-                            gui_sizes.entry(name.clone()).or_insert((*w, *h));
-                            let (old_w, old_h) = (*w, *h);
-                            *w = (*w / 2).max(1);
-                            *h = (*h / 2).max(1);
-                            let mut smaller = Vec::with_capacity((*w * *h * 4) as usize);
-                            for y in 0..*h {
-                                for x in 0..*w {
-                                    let at =
-                                        ((y * old_h / *h * old_w + x * old_w / *w) * 4) as usize;
-                                    smaller.extend_from_slice(&rgba[at..at + 4]);
-                                }
-                            }
-                            *rgba = smaller;
-                            changed = true;
-                        }
-                        if changed {
-                            log::info!(
-                                "Reduced {} atlas sprites to fit the adapter's {limit}px texture limit",
-                                if interface { "interface" } else { "non-UI" }
-                            );
-                            break;
-                        }
-                    }
-                    if !changed {
-                        return Err(error);
-                    }
+                Err(error) => error,
+            };
+            // Repack after reducing one size group. Small sprites can keep all their
+            // texels when making room in a few large sprites is enough.
+            let Some(rank @ (interface, std::cmp::Reverse(side))) =
+                images.iter().filter_map(shrink_rank).min()
+            else {
+                return Err(error);
+            };
+            let mut count = 0;
+            for image in images.iter_mut() {
+                if shrink_rank(image) == Some(rank) {
+                    gui_sizes
+                        .entry(image.0.clone())
+                        .or_insert((image.1, image.2));
+                    *image = halved(image);
+                    count += 1;
                 }
             }
+            log::info!(
+                "Reduced {count} {} atlas sprites with a {side}px side to fit the adapter's {limit}px texture limit",
+                if interface { "interface" } else { "non-UI" }
+            );
         }
     }
 
@@ -1921,17 +1911,13 @@ impl HudAtlas {
                     maps.iter().any(Option::is_some).then(|| Box::new(maps))
                 })
                 .flatten();
-            (gw <= 1024
-                && (gh <= 512
-                    || matches!(
-                        name.as_str(),
-                        "gui/title/background/panorama_0"
-                            | "gui/title/background/panorama_2"
-                            | "gui/title/background/panorama_3"
-                            | "gui/presets/isles"
-                    )
-                    || name.starts_with("font/")))
-            .then_some(((name, w, h, pixels), flags, gui_size, animated, maps))
+            (gw <= 1024 && (gh <= 512 || name.starts_with("font/"))).then_some((
+                (name, w, h, pixels),
+                flags,
+                gui_size,
+                animated,
+                maps,
+            ))
         };
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get());
         let chunk = files.len().div_ceil(threads).max(1);
@@ -6077,12 +6063,21 @@ texture=wide",
                 vec![255; 1024 * 1024 * 4],
             ),
             ("gui/panel".to_string(), 512, 256, vec![255; 512 * 256 * 4]),
+            (
+                "entity/player/wide/steve".into(),
+                64,
+                64,
+                vec![255; 64 * 64 * 4],
+            ),
+            ("entity/wolf/wolf".into(), 64, 32, vec![255; 64 * 32 * 4]),
         ];
         let mut full_sizes = HashMap::new();
         HudAtlas::fit_mobile_atlas(&mut images, &mut full_sizes, &HashMap::new(), 1024).unwrap();
         let gui = images.iter().find(|i| i.0 == "gui/panel").unwrap();
         assert_eq!((gui.1, gui.2), (512, 256));
         assert!(!full_sizes.contains_key("gui/panel"));
+        assert!(!full_sizes.contains_key("entity/player/wide/steve"));
+        assert!(!full_sizes.contains_key("entity/wolf/wolf"));
         assert!(full_sizes.contains_key("entity/large"));
     }
     #[test]
