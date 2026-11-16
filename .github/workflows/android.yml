@@ -72,7 +72,8 @@ jobs:
       - name: Install Rust for Android and cargo-ndk
         run: |
           # The Rust Horizon pins (tools/ci/rust-version), as its CI and the launcher's native mods build with.
-          bash tools/ci/rustup_install.sh --profile minimal --target ${{ matrix.target }}
+          # rust-src: build_apk.py builds the std with the game (its TLS_FLAGS).
+          bash tools/ci/rustup_install.sh --profile minimal --component rust-src --target ${{ matrix.target }}
           cargo install cargo-ndk --version 3.5.4 --locked
       - uses: Swatinem/rust-cache@v2
         with:
