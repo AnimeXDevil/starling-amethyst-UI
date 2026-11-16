@@ -179,14 +179,14 @@ mod tests {
             full_sizes,
             HashMap::from([(images[0].0.clone(), (400, 20))])
         );
-        for (index, pixel) in images[0].3.chunks_exact(4).enumerate() {
+        for (index, pixel) in images[0].3.as_chunks::<4>().0.iter().enumerate() {
             let (x, y) = (index % 200, index / 200);
             let expected = if x == 0 || x == 199 || y == 0 || y == 9 {
                 [0, 0, 0, 255]
             } else {
                 [255; 4]
             };
-            assert_eq!(pixel, expected, "button pixel ({x}, {y})");
+            assert_eq!(*pixel, expected, "button pixel ({x}, {y})");
         }
     }
 
