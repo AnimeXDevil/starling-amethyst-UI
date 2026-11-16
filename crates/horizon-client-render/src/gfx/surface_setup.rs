@@ -153,7 +153,15 @@ pub(super) async fn open_adapter(
                 | wgpu::Features::DEPTH_CLIP_CONTROL
                 | wgpu::Features::FLOAT32_FILTERABLE));
     let driver = format!("{} {}", info.driver, info.driver_info);
-    crate::hud::set_gpu_texture_side(adapter.limits().max_texture_dimension_2d);
+    // Test only: `HORIZON_GPU_TEXTURE_SIDE` packs the GUI atlas as for a GPU that takes no more
+    // (4096: the PowerVR GE8320, the Adreno 304), on a phone whose own takes more.
+    let side = std::env::var("HORIZON_GPU_TEXTURE_SIDE")
+        .ok()
+        .and_then(|side| side.parse().ok())
+        .map_or(adapter.limits().max_texture_dimension_2d, |side: u32| {
+            side.min(adapter.limits().max_texture_dimension_2d)
+        });
+    crate::hud::set_gpu_texture_side(side);
     startup_step(format_args!(
         "requesting the device (driver {}) with features [{features}] and the adapter's \
          limits (buffers up to {} bytes, storage bindings up to {} bytes, {} texture layers)",
