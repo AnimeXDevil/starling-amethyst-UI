@@ -174,8 +174,8 @@ def assets(out, abi=None):
     """The APK's assets/: prepare-kit.zip (PREPARE_KIT, with the paths horizon-prepare reads),
     lowbudget.zip, the skin the setup draws the menus with (packaging/lowbudget/pack, made by its
     make.py), StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
-    `out` for the release page), and for a 64-bit `abi` horizon-wasm-std.wasm (`wasm_std`), which the
-    game puts in its own files to load wasm mods (32-bit Android loads none)."""
+    `out` for the release page), and with an `abi` horizon-wasm-std.wasm (`wasm_std`), which the game
+    puts in its own files to load wasm mods: the same for every ABI, as a mod's wasm is."""
     run(sys.executable, ROOT / "tools/build_android_exporters.py")
     folder = out / "assets"
     shutil.rmtree(folder, ignore_errors=True)
@@ -197,7 +197,7 @@ def assets(out, abi=None):
     zip_folder(HERE.parent / "lowbudget" / "pack", folder / "lowbudget.zip")
     zip_folder(HERE.parent / "shaderpacks" / "starling-visuals", folder / "StarlingVisuals.zip")
     shutil.copyfile(folder / "StarlingVisuals.zip", out / "StarlingVisuals.zip")
-    if abi in ("arm64-v8a", "x86_64"):
+    if abi is not None:
         wasm_std(folder / "horizon-wasm-std.wasm")
     return folder
 
