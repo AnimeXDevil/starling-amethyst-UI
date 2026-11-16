@@ -290,10 +290,17 @@ fn folder() -> PathBuf {
     horizon_client::logging::private_home().join("performance")
 }
 
-/// This APK's version where it is a test build: a Starling Preview, never a release.
+/// This APK's version where it is a test build: a Starling Preview, never a release, started with
+/// `STARLING_PERF_TEST=1` (a line of `horizon-args.txt`). Only then does the guided test start on
+/// its own and reports go out. Every Preview started it, once per version, so again with each new
+/// development APK, and `REPORTS` is the Azure gateway, gone since 2026-11-14. A Calibrate button
+/// that sends nothing is to take its place.
 fn test_build() -> Option<String> {
     #[cfg(target_os = "android")]
     {
+        if std::env::var_os("STARLING_PERF_TEST").is_none_or(|on| on != "1") {
+            return None;
+        }
         crate::android::app_version()
             .filter(|(name, release)| !release && name.contains("preview"))
             .map(|(name, _)| name)
