@@ -18,6 +18,8 @@ mod animate;
 pub mod cit_glint;
 mod gui_sprite;
 mod menu_pictures;
+#[cfg(any(target_os = "android", test))]
+mod mobile_atlas;
 mod model_reducing;
 mod pack_text;
 pub mod pictures;
@@ -1481,11 +1483,39 @@ impl HudAtlas {
     #[cfg(any(target_os = "android", test))]
     fn mobile_layout(images: &[PackedImage], maximum: u32) -> Result<(u32, Vec<(u32, u32)>, u32)> {
         let width = maximum.min(4096);
+        let first = Self::mobile_skyline(images, width, maximum, 0..images.len());
+        if first.is_ok() {
+            return first;
+        }
+        let area: u64 = images
+            .iter()
+            .map(|image| (u64::from(image.1) + 1) * (u64::from(image.2) + 1))
+            .sum();
+        if area > u64::from(width) * u64::from(maximum.saturating_sub(GLYPH_ROWS)) {
+            return first;
+        }
+        // Place sprites with two large sides earlier when height order leaves gaps.
+        let mut order: Vec<_> = (0..images.len()).collect();
+        order.sort_by_key(|&i| {
+            let (_, w, h, _) = &images[i];
+            std::cmp::Reverse((w.min(h), w.max(h)))
+        });
+        Self::mobile_skyline(images, width, maximum, order)
+    }
+
+    #[cfg(any(target_os = "android", test))]
+    fn mobile_skyline(
+        images: &[PackedImage],
+        width: u32,
+        maximum: u32,
+        order: impl IntoIterator<Item = usize>,
+    ) -> Result<(u32, Vec<(u32, u32)>, u32)> {
         // [x, occupied height, segment width]. Segments cover the complete width.
         let mut skyline = vec![[0u32, 0, width]];
-        let mut placements = Vec::with_capacity(images.len());
+        let mut placements = vec![(0, 0); images.len()];
         let mut bottom = 0;
-        for (_, w, h, _) in images {
+        for sprite_index in order {
+            let (_, w, h, _) = &images[sprite_index];
             let (rw, rh) = (w + 1, h + 1);
             let mut best: Option<(u32, u32, usize, u32)> = None;
             for (i, node) in skyline.iter().enumerate() {
@@ -1514,7 +1544,7 @@ impl HudAtlas {
                 )
                 .into());
             }
-            placements.push((x, y));
+            placements[sprite_index] = (x, y);
             bottom = bottom.max(top);
             let end = x + rw;
             skyline.insert(index, [x, top, rw]);
@@ -1540,72 +1570,6 @@ impl HudAtlas {
         }
         Ok((width, placements, bottom))
     }
-    /// Fit static sprites to a small adapter without shrinking pixel icons, glyphs or dynamic
-    /// map/skin/GUI slots. Terrain uses separate texture arrays and is unchanged.
-    #[cfg(any(target_os = "android", test))]
-    fn fit_mobile_atlas(
-        images: &mut [PackedImage],
-        gui_sizes: &mut HashMap<String, (u32, u32)>,
-        flags: &HashMap<String, TextureFlags>,
-        limit: u32,
-    ) -> Result<()> {
-        let shrink_rank = |(name, w, h, rgba): &PackedImage| {
-            let path = name.split_once(':').map_or(name.as_str(), |(_, path)| path);
-            let side = (*w).max(*h);
-            // The two standard skin layouts use at most 64×64 texels. The slots for
-            // runtime patches keep their own pixel coordinates.
-            if path.contains("font/")
-                || name.starts_with("horizon/")
-                || (path.starts_with("entity/player/") && side <= 64)
-                || side <= SMALLEST_SHRUNK_SIDE
-                || rgba.len() < (*w as usize * *h as usize * 4)
-            {
-                return None;
-            }
-            let interface = path.starts_with("gui/") || path.starts_with("ui/");
-            Some((interface, std::cmp::Reverse(side)))
-        };
-        loop {
-            let mut dimensions: Vec<PackedImage> = images
-                .iter()
-                .map(|(name, w, h, _)| {
-                    let border = if flags.get(name).is_some_and(|f| f.blur) {
-                        2
-                    } else {
-                        0
-                    };
-                    (name.clone(), w + border, h + border, Vec::new())
-                })
-                .collect();
-            dimensions.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
-            let error = match Self::layout(&dimensions, limit) {
-                Ok(_) => return Ok(()),
-                Err(error) => error,
-            };
-            // Repack after reducing one size group. Small sprites can keep all their
-            // texels when making room in a few large sprites is enough.
-            let Some(rank @ (interface, std::cmp::Reverse(side))) =
-                images.iter().filter_map(shrink_rank).min()
-            else {
-                return Err(error);
-            };
-            let mut count = 0;
-            for image in images.iter_mut() {
-                if shrink_rank(image) == Some(rank) {
-                    gui_sizes
-                        .entry(image.0.clone())
-                        .or_insert((image.1, image.2));
-                    *image = halved(image);
-                    count += 1;
-                }
-            }
-            log::info!(
-                "Reduced {count} {} atlas sprites with a {side}px side to fit the adapter's {limit}px texture limit",
-                if interface { "interface" } else { "non-UI" }
-            );
-        }
-    }
-
     /// `layout_leaving_out`, but when the images still don't fit (a small GPU: the PowerVR GE8320
     /// takes 4096x4096 and the default resources need 4096x5120), with the largest at half size,
     /// then the largest of what is left, until they do. A sprite's `Rect` keeps its size in
@@ -2065,6 +2029,9 @@ impl HudAtlas {
                 })
                 .collect();
             images.push((MISSING_SPRITE.into(), 16, 16, missing));
+            let (width, height, rgba) =
+                decode_bytes(include_bytes!("jei_recipes/config_button.png"))?;
+            images.push(("horizon/recipes/settings".to_owned(), width, height, rgba));
         }
         let limit = atlas_limit();
         let mut full_sizes = HashMap::new();
@@ -2081,11 +2048,6 @@ impl HudAtlas {
                 *image = wrap_border(image);
                 bordered.insert(image.0.clone());
             }
-        }
-        if full {
-            let (width, height, rgba) =
-                decode_bytes(include_bytes!("jei_recipes/config_button.png"))?;
-            images.push(("horizon/recipes/settings".to_owned(), width, height, rgba));
         }
         images.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
         let (width, placements, glyph_region) = Self::layout_within(
