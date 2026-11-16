@@ -45,125 +45,141 @@ pub fn main_with(
     mod_render::render::install();
     horizon_client::entry::start(
         native,
-        |native, launch| {
-            let mut wasm =
-                horizon_mod_wasm::load_installed(launch, &horizon_client::logging::player_dir());
-            let mut mods = mods;
-            mods.extend(std::mem::take(&mut wasm.mods));
-            // One installed dispatch order for both targets; ties retain bundle order.
-            let code_manifests: Vec<_> = native
-                .packages()
+        |native, launch| load_code(mods, slots, native, launch),
+        code_runtime(),
+        startup,
+    );
+}
+
+/// The installed code in one dependency order, installed for dispatch: `mods` (the native entries
+/// built in) with the game folder's wasm mods, and `slots`, their typed listeners. What
+/// `entry::start` loads, from `main_with` and from Starling's Android start (android_lib.rs),
+/// which has no native code to give it.
+pub fn load_code(
+    mods: Vec<mod_api::ModEntry>,
+    slots: &[crate::SlotListener],
+    native: &horizon_mod_package::runtime::Runtime,
+    launch: &horizon_mod_package::selection::LaunchArguments,
+) -> (Vec<&'static str>, horizon_mod_wasm::Loaded) {
+    let mut wasm = horizon_mod_wasm::load_installed(launch, &horizon_client::logging::player_dir());
+    let mut mods = mods;
+    mods.extend(std::mem::take(&mut wasm.mods));
+    // One installed dispatch order for both targets; ties retain bundle order.
+    let code_manifests: Vec<_> = native
+        .packages()
+        .iter()
+        .map(|p| &p.manifest)
+        .chain(wasm.manifests.iter())
+        .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
+        .collect();
+    assert_eq!(
+        code_manifests.len(),
+        mods.len(),
+        "loaded code has checked manifests"
+    );
+    let side = launch.installation_side();
+    let declared: Vec<_> = code_manifests
+        .iter()
+        .map(|m| horizon_mod_package::dependencies::from_manifest(&m.dependencies, side))
+        .collect();
+    let inputs: Vec<_> = code_manifests
+        .iter()
+        .zip(&declared)
+        .map(|(m, dependencies)| horizon_mod_package::dependencies::Mod {
+            id: &m.id,
+            version: &m.version,
+            has_api: true,
+            code: true,
+            dependencies,
+        })
+        .collect();
+    let code_ids: std::collections::HashSet<_> =
+        mods.iter().map(|entry| entry.fields().id).collect();
+    let settings = horizon_mod_package::mod_list::ModList::load(&launch.context.game_dir);
+    let content: Vec<_> = horizon_mod_package::selection::content_packages(
+        &launch.context.game_dir,
+        &settings.enabled,
+        &launch.context.dev_mods,
+    )
+    .collect();
+    let manifests: Vec<_> = code_manifests
+        .iter()
+        .copied()
+        .chain(
+            content
                 .iter()
-                .map(|p| &p.manifest)
-                .chain(wasm.manifests.iter())
-                .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
-                .collect();
-            assert_eq!(
-                code_manifests.len(),
-                mods.len(),
-                "loaded code has checked manifests"
-            );
-            let side = launch.installation_side();
-            let declared: Vec<_> = code_manifests
-                .iter()
-                .map(|m| horizon_mod_package::dependencies::from_manifest(&m.dependencies, side))
-                .collect();
-            let inputs: Vec<_> = code_manifests
-                .iter()
-                .zip(&declared)
-                .map(|(m, dependencies)| horizon_mod_package::dependencies::Mod {
-                    id: &m.id,
-                    version: &m.version,
-                    has_api: true,
-                    code: true,
-                    dependencies,
+                .filter(|source| {
+                    let manifest = &source.package.manifest;
+                    let code = manifest.native.is_some() || manifest.wasm.is_some();
+                    !code || !code_ids.contains(manifest.id.as_str())
                 })
-                .collect();
-            let code_ids: std::collections::HashSet<_> =
-                mods.iter().map(|entry| entry.fields().id).collect();
-            let settings = horizon_mod_package::mod_list::ModList::load(&launch.context.game_dir);
-            let content: Vec<_> = horizon_mod_package::selection::content_packages(
-                &launch.context.game_dir,
-                &settings.enabled,
-                &launch.context.dev_mods,
-            )
-            .collect();
-            let manifests: Vec<_> = code_manifests
-                .iter()
-                .copied()
-                .chain(
-                    content
-                        .iter()
-                        .filter(|source| {
-                            let manifest = &source.package.manifest;
-                            let code = manifest.native.is_some() || manifest.wasm.is_some();
-                            !code || !code_ids.contains(manifest.id.as_str())
-                        })
-                        .map(|source| &source.package.manifest),
-                )
-                .collect();
-            let order = horizon_mod_package::dependencies::Overrides::read(
-                &launch
-                    .context
-                    .game_dir
-                    .join(horizon_mod_package::mod_list::DIR),
-            )
-            .and_then(|overrides| {
-                let resolution = horizon_mod_package::dependencies::resolve_manifests(
-                    &manifests, side, &overrides,
-                )
+                .map(|source| &source.package.manifest),
+        )
+        .collect();
+    let order = horizon_mod_package::dependencies::Overrides::read(
+        &launch
+            .context
+            .game_dir
+            .join(horizon_mod_package::mod_list::DIR),
+    )
+    .and_then(|overrides| {
+        let resolution =
+            horizon_mod_package::dependencies::resolve_manifests(&manifests, side, &overrides)
                 .map_err(|error| error.to_string())?;
-                horizon_mod_package::dependencies::resolve_links(&inputs)
-                    .map_err(|error| format!("code link requirements refused: {error}"))?;
-                Ok(resolution)
+        horizon_mod_package::dependencies::resolve_links(&inputs)
+            .map_err(|error| format!("code link requirements refused: {error}"))?;
+        Ok(resolution)
+    })
+    .unwrap_or_else(|error| {
+        eprintln!("Horizon: mod load refused: {error}");
+        horizon_client::logging::flush();
+        std::process::exit(1);
+    });
+    for warning in &order.warnings {
+        log::warn!("Horizon: {warning}");
+    }
+    // What every level.dat this game saves records (`fml.LoadingModList`).
+    horizon_client::save::level_mods::set_loaded(Some(
+        order
+            .order
+            .iter()
+            .filter(|&&i| code_ids.contains(manifests[i].id.as_str()))
+            .map(|&i| horizon_client::save::level_mods::ModRecord {
+                id: manifests[i].id.clone(),
+                version: manifests[i].version.clone(),
             })
-            .unwrap_or_else(|error| {
-                eprintln!("Horizon: mod load refused: {error}");
+            .collect(),
+    ));
+    let mut entries: std::collections::BTreeMap<_, _> = mods
+        .into_iter()
+        .map(|entry| (entry.fields().id, entry))
+        .collect();
+    let mods: Vec<_> = order
+        .order
+        .into_iter()
+        .filter(|&i| code_ids.contains(manifests[i].id.as_str()))
+        .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
+        .collect();
+    let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
+    mod_api::__private::install(mods.into());
+    for &id in &ids {
+        for slot in slots.iter().filter(|slot| slot.id() == id) {
+            if let Err(error) = mod_points::register(slot) {
+                log::error!("Horizon: {id}: {error}");
                 horizon_client::logging::flush();
                 std::process::exit(1);
-            });
-            for warning in &order.warnings {
-                log::warn!("Horizon: {warning}");
             }
-            // What every level.dat this game saves records (`fml.LoadingModList`).
-            horizon_client::save::level_mods::set_loaded(Some(
-                order
-                    .order
-                    .iter()
-                    .filter(|&&i| code_ids.contains(manifests[i].id.as_str()))
-                    .map(|&i| horizon_client::save::level_mods::ModRecord {
-                        id: manifests[i].id.clone(),
-                        version: manifests[i].version.clone(),
-                    })
-                    .collect(),
-            ));
-            let mut entries: std::collections::BTreeMap<_, _> = mods
-                .into_iter()
-                .map(|entry| (entry.fields().id, entry))
-                .collect();
-            let mods: Vec<_> = order
-                .order
-                .into_iter()
-                .filter(|&i| code_ids.contains(manifests[i].id.as_str()))
-                .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
-                .collect();
-            let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
-            mod_api::__private::install(mods.into());
-            for &id in &ids {
-                for slot in slots.iter().filter(|slot| slot.id() == id) {
-                    if let Err(error) = mod_points::register(slot) {
-                        log::error!("Horizon: {id}: {error}");
-                        horizon_client::logging::flush();
-                        std::process::exit(1);
-                    }
-                }
-            }
-            (ids, wasm)
-        },
-        horizon_client::entry::CodeRuntime {
-            initialize: horizon_mod_wasm::initialize,
-            refusal: |id| {
-                horizon_mod_wasm::refusal(id).map(|reason| {
+        }
+    }
+    (ids, wasm)
+}
+
+/// The wasm runtime's services for `entry::start`: initialization and the Mods page's refusals.
+pub fn code_runtime() -> horizon_client::entry::CodeRuntime {
+    horizon_client::entry::CodeRuntime {
+        initialize: horizon_mod_wasm::initialize,
+        refusal: |id| {
+            horizon_mod_wasm::refusal(id).map(|reason| {
                 use horizon_client::text::Text;
                 match reason {
                     horizon_mod_wasm::Refusal::CompileTimeout { member, budget } => {
@@ -203,13 +219,11 @@ pub fn main_with(
                     other => other.to_string(),
                 }
             })
-            },
-            startup_refused: |id| {
-                horizon_mod_wasm::refused()
-                    .iter()
-                    .any(|(owner, _)| owner == id)
-            },
         },
-        startup,
-    );
+        startup_refused: |id| {
+            horizon_mod_wasm::refused()
+                .iter()
+                .any(|(owner, _)| owner == id)
+        },
+    }
 }

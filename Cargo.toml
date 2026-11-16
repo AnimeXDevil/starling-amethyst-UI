@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["crates/horizon-telemetry-server", "launcher", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "third_party/winit", "tools/fixtures/paper-trace-mod"]
+exclude = ["crates/horizon-telemetry-server", "launcher", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "third_party/winit", "third_party/android-activity", "tools/fixtures/paper-trace-mod"]
 members = [
     "crates/starling-catalog",
     "crates/horizon-guest-stack",
@@ -113,6 +113,11 @@ large_enum_variant = "allow"
 [patch.crates-io]
 wgpu-hal = { path = "third_party/wgpu-hal" }
 winit = { path = "third_party/winit" }
+# android-activity 0.6.1 whose NativeActivity thread, the game's, has the wasm guest stack on 64-bit
+# Android (horizon-guest-stack): std's 2 MiB was too little for a wasm mod to run on it. One spawn,
+# marked "Horizon's patch" (src/native_activity/glue.rs); the folder drops android-games-sdk, which
+# only GameActivity builds. Drop this once android-activity takes a stack size.
+android-activity = { path = "third_party/android-activity" }
 # naga 30.0.1, with the fixes to its GLSL frontend that shader packs need (THIRD_PARTY_NOTICES.md).
 naga = { path = "third_party/naga" }
 # libmimalloc-sys 0.1.49 whose mimalloc v3 counts bits without POPCNT when MSVC builds it: the

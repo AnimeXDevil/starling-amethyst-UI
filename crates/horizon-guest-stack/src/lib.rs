@@ -4,12 +4,12 @@
 mod constants;
 pub use constants::{GUEST_STACK_BYTES, HOST_HEADROOM};
 
-/// Reserve the guest stack on hosts that run Wasm mods. Starling's Android host runs native mods
-/// and uses normal Rust worker stacks. A 136 MiB reservation per worker can exhaust 32-bit Android
-/// address space during loading.
+/// Reserve the guest stack on hosts that run Wasm mods. 32-bit Android loads none and keeps normal
+/// Rust worker stacks: a 136 MiB reservation per worker exhausted its address space while loading
+/// (#590). 64-bit Android reserves it, as the desktop does: there it is address space, not memory.
 pub fn builder() -> std::thread::Builder {
     let worker = std::thread::Builder::new();
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
     let worker = worker.stack_size(GUEST_STACK_BYTES + HOST_HEADROOM);
     worker
 }
@@ -20,7 +20,7 @@ pub fn spawn<T: Send + 'static>(
     body: impl FnOnce() -> T + Send + 'static,
 ) -> std::io::Result<std::thread::JoinHandle<T>> {
     builder().name(name).spawn(move || {
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
         debug_assert_eq!(
             check_current(),
             Ok(()),
@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
     fn guest_worker_reserves_the_required_stack() {
         super::builder()
             .spawn(|| super::check_current().unwrap())

@@ -470,7 +470,14 @@ pub fn load_installed(
     let game_dir = &launch.context.game_dir;
     let dev = &launch.context.dev_mods;
     let budget = compile_budget::CompileBudget::read(launch, player_dir);
-    let mut cache = module_cache::ModuleCache::new(game_dir.join(module_cache::CACHE_DIR));
+    // What the game keeps apart from the player's folder, when it does (`logging::private_home`):
+    // Android's game folder is in shared storage, which runs no code.
+    let private = std::env::var_os("HORIZON_PRIVATE")
+        .filter(|private| !private.is_empty())
+        .map(std::path::PathBuf::from);
+    // In `HORIZON_PRIVATE` when it is set apart, as the game's other caches (`logging::cache_dir`).
+    let cache_home = private.clone().unwrap_or_else(|| game_dir.clone());
+    let mut cache = module_cache::ModuleCache::new(cache_home.join(module_cache::CACHE_DIR));
     if let Ok(budget) = budget.as_ref() {
         cache.budget = *budget;
     }
@@ -534,10 +541,18 @@ pub fn load_installed(
                 .collect(),
             ..Loaded::default()
         },
+        // No wasm mod: no engine, nor its epoch thread ticking every millisecond (a phone's battery).
+        Ok(_) if packages.is_empty() => Loaded::default(),
         Ok(_) => {
+            // Beside the game's executable, or in `HORIZON_PRIVATE`: Android's game is a library
+            // in the system's app_process, and puts the std its APK carries there
+            // (`preparer::put_wasm_std`).
             let std = std::env::current_exe()
                 .ok()
-                .and_then(|exe| std::fs::read(exe.with_file_name("horizon-wasm-std.wasm")).ok());
+                .map(|exe| exe.with_file_name("horizon-wasm-std.wasm"))
+                .into_iter()
+                .chain(private.map(|private| private.join("horizon-wasm-std.wasm")))
+                .find_map(|path| std::fs::read(path).ok());
             load_available_std(
                 std.as_deref(),
                 packages,

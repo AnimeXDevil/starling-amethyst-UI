@@ -1,0 +1,7 @@
+id = "starling_wasm_probe"
+name = "Starling Wasm Probe"
+version = "0.1.0"
+description = "Says in the chat every ten seconds how many server and game ticks its hooks ran: a phone running it runs wasm mods on both threads."
+api = "0.2"
+side = "both"
+capabilities = []

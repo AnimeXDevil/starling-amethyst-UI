@@ -51,12 +51,13 @@ pub(super) const NO_ANSWER: &str =
 
 /// The server thread holds its `Game` by value and runs every tick on it.
 /// It reserves the same guest limit and host headroom as the main thread.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
 const SERVER_THREAD_STACK: usize =
     horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM;
 
-/// Android uses the original server stack size because its host does not load Wasm guests.
-#[cfg(target_os = "android")]
+/// 32-bit Android keeps the original server stack: it loads no Wasm guests, and its address space
+/// is short (`horizon_guest_stack::builder`).
+#[cfg(all(target_os = "android", target_pointer_width = "32"))]
 const SERVER_THREAD_STACK: usize = 8 * 1024 * 1024;
 
 /// The server thread's stack size: [`SERVER_THREAD_STACK`], or what `RUST_MIN_STACK` asks for
@@ -1580,7 +1581,8 @@ pub(super) mod tests {
     /// The server thread keeps its platform stack floor and accepts a larger `RUST_MIN_STACK`.
     #[test]
     fn the_server_thread_stack_keeps_its_floor_and_larger_overrides() {
-        let minimum = if cfg!(target_os = "android") { 8 } else { 136 } * 1024 * 1024;
+        let short = cfg!(all(target_os = "android", target_pointer_width = "32"));
+        let minimum = if short { 8 } else { 136 } * 1024 * 1024;
         assert_eq!(super::stack_for(None), minimum);
         assert_eq!(
             super::stack_for(Some("1048576")),
