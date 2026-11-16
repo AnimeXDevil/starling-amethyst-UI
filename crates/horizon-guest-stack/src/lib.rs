@@ -124,7 +124,8 @@ pub fn check_current() -> Result<(), &'static str> {
 }
 
 fn inspect_current() -> Result<(), &'static str> {
-    #[cfg(target_os = "linux")]
+    // Android's bionic has glibc's pthread_getattr_np.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         let mut attr = std::mem::MaybeUninit::<libc::pthread_attr_t>::uninit();
         // SAFETY: pthread_self is live and attr is writable. Destroy only on success.
@@ -136,6 +137,11 @@ fn inspect_current() -> Result<(), &'static str> {
             let mut size = 0;
             let result = libc::pthread_attr_getstacksize(&attr, &mut size);
             libc::pthread_attr_destroy(&mut attr);
+            // Bionic leaves the thread's own structure, carved from the top of the stack that was
+            // asked for, out of the size it reports: a thread given exactly the reservation reads
+            // a few KiB short. Up to 1 MiB short still leaves host frames 7 MiB.
+            #[cfg(target_os = "android")]
+            let size = size + (1 << 20);
             if result != 0 || size < GUEST_STACK_BYTES + HOST_HEADROOM {
                 return Err("GuestStackUnavailable: calling thread needs 136 MiB of stack");
             }
@@ -159,9 +165,19 @@ fn inspect_current() -> Result<(), &'static str> {
             return Err("GuestStackUnavailable: calling thread needs 136 MiB of stack");
         }
     }
-    #[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        windows
+    )))]
     return Err("GuestStackUnavailable: stack inspection is unsupported on this platform");
-    #[cfg(any(target_os = "linux", target_vendor = "apple", windows))]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        windows
+    ))]
     Ok(())
 }
 
