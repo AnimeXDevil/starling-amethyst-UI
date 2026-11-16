@@ -1733,7 +1733,11 @@ impl Game<'_> {
         let (mut x, mut y) = (home_x, home_y);
         self.native_customize_chat_overlay(width, height, focused, &mut x, &mut y);
         // Out of a camera cutout's strip at the left, as the chat box below it (#166).
-        let clear = self.safe_gui_insets(batch.scale)[0];
+        let clear = if focused {
+            self.safe_gui_insets(batch.scale)[0]
+        } else {
+            0.0
+        };
         let offset = [(x - home_x) as f32 + clear, (y - home_y) as f32];
         self.ui
             .chat

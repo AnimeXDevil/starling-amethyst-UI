@@ -20,6 +20,13 @@ pub(super) enum FrameDraw {
     Complete,
 }
 impl OptionsUi {
+    #[cfg(target_os = "android")]
+    pub fn display_open(&mut self, s: &Settings, batch: &HudBatch) -> bool {
+        Self::graphics_page(self.page()).is_some()
+            && self.graphics.current_page(s, (batch.width, batch.height))
+                == Some(crate::graphics_ui::Page::Display)
+    }
+
     /// Discard a cancelled frame, including the hosted shell's prepared view.
     pub fn discard_draw(&mut self) {
         if let Some(FrameDraw::Shell(page)) = self.frame_draw.take() {

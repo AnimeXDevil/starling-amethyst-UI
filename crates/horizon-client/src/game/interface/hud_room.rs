@@ -3,13 +3,145 @@
 //! world's HUD draws, into `ui.room`; the controller notice, splitscreen's join strip and the
 //! radial menu read it. With it, the frame's `motion::Clock` (`hud_clock`), and whether an
 //! overlay holds the view (`overlay_holds_view`), which what vanilla draws there gives way to.
-use super::Game;
+use super::{CREATIVE_SHIFT, Game, Screen};
 use horizon_client::hud::HudBatch;
 use horizon_client::hud_kit::motion::Clock;
 use horizon_client::hud_kit::room::{Keep, Room};
 use horizon_client::{boss_overlay, hud_layout, hud_overlays};
 
+/// The HUD works in local safe-area coordinates. Move its vertices and item
+/// scissors back into the full frame after drawing it.
+pub(super) struct HudArea {
+    full: [f32; 2],
+    origin: [f32; 2],
+    first_vertex: usize,
+    first_blend: usize,
+}
+
+impl HudArea {
+    pub(super) fn begin(batch: &mut HudBatch, [left, top, right, bottom]: [f32; 4]) -> Self {
+        let area = Self {
+            full: [batch.width, batch.height],
+            origin: [left, top],
+            first_vertex: batch.vertices.len(),
+            first_blend: batch.blends.len(),
+        };
+        batch.width -= left + right;
+        batch.height -= top + bottom;
+        area
+    }
+
+    pub(super) fn finish(self, batch: &mut HudBatch) {
+        let [x, y] = self.origin;
+        [batch.width, batch.height] = self.full;
+        if self.origin == [0.0; 2] {
+            return;
+        }
+        for vertex in &mut batch.vertices[self.first_vertex..] {
+            vertex.pos[0] += x;
+            vertex.pos[1] += y;
+        }
+        for (_, blend) in &mut batch.blends[self.first_blend..] {
+            use horizon_client::hud::Blend;
+            if let Blend::Depth(rect) | Blend::DepthGlint(rect) = blend {
+                rect[0] += (x * batch.scale) as u32;
+                rect[1] += (y * batch.scale) as u32;
+            }
+        }
+    }
+}
+
 impl Game<'_> {
+    pub(super) fn draw_performance_overlays(&mut self, batch: &mut HudBatch) {
+        let margins = self.hud_safe_insets(batch);
+        let area = HudArea::begin(batch, margins);
+        self.frame_graph
+            .draw(self.settings.horizon.overlay, batch, &self.gui.atlas);
+        self.draw_stats_overlay(batch);
+        area.finish(batch);
+    }
+
+    pub(super) fn draw_hud_crosshair(
+        &mut self,
+        batch: &mut HudBatch,
+        spectator: bool,
+        indicator: u8,
+        strength: f32,
+        delay: f32,
+    ) {
+        let (wi, hi) = (batch.width as i32, batch.height as i32);
+        // Hud.extractCrosshair / extractItemHotbar / extractPlayerHealth /
+        // extractVehicleHealth and the experience bar, laid out by hud_layout.
+        // Combat feel Legacy hides the attack indicator unless the player keeps it.
+        // The 3D crosshair (F3) takes the 2D one's place.
+        // Hud.extractCrosshair: a spectator only sees it over something to open.
+        if self.camera_type.is_first_person()
+            && (!spectator || self.spectator_crosshair())
+            && !self.debug_crosshair()
+            && !self.touch_hides_crosshair()
+            && !self.overlay_holds_view()
+        {
+            let attack = (indicator == 1).then_some(strength);
+            let full = attack.is_some_and(|a| {
+                hud_layout::full_attack_indicator(a, delay, self.crosshair_living())
+            });
+            let draws = hud_layout::crosshair(wi, hi, attack, full);
+            // Under one creative window it hides; Bedrock Inventory has a gap at the middle.
+            if self.screen != Screen::Creative || CREATIVE_SHIFT.get() == 0.0 {
+                self.gui_layer("minecraft:crosshair", batch, |g, batch| {
+                    // The custom crosshair takes the sprite's place (the first draw); the
+                    // attack indicator stays.
+                    if g.custom_crosshair() {
+                        g.draw_custom_crosshair(batch, wi, hi);
+                        hud_layout::paint(batch, &g.gui.atlas, &draws[1..]);
+                    } else {
+                        hud_layout::paint(batch, &g.gui.atlas, &draws);
+                    }
+                });
+            }
+        }
+    }
+
+    pub(super) fn hud_safe_insets(&self, batch: &HudBatch) -> [f32; 4] {
+        #[cfg(target_os = "android")]
+        {
+            use horizon_client::android_display::{DisplayOption as D, safe_zone};
+            safe_zone(
+                [batch.width, batch.height],
+                [
+                    D::SafeHorizontal.value(&self.settings),
+                    D::SafeVertical.value(&self.settings),
+                ],
+                crate::android::safe_insets()
+                    .map(|pixels| (pixels as f32 / batch.scale.max(1.0)).ceil()),
+            )
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = batch;
+            [0.0; 4]
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    pub(super) fn draw_safe_zone(&self, batch: &mut HudBatch) {
+        let [left, top, right, bottom] = self.hud_safe_insets(batch);
+        let [right, bottom] = [batch.width - right - 2.0, batch.height - bottom - 2.0];
+        for (x, y, dx, dy) in [
+            (left, top, 1.0, 1.0),
+            (right, top, -1.0, 1.0),
+            (left, bottom, 1.0, -1.0),
+            (right, bottom, -1.0, -1.0),
+        ] {
+            for [x, y, w, h] in [
+                [x.min(x + 12.0 * dx), y, 14.0, 2.0],
+                [x, y.min(y + 12.0 * dy), 2.0, 14.0],
+            ] {
+                batch.fill(&self.gui.atlas, x + 1.0, y + 1.0, w, h, 0xff162026);
+                batch.fill(&self.gui.atlas, x, y, w, h, u32::MAX);
+            }
+        }
+    }
     /// The HUD's clock this frame (`hud_kit::motion`): still, so overlays show their motion
     /// settled, while the game is paused, frame-stepped (`HORIZON_STILL`, a screenshot
     /// sequence) or a repro recording or replay runs.

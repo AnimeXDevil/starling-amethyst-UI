@@ -303,6 +303,10 @@ impl Game<'_> {
         self.ui
             .options
             .draw_overlays(batch, &self.gui.atlas, cursor);
+        #[cfg(target_os = "android")]
+        if self.ui.options.display_open(&self.settings, batch) {
+            self.draw_safe_zone(batch);
+        }
         self.show_calibration((batch.width, batch.height));
     }
     /// Whose controller settings these are and what this game sees (`controller_ui`): the

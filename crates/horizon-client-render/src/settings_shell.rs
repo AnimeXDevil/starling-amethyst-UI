@@ -1987,6 +1987,12 @@ impl<S: Screen> Shell<S> {
     }
     /// The page the plate shows: the open one or, while searching, the one picked, else the
     /// topmost line's.
+    /// The page the plate is headed with.
+    #[cfg(any(test, target_os = "android"))]
+    pub(crate) fn current_page(&mut self, s: &Settings, size: (f32, f32)) -> Option<S::Page> {
+        let view = self.view(s, size);
+        self.current(&view)
+    }
     fn current(&self, view: &View<S::Page, S::Row>) -> Option<S::Page> {
         if self.query().is_empty() {
             // A page that went (a screen whose pages are the player's) leaves the first.
@@ -2835,11 +2841,6 @@ impl<S: Screen> Shell<S> {
         lines
             .filter_map(|l| Some((l.page, view.rows[l.setting?].id)))
             .collect()
-    }
-    /// The page the plate is headed with.
-    pub(crate) fn current_page(&mut self, s: &Settings, size: (f32, f32)) -> Option<S::Page> {
-        let view = self.view(s, size);
-        self.current(&view)
     }
     /// Whether `row` is all in the list's view now.
     pub(crate) fn in_view(&mut self, s: &Settings, size: (f32, f32), row: S::Row) -> bool {

@@ -4954,9 +4954,7 @@ impl Game<'_> {
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         self.draw_debug_overlay(&mut batch, size);
-        self.frame_graph
-            .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
-        self.draw_stats_overlay(&mut batch);
+        self.draw_performance_overlays(&mut batch);
         self.draw_pad_over_hud(&mut batch);
         self.lift_over_keyboard(&mut batch);
         self.draw_phone_offers(&mut batch);
@@ -5075,7 +5073,7 @@ impl Game<'_> {
         // crosshair, hotbar, effects, bars, sidebar, action bar, titles and chat;
         // the sleep overlay, debug screen and open screens still draw.
         let spectator = self.spectator();
-        let (wi, hi) = (w as i32, h as i32);
+        let (full_w, full_h) = (w, h);
         let mut gui_canceled = false;
         if !self.ui.hide_gui {
             self.native_render_gui_pre(&mut gui_canceled);
@@ -5091,52 +5089,28 @@ impl Game<'_> {
         );
         // The mods' layers (`register_gui_layers`) draw among vanilla's while the HUD shows.
         self.hud_layer_next = show_hud.then_some(0);
-        self.ui.room = self.hud_room(w, h, show_hud);
         let mut guide_from = 0;
-        if show_hud {
-            self.draw_spyglass(&mut batch);
-            guide_from = batch.vertices.len();
-            // Hud.extractCrosshair / extractItemHotbar / extractPlayerHealth /
-            // extractVehicleHealth and the experience bar, laid out by hud_layout.
-            // Combat feel Legacy hides the attack indicator unless the player keeps it.
-            let indicator = if self.pvp_hides_attack_indicator() {
+        let indicator = horizon_client::android_controls::attack_indicator(
+            if self.pvp_hides_attack_indicator() {
                 0
             } else {
                 self.settings.attack_indicator
-            };
-            let indicator = horizon_client::android_controls::attack_indicator(
-                indicator,
-                !self.touch_hides_crosshair(),
-            );
-            let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
-            let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
-            // The 3D crosshair (F3) takes the 2D one's place.
-            // Hud.extractCrosshair: a spectator only sees it over something to open.
-            if self.camera_type.is_first_person()
-                && (!spectator || self.spectator_crosshair())
-                && !self.debug_crosshair()
-                && !self.touch_hides_crosshair()
-                && !self.overlay_holds_view()
-            {
-                let attack = (indicator == 1).then_some(strength);
-                let full = attack.is_some_and(|a| {
-                    hud_layout::full_attack_indicator(a, delay, self.crosshair_living())
-                });
-                let draws = hud_layout::crosshair(wi, hi, attack, full);
-                // Under one creative window it hides; Bedrock Inventory has a gap at the middle.
-                if self.screen != Screen::Creative || CREATIVE_SHIFT.get() == 0.0 {
-                    self.gui_layer("minecraft:crosshair", &mut batch, |g, batch| {
-                        // The custom crosshair takes the sprite's place (the first draw); the
-                        // attack indicator stays.
-                        if g.custom_crosshair() {
-                            g.draw_custom_crosshair(batch, wi, hi);
-                            hud_layout::paint(batch, &g.gui.atlas, &draws[1..]);
-                        } else {
-                            hud_layout::paint(batch, &g.gui.atlas, &draws);
-                        }
-                    });
-                }
-            }
+            },
+            !self.touch_hides_crosshair(),
+        );
+        let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
+        let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
+        if show_hud {
+            self.draw_spyglass(&mut batch);
+            guide_from = batch.vertices.len();
+            self.draw_hud_crosshair(&mut batch, spectator, indicator, strength, delay);
+        }
+        let margins = self.hud_safe_insets(&batch);
+        let area = hud_room::HudArea::begin(&mut batch, margins);
+        let (w, h) = (batch.width, batch.height);
+        let (wi, hi) = (w as i32, h as i32);
+        self.ui.room = self.hud_room(w, h, show_hud);
+        if show_hud {
             self.gui_layer("minecraft:hotbar", &mut batch, |g, batch| {
                 if spectator {
                     g.draw_spectator_hotbar(batch);
@@ -5310,7 +5284,18 @@ impl Game<'_> {
             }
         }
         // Hud.extractSleepOverlay: over all health/food bars, under titles and chat.
-        let draws = hud_overlays::sleep_overlay(wi, hi, self.sleep_timer as i32);
+        let mut draws =
+            hud_overlays::sleep_overlay(full_w as i32, full_h as i32, self.sleep_timer as i32);
+        if !draws.is_empty() && margins != [0.0; 4] {
+            draws.insert(
+                0,
+                hud_layout::GuiDraw::Push(vec![hud_layout::PoseOp::Translate(
+                    -margins[0],
+                    -margins[1],
+                )]),
+            );
+            draws.push(hud_layout::GuiDraw::Pop);
+        }
         self.gui_layer("minecraft:sleep_overlay", &mut batch, |g, batch| {
             hud_layout::paint(batch, &g.gui.atlas, &draws);
         });
@@ -5358,6 +5343,14 @@ impl Game<'_> {
         // The mod layers above the last vanilla layer drawn.
         self.draw_mod_gui_layers(None, &mut batch);
         self.hud_layer_next = None;
+        area.finish(&mut batch);
+        if margins != [0.0; 4] {
+            let mut room = horizon_client::hud_kit::room::Room::new(full_w, full_h);
+            for (keep, [x, y, w, h]) in self.ui.room.keeps() {
+                room.add(keep, [x + margins[0], y + margins[1], w, h]);
+            }
+            self.ui.room = room;
+        }
         // Screen.extractBlurredBackground blurs the world and HUD, while the
         // screen's background, widgets, toasts and debug overlay stay sharp.
         batch.blur_at = batch.vertices.len() as u32;

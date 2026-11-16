@@ -556,9 +556,14 @@ impl Game<'_> {
             self.android_menu_touch(t, events, id);
             return;
         }
+        let [left, top, right, bottom] = self.hud_safe_insets(&b);
         if t.phase == TouchPhase::Started
             && !self.mobile.controls.control_at_point(n)
-            && let Some(slot) = horizon_client::android_controls::hotbar_slot(b.width, b.height, p)
+            && let Some(slot) = horizon_client::android_controls::hotbar_slot(
+                b.width - left - right,
+                b.height - top - bottom,
+                [p[0] - left, p[1] - top],
+            )
         {
             self.selected = slot;
             self.mobile.controls.ignore(t.id);
