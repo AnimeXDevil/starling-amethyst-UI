@@ -193,11 +193,24 @@ def zip_folder(folder, archive):
             z.writestr(info, file.read_bytes())
 
 
-def assets(out):
+def wasm_std(out_file):
+    """horizon-wasm-std.wasm, the std every wasm mod links against when the game loads it, built as
+    Horizon ships it beside its executable (crates/cargo-horizon-mod `wasm-std`): by the Rust wasm
+    mods are built with (tools/ci/rust-version), with its std's source and the wasm target."""
+    toolchain = (ROOT / "tools/ci/rust-version").read_text(encoding="utf-8").strip()
+    if shutil.which("rustup"):
+        run("rustup", "toolchain", "install", toolchain, "--profile", "minimal")
+        run("rustup", "component", "add", "rust-src", "--toolchain", toolchain)
+        run("rustup", "target", "add", "wasm32-unknown-unknown", "--toolchain", toolchain)
+    run("cargo", "run", "--locked", "-p", "cargo-horizon-mod", "--", "wasm-std", out_file, cwd=ROOT)
+
+
+def assets(out, abi=None):
     """The APK's assets/: prepare-kit.zip (PREPARE_KIT, with the paths horizon-prepare reads),
     lowbudget.zip, the skin the setup draws the menus with (packaging/lowbudget/pack, made by its
-    make.py), and StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
-    `out` for the release page)."""
+    make.py), StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
+    `out` for the release page), and for a 64-bit `abi` horizon-wasm-std.wasm (`wasm_std`), which the
+    game puts in its own files to load wasm mods (32-bit Android loads none)."""
     run(sys.executable, ROOT / "tools/build_android_exporters.py")
     folder = out / "assets"
     shutil.rmtree(folder, ignore_errors=True)
@@ -219,6 +232,8 @@ def assets(out):
     zip_folder(HERE.parent / "lowbudget" / "pack", folder / "lowbudget.zip")
     zip_folder(HERE.parent / "shaderpacks" / "starling-visuals", folder / "StarlingVisuals.zip")
     shutil.copyfile(folder / "StarlingVisuals.zip", out / "StarlingVisuals.zip")
+    if abi in ("arm64-v8a", "x86_64"):
+        wasm_std(folder / "horizon-wasm-std.wasm")
     return folder
 
 
@@ -410,7 +425,9 @@ def main():
         shutil.copyfile(built, out / f"lib{LIBRARY}-symbols.so")
 
     variant = "dev" if args.dev else "preview" if args.preview else None
-    link_resources(tool(build_tools, "aapt2"), android_jar, out, assets(out), variant, args.abi)
+    link_resources(
+        tool(build_tools, "aapt2"), android_jar, out, assets(out, args.abi), variant, args.abi
+    )
     dex = compile_java(build_tools, android_jar, out)
     libraries = build_launchers(ndk, out, args.abi)
     libraries[library.name] = library

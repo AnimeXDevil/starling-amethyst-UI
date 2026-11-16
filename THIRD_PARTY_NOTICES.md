@@ -92,6 +92,14 @@ not refused. Its GL backend copies depth and stencil textures with a framebuffer
 Apache-2.0; both licenses are in that folder
 (`LICENSE.MIT`, `LICENSE.APACHE`).
 
+## android-activity
+
+`third_party/android-activity` is [android-activity](https://github.com/rust-mobile/android-activity)
+0.6.1 by the rust-mobile developers, without its `android-games-sdk` folder (GameActivity's, which
+Starling does not build). On 64-bit Android its NativeActivity thread, the game's, is started with
+the wasm guest stack (`horizon-guest-stack`). It is licensed under MIT or Apache-2.0; both licenses
+are in that folder (`LICENSE-MIT`, `LICENSE-APACHE`).
+
 ## naga
 
 `third_party/naga` is [naga](https://github.com/gfx-rs/wgpu) 30.0.1 by the gfx-rs developers, with

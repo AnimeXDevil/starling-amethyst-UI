@@ -147,7 +147,7 @@ impl ModuleCache {
         engine: &Engine,
         bytes: &[u8],
     ) -> wasmtime::Result<(Module, Source)> {
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "android")))]
         let child = if cfg!(test) {
             None
         } else {
@@ -156,7 +156,10 @@ impl ModuleCache {
                 self.budget.limit,
             ))
         };
-        #[cfg(not(unix))]
+        // Android has no executable of the game's to run as the compiler: its process is the
+        // system's app_process, with the game a library in it. Modules compile in the game's
+        // process there, into the same cache, with no time limit.
+        #[cfg(any(not(unix), target_os = "android"))]
         let child = None;
         self.load_with_child(engine, bytes, child)
     }
@@ -571,6 +574,8 @@ mod tests;
 mod gate_tests;
 
 #[cfg(unix)]
+// Android compiles in its own process (`load_or_compile`); only a fixture runs this there.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) fn production_command(input: &Path, key: &str) -> std::process::Command {
     let mut command = std::process::Command::new(std::env::current_exe().unwrap_or_default());
     command

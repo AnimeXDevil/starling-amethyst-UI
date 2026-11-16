@@ -780,7 +780,6 @@ pub(super) fn content_overlay(
     jar_store: &std::path::Path,
 ) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
-    let here = std::env::current_dir().unwrap_or_default();
     let original_base = root.to_owned();
 
     let requirements = collect_jar_requirements(
@@ -959,7 +958,10 @@ pub(super) fn content_overlay(
         &overrides,
     )
     .map_err(|error| error.to_string())?;
-    let cache = here.join(".horizon-cache");
+    // The game's derived caches (`logging::cache_dir`): the folder the game runs in, or Android's
+    // private files. Android's game folder is in shared storage, which refuses the overlay's links:
+    // a phone with a code or content mod on fell back to its setup ("Permission denied").
+    let cache = horizon_client::logging::cache_dir();
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
     let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));

@@ -1106,51 +1106,66 @@ impl WasmMod {
         // This guard unwinds before the resource scope, whose native destructors
         // must already see the group stopped.
         let panic_stop = PoisonOnPanic(&self.running.poisoned);
-        let result = (|| -> Result<R, CallError> {
-            if top {
-                for (slot, generation) in self.prepared_releases.take() {
-                    w.clear();
-                    w.put(&slot);
-                    w.put(&generation);
-                    self.invoke(&mut store, crate::prepared::RELEASE, &w, &mut output)
-                        .map_err(|error| {
-                            CallError::Fault(
-                                error.into_error().context("deferred prepared release"),
-                            )
-                        })?;
-                    if !output.is_empty() {
-                        return Err(CallError::Fault(
-                            wasmtime::Error::from(WireError::Trailing)
-                                .context("deferred prepared release"),
-                        ));
+        // A panic during the call, in a host import the guest made or in the game's own arguments
+        // and reply, is this group's fault, as a trap is, not the game's end: a mod asking for
+        // what the game has not loaded at that moment stops, and the game goes on. The group is
+        // poisoned below and never entered again, so its store's state after the unwind is moot.
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<R, CallError> {
+                if top {
+                    for (slot, generation) in self.prepared_releases.take() {
+                        w.clear();
+                        w.put(&slot);
+                        w.put(&generation);
+                        self.invoke(&mut store, crate::prepared::RELEASE, &w, &mut output)
+                            .map_err(|error| {
+                                CallError::Fault(
+                                    error.into_error().context("deferred prepared release"),
+                                )
+                            })?;
+                        if !output.is_empty() {
+                            return Err(CallError::Fault(
+                                wasmtime::Error::from(WireError::Trailing)
+                                    .context("deferred prepared release"),
+                            ));
+                        }
+                        self.finish_prepared_release(slot);
                     }
-                    self.finish_prepared_release(slot);
                 }
-            }
-            // Deferred releases have the same empty frame as a direct release.
-            *store.data_mut().cx.frames.last_mut().unwrap() = frame;
-            let released = self.released.take();
-            if !released.is_empty() {
+                // Deferred releases have the same empty frame as a direct release.
+                *store.data_mut().cx.frames.last_mut().unwrap() = frame;
+                let released = self.released.take();
+                if !released.is_empty() {
+                    w.clear();
+                    w.put(&released);
+                    self.invoke(&mut store, mod_api::wire::RELEASE, &w, &mut output)?;
+                    if !output.is_empty() {
+                        return Err(WireError::Trailing.into());
+                    }
+                }
                 w.clear();
-                w.put(&released);
-                self.invoke(&mut store, mod_api::wire::RELEASE, &w, &mut output)?;
-                if !output.is_empty() {
+                if let Some(handler) = handler {
+                    w.put(&handler);
+                }
+                args(&mut w);
+                self.invoke(&mut store, id, &w, &mut output)?;
+                let mut r = Reader::new(&output);
+                let value = reply(&mut r)?;
+                if !r.rest().is_empty() {
                     return Err(WireError::Trailing.into());
                 }
-            }
-            w.clear();
-            if let Some(handler) = handler {
-                w.put(&handler);
-            }
-            args(&mut w);
-            self.invoke(&mut store, id, &w, &mut output)?;
-            let mut r = Reader::new(&output);
-            let value = reply(&mut r)?;
-            if !r.rest().is_empty() {
-                return Err(WireError::Trailing.into());
-            }
-            Ok(value)
-        })();
+                Ok(value)
+            }))
+            .unwrap_or_else(|payload| {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "no message".to_owned());
+                Err(CallError::Fault(wasmtime::Error::msg(format!(
+                    "the game panicked while serving it: {message}"
+                ))))
+            });
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
         // A failed guest release may leave retained state in the slot.
