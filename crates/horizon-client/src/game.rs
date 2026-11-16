@@ -5090,21 +5090,24 @@ impl Game<'_> {
         // The mods' layers (`register_gui_layers`) draw among vanilla's while the HUD shows.
         self.hud_layer_next = show_hud.then_some(0);
         let mut guide_from = 0;
-        let indicator = horizon_client::android_controls::attack_indicator(
-            if self.pvp_hides_attack_indicator() {
-                0
-            } else {
-                self.settings.attack_indicator
-            },
-            !self.touch_hides_crosshair(),
-        );
-        let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
-        let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
-        if show_hud {
+        let (indicator, strength) = if show_hud {
+            let indicator = horizon_client::android_controls::attack_indicator(
+                if self.pvp_hides_attack_indicator() {
+                    0
+                } else {
+                    self.settings.attack_indicator
+                },
+                !self.touch_hides_crosshair(),
+            );
+            let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
+            let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
             self.draw_spyglass(&mut batch);
             guide_from = batch.vertices.len();
             self.draw_hud_crosshair(&mut batch, spectator, indicator, strength, delay);
-        }
+            (indicator, strength)
+        } else {
+            (0, 0.0)
+        };
         let margins = self.hud_safe_insets(&batch);
         let area = hud_room::HudArea::begin(&mut batch, margins);
         let (w, h) = (batch.width, batch.height);
