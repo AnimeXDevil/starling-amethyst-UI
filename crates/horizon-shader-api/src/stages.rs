@@ -576,6 +576,58 @@ impl StageKind {
 pub const TEXTURE_BINDING: u32 = 16;
 pub const TEXTURE_SAMPLER_BINDING: u32 = 24;
 
+/// The world's TLAS in group 3, for packs with `[ray_tracing]`: the only binding of
+/// the material and post preludes the plain lists below don't carry. 14 is free in
+/// both layouts (post uses 0..11, material 0..13).
+pub const RT_TLAS_BINDING: u32 = 14;
+
+/// `enable` line opening the composed module of a pack with `[ray_tracing]`: ray
+/// queries need it before every other statement, so `compose` puts it first.
+pub const RT_ENABLE: &str = "enable wgpu_ray_query;\n";
+
+/// The TLAS and the ray-tracing helpers of the material and post preludes of a pack
+/// with `[ray_tracing]`: real ray queries against the renderer's BLAS/TLAS, built from
+/// the live sections on a ray-query device (the pack is refused without one).
+pub const RT_HELPERS: &str = "\
+@group(3) @binding(14) var rt_tlas: acceleration_structure;\n\
+\n\
+// A ray's committed hit: `hit` (false on a miss), `t` along `dir`, the TLAS instance
+// (`instance`, the section's index) and primitive hit and its barycentrics.
+struct RtHit {
+    hit: bool,
+    t: f32,
+    instance: u32,
+    primitive: u32,
+    bary: vec2<f32>,
+}
+// Casts `origin` along `dir` between `t_min` and `t_max` (world blocks): the nearest
+// solid surface hit, or `hit` false on a miss. Translucent terrain is not in the
+// structures, so rays pass through water and glass.
+fn rt_trace(origin: vec3<f32>, dir: vec3<f32>, t_min: f32, t_max: f32) -> RtHit {
+    var rq: ray_query;
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(0u, 0xFFu, t_min, t_max, origin, dir));
+    while rayQueryProceed(&rq) {}
+    let intersection = rayQueryGetCommittedIntersection(&rq);
+    let has_hit = intersection.kind == 1u;
+    return RtHit(
+        has_hit,
+        intersection.t,
+        intersection.instance_custom_data,
+        intersection.primitive_index,
+        intersection.barycentrics
+    );
+}
+// 1 where a ray from `origin` along `dir` hits solid terrain before `t_max`, else 0:
+// hard sun shadows and ray-traced occlusion without marching.
+fn rt_occluded(origin: vec3<f32>, dir: vec3<f32>, t_min: f32, t_max: f32) -> f32 {
+    var rq: ray_query;
+    rayQueryInitialize(&rq, rt_tlas, RayDesc(0u, 0xFFu, t_min, t_max, origin, dir));
+    while rayQueryProceed(&rq) {}
+    let intersection = rayQueryGetCommittedIntersection(&rq);
+    return select(0.0, 1.0, intersection.kind == 1u);
+}
+";
+
 /// The declarations of a pack's `[[textures]]`, part of every stage's prelude.
 pub fn texture_declarations(textures: &[crate::manifest::PackTexture]) -> String {
     let mut out = String::new();
@@ -651,7 +703,16 @@ pub fn compose(pack: &Pack, kind: StageKind, file: &str) -> Composed {
             .parts
             .push((name.to_owned(), start..composed.text.len()));
     };
-    let mut prelude = kind.prelude() + &texture_declarations(&pack.manifest.textures);
+    let mut prelude = String::new();
+    if pack.manifest.ray_tracing.is_some() {
+        prelude += RT_ENABLE;
+    }
+    prelude += &kind.prelude();
+    if pack.manifest.ray_tracing.is_some() && matches!(kind, StageKind::Material | StageKind::Post)
+    {
+        prelude += RT_HELPERS;
+    }
+    prelude += &texture_declarations(&pack.manifest.textures);
     if kind == StageKind::Post {
         prelude += &post_target_declarations(&pack.manifest);
     }

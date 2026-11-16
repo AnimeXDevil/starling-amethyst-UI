@@ -238,7 +238,13 @@ pub fn check_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedSt
     }
     let composed = compose(pack, kind, file);
     let module = parse(&composed)?;
-    let info = Validator::new(ValidationFlags::all(), Capabilities::default())
+    // Ray queries validate only with the capability; packs without `[ray_tracing]`
+    // have no ray-query IR, so the default stays strict for them.
+    let mut capabilities = Capabilities::default();
+    if pack.manifest.ray_tracing.is_some() {
+        capabilities |= Capabilities::RAY_QUERY;
+    }
+    let info = Validator::new(ValidationFlags::all(), capabilities)
         .validate(&module)
         .map_err(|e| {
             let at = e.spans().next().and_then(|(span, _)| span.to_range());
@@ -264,7 +270,13 @@ pub fn check_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedSt
             format!("{texture_reads} texture reads; a stage may write {MAX_TEXTURE_READS}"),
         ));
     }
-    problems.extend(translate(&module, &info, &pack.manifest.options, file));
+    problems.extend(translate(
+        &module,
+        &info,
+        &pack.manifest.options,
+        file,
+        pack.manifest.ray_tracing.is_some(),
+    ));
     if !problems.is_empty() {
         return Err(problems);
     }
@@ -520,6 +532,7 @@ fn translate(
     info: &ModuleInfo,
     options: &[PackOption],
     file: &str,
+    ray_tracing: bool,
 ) -> Vec<Problem> {
     let present: HashSet<&str> = module
         .overrides
@@ -568,7 +581,9 @@ fn translate(
                 &m,
                 &i,
                 &naga::back::msl::Options {
-                    lang_version: (2, 2),
+                    // Ray queries need MSL 2.4; everything else stays at the
+                    // oldest Metal the renderer supports.
+                    lang_version: if ray_tracing { (2, 4) } else { (2, 2) },
                     ..Default::default()
                 },
                 &naga::back::msl::PipelineOptions {

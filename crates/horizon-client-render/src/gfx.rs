@@ -233,6 +233,7 @@ pub mod panorama;
 mod readback;
 mod resident;
 mod reuse;
+mod rt;
 mod solid_paths;
 mod stars;
 pub mod submit;
@@ -1044,6 +1045,9 @@ pub struct Renderer {
     outline: wgpu::Buffer,
     depth: wgpu::TextureView,
     sections: resident::Resident<SectionGpu>,
+    /// One BLAS per live section and one TLAS over them (Advanced graphics' Ray
+    /// Tracing): built as sections mesh, only on a ray-query device.
+    rt: rt::RtWorld,
     lods: HashMap<crate::lod::TileKey, lod::Tile>,
     /// The chunk columns the resident tiles leave out (`Lod::take_cutout`):
     /// their sections are drawn even past the render distance, so terrain
@@ -1727,10 +1731,33 @@ async fn open_device(
     offscreen: bool,
     api: GraphicsApi,
     layers: u32,
+    want_ray_tracing: bool,
 ) -> Result<Opened> {
     let wgpu_backend = std::env::var_os("WGPU_BACKEND").is_some();
     let mut api = api.with_env();
-    if api == GraphicsApi::Auto
+    // A custom GPU driver (Android, gpu_drivers) replaces the system's libvulkan: Vulkan,
+    // whatever the setting says, and no sidestep to OpenGL ES for GPUs whose stock driver
+    // crashes (that is what the custom driver is for). Off Android nothing sets one.
+    let custom_driver = crate::gpu_drivers::active().map(|(id, _)| id);
+    if let Some(id) = custom_driver {
+        if api == GraphicsApi::OpenGl {
+            // An explicit OpenGL ES choice wins over a chosen driver: the way back when a
+            // custom Vulkan driver misbehaves past startup.
+            log::info!("Horizon renderer: OpenGL ES chosen: the custom GPU driver {id} stays off");
+        } else {
+            if api != GraphicsApi::Vulkan {
+                log::info!(
+                    "Horizon renderer: custom GPU driver {id} chosen: Vulkan, not {}",
+                    api.label()
+                );
+            } else {
+                log::info!("Horizon renderer: custom GPU driver {id} chosen");
+            }
+            api = GraphicsApi::Vulkan;
+        }
+    }
+    if custom_driver.is_none()
+        && api == GraphicsApi::Auto
         && !wgpu_backend
         && cfg!(target_os = "android")
         && let Some(gpu) = vulkan_gpu_name(window)
@@ -1746,7 +1773,16 @@ async fn open_device(
     }
     let mut first = None;
     for (order, allow_cpu) in device_search(api, std::env::consts::OS, wgpu_backend) {
-        match open_device_with(window, offscreen, &order, layers, allow_cpu).await {
+        match open_device_with(
+            window,
+            offscreen,
+            &order,
+            layers,
+            allow_cpu,
+            want_ray_tracing,
+        )
+        .await
+        {
             Ok(opened) => {
                 if let Some(first) = &first {
                     log::warn!(
@@ -1826,6 +1862,7 @@ async fn open_device_with(
     order: &[wgpu::Backends],
     layers: u32,
     allow_cpu: bool,
+    want_ray_tracing: bool,
 ) -> Result<Opened> {
     let mut failures = Vec::new();
     for (attempt, backends) in order.iter().copied().enumerate() {
@@ -1833,7 +1870,16 @@ async fn open_device_with(
         if attempt > 0 {
             log::warn!("Horizon renderer: trying {name} ({})", failures.join("; "));
         }
-        match open_with_retry(backends, window, offscreen, layers, allow_cpu).await {
+        match open_with_retry(
+            backends,
+            window,
+            offscreen,
+            layers,
+            allow_cpu,
+            want_ray_tracing,
+        )
+        .await
+        {
             Ok(opened) => return Ok(opened),
             Err(e) => failures.push(e),
         }
@@ -1858,15 +1904,36 @@ async fn open_with_retry(
     offscreen: bool,
     layers: u32,
     allow_cpu: bool,
+    want_ray_tracing: bool,
 ) -> std::result::Result<Opened, String> {
-    match open_backend(backends, window, offscreen, false, layers, allow_cpu).await {
+    match open_backend(
+        backends,
+        window,
+        offscreen,
+        false,
+        layers,
+        allow_cpu,
+        want_ray_tracing,
+    )
+    .await
+    {
         Err(NoDevice::NoAdapter(hidden)) => {
             log::warn!(
                 "Horizon renderer: {} has no conformant adapter ({hidden}); asking again for the \
                  ones wgpu hides as non-conformant",
                 backends_name(backends)
             );
-            match open_backend(backends, window, offscreen, true, layers, allow_cpu).await {
+            match open_backend(
+                backends,
+                window,
+                offscreen,
+                true,
+                layers,
+                allow_cpu,
+                want_ray_tracing,
+            )
+            .await
+            {
                 Ok(opened) => {
                     log::warn!(
                         "Horizon renderer: using {} although its driver reports no Vulkan \
@@ -1892,6 +1959,7 @@ async fn open_backend(
     allow_nonconformant: bool,
     layers: u32,
     allow_cpu: bool,
+    want_ray_tracing: bool,
 ) -> std::result::Result<Opened, NoDevice> {
     let name = backends_name(backends);
     let instance = wgpu::Instance::new(instance_descriptor(
@@ -1968,53 +2036,132 @@ async fn open_backend(
         limits.max_storage_buffer_binding_size,
         limits.max_texture_array_layers,
     ));
-    let desc = wgpu::DeviceDescriptor {
+    let mut desc = wgpu::DeviceDescriptor {
         label: Some("Horizon device"),
         required_features: features,
-        required_limits: limits,
+        required_limits: limits.clone(),
         // Video memory in blocks of 8-64 MiB instead of 128-256 MiB (Vulkan and DirectX 12):
         // with the larger blocks a few small buffers kept whole blocks the arena's pages had
         // left, and over half the video memory reserved was unused (1,344 MiB for 500).
         memory_hints: wgpu::MemoryHints::MemoryUsage,
         ..Default::default()
     };
-    #[cfg(not(target_os = "macos"))]
-    let opened = match info.backend {
-        wgpu::Backend::Vulkan => horizon_hdr::open_vulkan_device(&adapter, &desc),
-        _ => None,
-    };
-    #[cfg(target_os = "macos")]
-    let opened = None;
-    let opened = match opened {
-        Some(opened) => opened,
-        None => adapter.request_device(&desc).await,
-    };
-    match opened {
-        Ok((device, queue)) => {
-            let device_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let lost = device_lost.clone();
-            device.set_device_lost_callback(move |reason, message| {
-                // A device destroyed on purpose was not lost.
-                if reason == wgpu::DeviceLostReason::Destroyed {
-                    return;
-                }
-                log::warn!(
-                    "Horizon renderer: the graphics device was lost ({reason:?}: {message}){}",
-                    memory_note()
+    // Hardware ray tracing (ray queries): asked when the player switched Ray Tracing on
+    // (off by default). Falls back to a plain device when the ray-tracing one fails.
+    let rt_offered = adapter
+        .features()
+        .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    crate::graphics::offer_ray_tracing(rt_offered);
+    if rt_offered {
+        log::info!(
+            "Horizon renderer: {} offers ray queries (the Ray Tracing switch is available)",
+            info.name
+        );
+        crate::graphics::set_ray_tracing_missing(None);
+    } else {
+        // Name what the switch waits for: wgpu offers ray queries only when the driver
+        // lists all four extensions, so the log says which ones this driver lacks. The
+        // settings screen shows the same list under the greyed-out switch.
+        #[cfg(not(target_os = "macos"))]
+        {
+            let missing = horizon_hdr::ray_query_missing_extensions(&adapter).unwrap_or_default();
+            crate::graphics::set_ray_tracing_missing((!missing.is_empty()).then_some(&missing));
+            if missing.is_empty() {
+                log::info!(
+                    "Horizon renderer: {} lists the ray-query extensions, but wgpu offers no \
+                     ray queries; the Ray Tracing switch stays off",
+                    info.name
                 );
-                lost.store(true, std::sync::atomic::Ordering::Relaxed);
-            });
-            Ok(Opened {
-                instance,
-                surface,
-                adapter,
-                device,
-                queue,
-                device_lost,
-            })
+            } else {
+                log::info!(
+                    "Horizon renderer: {} offers no ray queries; driver lacks {}. \
+                     The Ray Tracing switch stays off",
+                    info.name,
+                    missing.join(", ")
+                );
+            }
         }
-        Err(e) => Err(NoDevice::Failed(format!("{name} device: {e}"))),
+        #[cfg(target_os = "macos")]
+        {
+            crate::graphics::set_ray_tracing_missing(None);
+            log::info!(
+                "Horizon renderer: Metal offers no ray queries; the Ray Tracing switch stays off"
+            );
+        }
     }
+    let mut rt_active = want_ray_tracing && rt_offered;
+    if rt_active {
+        desc.required_features |= wgpu::Features::EXPERIMENTAL_RAY_QUERY;
+        desc.required_limits = desc
+            .required_limits
+            .using_minimum_supported_acceleration_structure_values();
+        desc.experimental_features = horizon_hdr::enable_experimental_features();
+        log::info!(
+            "Horizon renderer: requesting ray tracing (ray queries) on {}",
+            info.name
+        );
+    } else if want_ray_tracing {
+        log::info!(
+            "Horizon renderer: Ray Tracing is on, but {} offers no ray queries; plain device",
+            info.name
+        );
+    }
+    let (device, queue) = loop {
+        match open_one(&adapter, info.backend, &desc).await {
+            Ok(opened) => break opened,
+            Err(e) if rt_active => {
+                log::warn!(
+                    "Horizon renderer: the ray-tracing device failed to open ({e}); opening a \
+                     plain one instead"
+                );
+                desc.required_features
+                    .remove(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+                desc.required_limits = limits.clone();
+                desc.experimental_features = wgpu::ExperimentalFeatures::disabled();
+                rt_active = false;
+            }
+            Err(e) => return Err(NoDevice::Failed(format!("{name} device: {e}"))),
+        }
+    };
+    if rt_active {
+        log::info!("Horizon renderer: ray tracing (ray queries) armed");
+    }
+    let device_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let lost = device_lost.clone();
+    device.set_device_lost_callback(move |reason, message| {
+        // A device destroyed on purpose was not lost.
+        if reason == wgpu::DeviceLostReason::Destroyed {
+            return;
+        }
+        log::warn!(
+            "Horizon renderer: the graphics device was lost ({reason:?}: {message}){}",
+            memory_note()
+        );
+        lost.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    Ok(Opened {
+        instance,
+        surface,
+        adapter,
+        device,
+        queue,
+        device_lost,
+    })
+}
+/// Opens one device from `desc`: through HDR metadata's Vulkan path where it applies,
+/// else through wgpu itself.
+async fn open_one(
+    adapter: &wgpu::Adapter,
+    _backend: wgpu::Backend,
+    desc: &wgpu::DeviceDescriptor<'_>,
+) -> std::result::Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
+    #[cfg(not(target_os = "macos"))]
+    if _backend == wgpu::Backend::Vulkan
+        && let Some(opened) = horizon_hdr::open_vulkan_device(adapter, desc)
+    {
+        return opened;
+    }
+    adapter.request_device(desc).await
 }
 /// What to tell a player whose system offers no usable graphics adapter.
 /// Vulkan is loaded at run time (the game links no graphics library), so a
@@ -2061,6 +2208,14 @@ impl Renderer {
             .values()
             .map(|tile| u64::from(tile.mesh.solid + tile.mesh.translucent))
             .sum()
+    }
+    /// Whether this renderer's device was armed for hardware ray tracing (ray queries):
+    /// the adapter offered `EXPERIMENTAL_RAY_QUERY` and Ray Tracing was switched on when
+    /// the device opened. No pass casts rays yet; the flag arms the device for them.
+    pub fn ray_tracing(&self) -> bool {
+        self.device
+            .features()
+            .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
     }
     /// Tiles and quads of the far terrain tiles with GPU buffers, by level.
     pub fn lod_levels(&self) -> Vec<[u64; 2]> {
@@ -2155,6 +2310,7 @@ impl Renderer {
         prepared: Option<PreparedTextures>,
         previous: Option<&Self>,
         api: GraphicsApi,
+        ray_tracing: bool,
         translucent_batching: bool,
         shader_pack: bool,
     ) -> Result<Self> {
@@ -2195,7 +2351,7 @@ impl Renderer {
             }
             None => {
                 let _step = crate::spans::startup::step("renderer.open_device");
-                open_device(&window, offscreen, api, layers).await?
+                open_device(&window, offscreen, api, layers, ray_tracing).await?
             }
         };
         // Computed once: the sprite arrays, the shaders' constants and the
@@ -4285,6 +4441,7 @@ impl Renderer {
             outline,
             depth,
             sections: resident::Resident::default(),
+            rt: rt::RtWorld::default(),
             lods: HashMap::new(),
             lod_cutout: Default::default(),
             lod_retiring: Default::default(),
@@ -4812,6 +4969,13 @@ impl Renderer {
         );
         if let Some(section) = section {
             self.sections.insert_with_bounds(key, section, mesh.bounds);
+            // Ray tracing's triangle soup, on a ray-query device with a ray-tracing
+            // pack: solid quads baked into world space for one BLAS per section.
+            if self.rt_enabled() && !mesh.solid.is_empty() {
+                let origin = rt::section_origin(key);
+                self.rt
+                    .note_upload(key, rt::expand_section_positions(&mesh.solid, origin));
+            }
         }
     }
     fn upload_mesh(&mut self, mesh: &SectionMesh) -> Option<SectionGpu> {
@@ -5015,6 +5179,7 @@ impl Renderer {
     }
     fn release_section(&mut self, key: SectionKey) {
         if let Some(s) = self.sections.remove(key) {
+            self.rt.forget(key);
             self.release_mesh(s);
         }
     }
@@ -5272,6 +5437,7 @@ impl Renderer {
         self.newest_lod_fade = None;
         self.block_entity_revision = next_block_entity_revision();
         self.sections.clear();
+        self.rt.clear();
         self.lods.clear();
         self.lod_cutout.clear();
         self.lod_retiring.clear();
@@ -5456,6 +5622,7 @@ impl Renderer {
                     // Far terrain draws the column: it fades out over it.
                     self.leave_section(key);
                 } else if let Some(section) = self.sections.remove(key) {
+                    self.rt.forget(key);
                     released.push(section);
                 }
             }
@@ -5487,6 +5654,9 @@ impl Renderer {
         self.light_revision += (before - self.light_blocks.len()) as u64;
         self.section_uploaded.retain(|key, _| kept(key));
         let released = self.sections.remove_columns(&gone);
+        for &(x, z) in columns {
+            self.rt.forget_column(x, z);
+        }
         self.release_meshes(released);
     }
     /// Gives the removed sections' quads back to their arenas; the sections themselves
@@ -5893,6 +6063,22 @@ impl Renderer {
             self.native = None;
             return Ok(Vec::new());
         };
+        // Hardware ray tracing needs a ray-query device: refuse the pack with its name
+        // rather than failing its pipelines' TLAS binding.
+        if report.manifest.ray_tracing.is_some() && !self.ray_tracing() {
+            return Err(format!(
+                "{} needs a ray-tracing GPU (Advanced graphics' Ray Tracing): \
+                 this device offers no ray queries",
+                report.manifest.name
+            ));
+        }
+        // The TLAS the pack's bind groups share: created empty here, filled as sections
+        // build BLASes. The object is stable, so the groups stay valid across rebuilds.
+        let tlas = report
+            .manifest
+            .ray_tracing
+            .as_ref()
+            .map(|_| self.rt.ensure_tlas(&self.device).clone());
         let terrain = native_material::TerrainShape {
             globals: &self.terrain_layout,
             flat: self.flat.as_ref().map(|f| &f.draw_layout),
@@ -5911,6 +6097,7 @@ impl Renderer {
             report,
             &constants,
             lights,
+            tlas.as_ref(),
         )?;
         self.native = pack.draws().then_some(pack);
         if self.native.is_some() {
@@ -6233,6 +6420,9 @@ impl Renderer {
         if self.device_lost() {
             return Err("the graphics device was lost".into());
         }
+        // Ray tracing's BLAS/TLAS follow the meshed sections (nothing unless
+        // the device was armed for ray queries at the start).
+        self.rt_sync(frame.camera);
         let scaled = self.screenshot_size();
         let rendered = match scaled {
             Some(size) => self.draw_scaled_frame(frame, size),
@@ -6265,6 +6455,20 @@ impl Renderer {
         }
         // A scaled screenshot's frame never reached the window.
         rendered.map(|drawn| drawn && scaled.is_none())
+    }
+    /// Builds pending ray-tracing BLASes and rebuilds the TLAS (Advanced
+    /// graphics' Ray Tracing, while a ray-tracing pack runs).
+    fn rt_sync(&mut self, camera: DVec3) {
+        if self.rt_enabled() {
+            self.rt.sync(&self.device, &self.queue, camera);
+        }
+    }
+
+    /// Whether the world builds ray-tracing structures this frame: an armed
+    /// device plus a running ray-tracing pack. Without a pack reading it the
+    /// world builds no structures at all.
+    fn rt_enabled(&self) -> bool {
+        self.ray_tracing() && self.native.as_ref().is_some_and(|n| n.ray_tracing)
     }
     /// Whether the device's loss callback has fired. A surface reconfigure
     /// alone cannot restore resources belonging to a lost device.

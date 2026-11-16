@@ -14223,6 +14223,7 @@ impl Game<'_> {
             None,
             None,
             self.settings.horizon.api,
+            self.settings.horizon.ray_tracing,
             self.settings.horizon.translucent_batching,
             shader_packs::picked_pack_draws_flat(&self.settings),
         )?;
@@ -14257,6 +14258,7 @@ impl Game<'_> {
             self.renderer.as_ref(),
             None,
             self.settings.horizon.api,
+            self.settings.horizon.ray_tracing,
             self.settings.horizon.translucent_batching,
             shader_packs::picked_pack_draws_flat(&self.settings),
         )
@@ -20712,6 +20714,7 @@ fn build_renderer(
     previous: Option<&Renderer>,
     prepared: Option<horizon_client::gfx::PreparedTextures>,
     api: horizon_client::graphics::GraphicsApi,
+    ray_tracing: bool,
     translucent_batching: bool,
     shader_pack: bool,
 ) -> Result<Renderer> {
@@ -20763,6 +20766,7 @@ fn build_renderer(
         prepared,
         previous,
         api,
+        ray_tracing,
         translucent_batching,
         shader_pack,
     ))?;
@@ -20795,6 +20799,7 @@ fn loading_renderer(
     panorama: Option<&Arc<horizon_client::gfx::panorama::Faces>>,
     previous: Option<&Renderer>,
     api: horizon_client::graphics::GraphicsApi,
+    ray_tracing: bool,
 ) -> Result<Renderer> {
     static FORCEFIELD: [u8; 4] = [0; 4];
     static EMPTY_HUD: [u8; 4] = [0, 0, 0, 255];
@@ -20837,6 +20842,7 @@ fn loading_renderer(
         None,
         previous,
         api,
+        ray_tracing,
         // It draws no terrain.
         false,
         false,
@@ -21309,6 +21315,7 @@ impl Loading {
             None,
             None,
             self.settings.horizon.api,
+            self.settings.horizon.ray_tracing,
         ) {
             Ok(r) => self.renderer = Some(r),
             Err(e) => {
@@ -21440,6 +21447,7 @@ impl Loading {
             Some(&bundle.panorama),
             self.renderer.as_ref(),
             self.settings.horizon.api,
+            self.settings.horizon.ray_tracing,
         ) {
             Ok(r) => {
                 horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
@@ -21723,6 +21731,7 @@ impl Loading {
                 self.renderer.as_ref(),
                 loaded.renderer_cpu,
                 self.settings.horizon.api,
+                self.settings.horizon.ray_tracing,
                 self.settings.horizon.translucent_batching,
                 shader_packs::picked_pack_draws_flat(&self.settings),
             )

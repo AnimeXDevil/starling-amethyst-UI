@@ -103,6 +103,7 @@ pub enum H {
     ShadowCache,
     GraphicsApi,
     TranslucentBatching,
+    RayTracing,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -467,6 +468,11 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                             Saves,
                             "Water and glass in one buffer: fewer draw calls, a bit more VRAM. Next start.",
                         ),
+                        h(
+                            H::RayTracing,
+                            None,
+                            "Hardware ray tracing (ray queries) where the GPU offers it. Next start.",
+                        ),
                     ],
                 ),
                 (
@@ -795,6 +801,10 @@ impl H {
                 "Translucent Batching",
                 on_off(g.translucent_batching && crate::graphics::translucent_batching_offered()),
             ),
+            H::RayTracing => labelled(
+                "Ray Tracing",
+                on_off(g.ray_tracing && crate::graphics::ray_tracing_offered()),
+            ),
             H::Overlay => labelled(
                 "Performance Overlay",
                 match g.overlay {
@@ -905,6 +915,7 @@ impl H {
             H::ShadowCache => g.shadow_cache = !g.shadow_cache,
             H::GraphicsApi => g.api = step(GraphicsApi::choices(), g.api, back),
             H::TranslucentBatching => g.translucent_batching = !g.translucent_batching,
+            H::RayTracing => g.ray_tracing = !g.ray_tracing,
             H::Pacing => {
                 g.pacing = match g.pacing {
                     Pacing::Efficient => Pacing::Precise,
@@ -964,6 +975,9 @@ impl Item {
             {
                 Some("Your GPU or graphics API doesn't support it.")
             }
+            Item::Horizon(H::RayTracing) if !crate::graphics::ray_tracing_offered() => {
+                Some("Your GPU or graphics API doesn't support it.")
+            }
             _ => None,
         }
     }
@@ -995,6 +1009,7 @@ impl Item {
             Item::Horizon(H::BatteryMode) => g.battery,
             Item::Horizon(H::ShadowCache) => g.shadow_cache,
             Item::Horizon(H::TranslucentBatching) => g.translucent_batching,
+            Item::Horizon(H::RayTracing) => g.ray_tracing,
             Item::Vanilla(Opt::ViewBobbing) => s.view_bobbing,
             Item::Vanilla(Opt::Vsync) => s.vsync,
             Item::Vanilla(Opt::Fullscreen) => s.fullscreen,
@@ -1061,6 +1076,7 @@ impl Item {
                     | H::ShadowCache
                     | H::GraphicsApi
                     | H::TranslucentBatching
+                    | H::RayTracing
             ) | Item::Vanilla(
                 Opt::GuiScale
                     | Opt::Fullscreen
@@ -1857,7 +1873,18 @@ impl GraphicsUi {
                 style::fill(batch, atlas, square, style::cost_color(setting.cost));
                 batch.text_styled(atlas, &line, left + 8.0, y + 8.0, style::WHITE, true);
                 match setting.item.blocked(s) {
-                    Some(why) => (lang::get(why), style::MUTED),
+                    Some(why) => {
+                        // The Ray Tracing switch names the missing device extensions, so a
+                        // greyed-out switch is diagnosable on the screen: extension names are
+                        // driver vocabulary, never translated, so they skip the language table.
+                        let mut text = lang::get(why);
+                        if matches!(setting.item, Item::Horizon(H::RayTracing))
+                            && let Some(missing) = crate::graphics::ray_tracing_missing()
+                        {
+                            text += &format!(" Missing: {missing}.");
+                        }
+                        (text, style::MUTED)
+                    }
                     None => (
                         lang::get(description(setting.item, s, setting.text)),
                         style::GREY,

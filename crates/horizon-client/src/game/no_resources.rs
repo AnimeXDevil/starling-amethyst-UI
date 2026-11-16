@@ -14,6 +14,7 @@ struct Missing {
     /// The pointer in physical pixels.
     pointer: (f64, f64),
     api: horizon_client::graphics::GraphicsApi,
+    ray_tracing: bool,
     error: Option<Box<dyn std::error::Error>>,
 }
 
@@ -29,6 +30,7 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
         screen: NoResources::new(looked_in),
         pointer: (0.0, 0.0),
         api: settings.horizon.api,
+        ray_tracing: settings.horizon.ray_tracing,
         error: None,
     };
     horizon_client::hud::GUI_SCALE.store(settings.gui_scale, Ordering::Relaxed);
@@ -109,6 +111,7 @@ impl ApplicationHandler for Missing {
                     Some(&self.gui.panorama),
                     None,
                     self.api,
+                    self.ray_tracing,
                 )?;
                 Ok((window, renderer))
             });

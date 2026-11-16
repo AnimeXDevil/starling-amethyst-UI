@@ -481,6 +481,35 @@ pub fn translucent_batching_offered() -> bool {
     TRANSLUCENT_BATCHING_OFFERED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+static RAY_TRACING_OFFERED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// Whether the adapter offers hardware ray tracing (`Features::EXPERIMENTAL_RAY_QUERY`):
+/// set when the renderer opens its device. The Ray Tracing switch is greyed out where it
+/// is false, whatever `horizon-graphics.txt` says.
+pub fn offer_ray_tracing(on: bool) {
+    RAY_TRACING_OFFERED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn ray_tracing_offered() -> bool {
+    RAY_TRACING_OFFERED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static RAY_TRACING_MISSING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Why the adapter offers no ray queries, for the settings screen: the missing device
+/// extensions `open_backend` enumerated, if it could (`None`: not enumerated, e.g. the
+/// graphics API is not Vulkan). Overwritten on every device open.
+pub fn set_ray_tracing_missing(missing: Option<&[&str]>) {
+    *RAY_TRACING_MISSING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = missing.map(|m| m.join(", "));
+}
+/// [`set_ray_tracing_missing`]'s message, if one was recorded.
+pub fn ray_tracing_missing() -> Option<String> {
+    RAY_TRACING_MISSING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// The farthest LOD Distance, in chunks, on integrated GPUs other than
 /// Apple's: they share the CPU's memory bandwidth, and past it far terrain
 /// costs them more frame time than it is worth.
@@ -642,6 +671,10 @@ pub struct Graphics {
     /// `batchTranslucent`: `translucentBatching`, which every save wrote as false while it was
     /// off by default and had no switch, stays ignored.
     pub translucent_batching: bool,
+    /// Hardware ray tracing (ray queries): asked of a device whose adapter offers it,
+    /// when this is on (off by default). Falls back to a plain device when the
+    /// ray-tracing one fails to open.
+    pub ray_tracing: bool,
     /// The shader pack picked in `shaderpacks/` (`shader_pack_list`); empty: none. Its key is
     /// not `shaderPack`, which versions before the clean-room rewrite saved and which stays
     /// ignored.
@@ -739,6 +772,7 @@ impl Default for Graphics {
             shadow_cache: false,
             api: GraphicsApi::Auto,
             translucent_batching: true,
+            ray_tracing: false,
             shader_pack: String::new(),
             shader_profile: String::new(),
         }
@@ -778,6 +812,9 @@ impl Graphics {
         }
         if fs::remove_file(dir.join(RENDERER_MARKER)).is_ok()
             && cfg!(target_os = "android")
+            // A custom GPU driver keeps Vulkan: its own start counter (gpu_drivers::note_start)
+            // sets it aside after repeated crashes, instead of swinging the API to OpenGL ES.
+            && crate::gpu_drivers::active().is_none()
             && after_driver_crash(g.api) != g.api
         {
             g.api = after_driver_crash(g.api);
@@ -890,6 +927,7 @@ impl Graphics {
                 "batteryMode" => g.battery = flag(g.battery),
                 "shadowCache" => g.shadow_cache = flag(g.shadow_cache),
                 "batchTranslucent" => g.translucent_batching = flag(g.translucent_batching),
+                "rayTracing" => g.ray_tracing = flag(g.ray_tracing),
                 "graphicsApi" => g.api = GraphicsApi::from_name(value).unwrap_or_default(),
                 "pickedShaderPack" => g.shader_pack = value.to_owned(),
                 // Starling's pick before it took this page's key (`off`: none).
@@ -912,7 +950,7 @@ impl Graphics {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nshadersProfile:{}\nbatchTranslucent:{}\n",
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nshadersProfile:{}\nbatchTranslucent:{}\nrayTracing:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
@@ -964,6 +1002,7 @@ impl Graphics {
             self.shader_pack,
             self.shader_profile,
             bool_text(self.translucent_batching),
+            bool_text(self.ray_tracing),
         );
         text += &self.blue_map.serialize();
         text
@@ -1217,6 +1256,7 @@ mod tests {
             shadow_cache: true,
             api: GraphicsApi::Dx12,
             translucent_batching: false,
+            ray_tracing: true,
             shader_pack: "Golden Hour".into(),
             shader_profile: "LOW".into(),
         };

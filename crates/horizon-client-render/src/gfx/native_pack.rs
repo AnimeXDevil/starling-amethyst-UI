@@ -25,6 +25,8 @@ pub struct NativePack {
     pub particle_lights: Vec<horizon_shader_api::manifest::ParticleLight>,
     /// `[[lights]]`, for the colour of held and dropped items' light.
     pub light_colors: Vec<horizon_shader_api::manifest::LightColor>,
+    /// Whether a ray-tracing pack runs: set from its manifest at activation.
+    pub ray_tracing: bool,
     /// GPU time of each pass, while the renderer asks for it (`pack_timing.rs`).
     pub timing: Option<PassTiming>,
 }
@@ -41,6 +43,7 @@ impl NativePack {
         report: Report,
         constants: &[(String, f64)],
         lights: super::block_light::LightTable,
+        tlas: Option<&wgpu::Tlas>,
     ) -> Result<(Self, Vec<String>), String> {
         let (globals, format) = (terrain.globals, terrain.format);
         let textures = super::native_post::pack_textures(device, queue, &report);
@@ -48,7 +51,14 @@ impl NativePack {
             .shadow
             .as_ref()
             .map(|settings| super::native_shadow::fitted(device, settings));
-        let mut frame = NativeFrame::new(device, settings.as_ref(), textures, lights, terrain.pbr);
+        let mut frame = NativeFrame::new(
+            device,
+            settings.as_ref(),
+            textures,
+            lights,
+            terrain.pbr,
+            tlas,
+        );
         let shadow = report
             .shadow
             .as_ref()
@@ -123,7 +133,17 @@ impl NativePack {
             })
             .transpose()?;
         let post = (!post.is_empty())
-            .then(|| NativePost::new(device, post, &report.manifest, constants, format, &frame))
+            .then(|| {
+                NativePost::new(
+                    device,
+                    post,
+                    &report.manifest,
+                    constants,
+                    format,
+                    &frame,
+                    tlas,
+                )
+            })
             .transpose()?;
         let mut labels: Vec<String> = sky.iter().map(|s| s.label.clone()).collect();
         labels.extend(
@@ -136,9 +156,11 @@ impl NativePack {
         if let Some(post) = &post {
             labels.extend(post.labels().into_iter().map(str::to_owned));
         }
+        let ray_tracing = report.manifest.ray_tracing.is_some();
         let pack = Self {
             particle_lights: report.manifest.particle_lights.clone(),
             light_colors: report.manifest.lights.clone(),
+            ray_tracing,
             frame,
             sky,
             material,

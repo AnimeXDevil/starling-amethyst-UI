@@ -72,6 +72,9 @@ pub struct Manifest {
     pub reflection: Option<Reflection>,
     /// The shadow map the material and post stages read, if the pack asks for one.
     pub shadow: Option<Shadow>,
+    /// Hardware ray tracing: the pack traces rays against the world's BLAS/TLAS
+    /// (`rt_trace`, `rt_occluded`). Needs a ray-query device; refused elsewhere.
+    pub ray_tracing: Option<RayTracing>,
 }
 
 /// `[shadow]`: the renderer draws the solid terrain and entities as the sun (the moon by night)
@@ -114,6 +117,18 @@ pub struct Reflection {
     #[serde(default)]
     pub option: Option<String>,
 }
+
+/// `[ray_tracing]`: the pack uses hardware ray queries (`rt_trace`, `rt_occluded`
+/// in the material and post stages) against the world's BLAS/TLAS. Without a
+/// ray-query device the pack is refused with its name in the log.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RayTracing {}
+
+/// `[ray_tracing]`, unchecked.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRayTracing {}
 
 /// `[[textures]]`: a PNG of the pack every stage reads, as `<id>` and `<id>_sampler`.
 #[derive(Clone, Debug, PartialEq)]
@@ -373,6 +388,7 @@ struct Raw {
     budget: RawBudget,
     reflection: Option<Reflection>,
     shadow: Option<Shadow>,
+    ray_tracing: Option<RawRayTracing>,
 }
 
 #[derive(Deserialize)]
@@ -745,6 +761,9 @@ impl Manifest {
                 return Err(err(format!("reflection.option: `{id}` is no option")));
             }
         }
+        if raw.ray_tracing.is_some() && raw.material.is_none() && raw.post.is_empty() {
+            return Err(err("[ray_tracing] needs [material] or [[post]]".into()));
+        }
         if let Some(s) = &raw.shadow {
             if raw.material.is_none() && raw.post.is_empty() {
                 return Err(err("[shadow] needs [material] or [[post]]".into()));
@@ -786,6 +805,7 @@ impl Manifest {
             budget: Budget { gpu_ms },
             reflection: raw.reflection,
             shadow: raw.shadow,
+            ray_tracing: raw.ray_tracing.map(|_| RayTracing {}),
         })
     }
 

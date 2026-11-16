@@ -97,6 +97,17 @@ pub fn markdown() -> String {
             out += "- `fn shadow_position(position: vec3<f32>) -> vec3<f32>`: where the camera-relative point `position` is\n  \
                     stored in the shadow map, for `textureSampleCompareLevel`.\n\
                     - `fn shadow_distort(xy: vec2<f32>) -> vec2<f32>`: the map's distortion of a point at shadow clip `xy`.\n\n";
+            if matches!(kind, StageKind::Material | StageKind::Post) {
+                out += "With `[ray_tracing]` (needs a ray-query device): binding 14 declares\n\
+                        `var rt_tlas: acceleration_structure`, the world's BLAS/TLAS, with:\n\
+                        - `struct RtHit`: `hit` (false on a miss), `t`, `instance` (the TLAS instance),\n  \
+                        `primitive`, `bary`.\n\
+                        - `fn rt_trace(origin: vec3<f32>, dir: vec3<f32>, t_min: f32, t_max: f32) -> RtHit`:\n  \
+                        the nearest solid surface hit in world blocks, or `hit` false on a miss.\n\
+                        - `fn rt_occluded(origin: vec3<f32>, dir: vec3<f32>, t_min: f32, t_max: f32) -> f32`:\n  \
+                        1 where the ray hits before `t_max`, else 0. Translucent terrain is not in the\n  \
+                        structures, so rays pass through water and glass.\n\n";
+            }
         }
         if kind == StageKind::Post {
             out += "A `[[post]]` entry with `output = \"<name>\"` writes a target of the pack's own, at its `scale` of the\n\
