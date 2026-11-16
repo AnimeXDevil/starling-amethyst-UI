@@ -1,13 +1,19 @@
-//! A wasm mod to check that a phone runs wasm mods: the server thread's ticks and the game
-//! thread's, counted by hooks each thread calls, said in the chat every ten seconds.
-use mod_api::{ClientHost, ClientTickPostEvent, Hooks, ServerHost, ServerTickEvent, Text};
+//! A wasm mod to check that a phone runs wasm mods on both of the game's threads: the server
+//! thread says in the chat every ten seconds how many ticks it ran, and the game's thread marks
+//! that line when it reaches the chat.
+use mod_api::{
+    ClientChatReceivedEvent, ClientHost, Flow, Hooks, ServerHost, ServerTickEvent, Text,
+    text::TextContent,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Default)]
 pub struct Mod;
 
+const SAID: &str = "wasm probe: ";
+
 static SERVER_TICKS: AtomicU64 = AtomicU64::new(0);
-static CLIENT_TICKS: AtomicU64 = AtomicU64::new(0);
+static SEEN: AtomicU64 = AtomicU64::new(0);
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
@@ -17,14 +23,24 @@ impl Hooks for Mod {
         }
         let ticks = SERVER_TICKS.fetch_add(1, Ordering::Relaxed) + 1;
         if ticks % 200 == 0 {
-            let client = CLIENT_TICKS.load(Ordering::Relaxed);
-            host.messages().broadcast(Text::literal(format!(
-                "wasm probe: {ticks} server ticks, {client} game ticks"
-            )));
+            host.messages()
+                .broadcast(Text::literal(format!("{SAID}{ticks} server ticks")));
         }
     }
 
-    fn client_tick_post(&self, _: &mut dyn ClientHost, _: &mut ClientTickPostEvent) {
-        CLIENT_TICKS.fetch_add(1, Ordering::Relaxed);
+    /// In a world only: a chat line comes from its server, so the world's resources are in.
+    fn client_chat_received(
+        &self,
+        _: &mut dyn ClientHost,
+        event: &mut ClientChatReceivedEvent<'_>,
+    ) -> Flow {
+        let TextContent::Literal(text) = &event.message.content else {
+            return Flow::Continue;
+        };
+        if event.system && text.starts_with(SAID) {
+            let seen = SEEN.fetch_add(1, Ordering::Relaxed) + 1;
+            *event.message = Text::literal(format!("{text}, seen by the game thread ({seen})"));
+        }
+        Flow::Continue
     }
 }
