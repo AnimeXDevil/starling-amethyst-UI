@@ -118,6 +118,23 @@ def ndk_tool(ndk, name):
     return tool(ndk / "toolchains" / "llvm" / "prebuilt" / host / "bin", name)
 
 
+def emutls_runtime(ndk, abi):
+    """The NDK's compiler runtime for `abi`, whose `emutls.c` is LLVM's emulated TLS (`__emutls_get_address`),
+    which the thread locals of `TLS_FLAGS` call. Rust links with -nodefaultlibs and its own compiler_builtins, which
+    has none, so without this archive the library left the symbol to the phone's dynamic linker, which has none
+    either: "dlopen failed: cannot locate symbol "__emutls_get_address"" before the game's first line."""
+    arch = TARGETS[abi][2].split("-")[0]
+    host = {"win32": "windows-x86_64", "darwin": "darwin-x86_64"}.get(sys.platform, "linux-x86_64")
+    clang = ndk / "toolchains" / "llvm" / "prebuilt" / host / "lib" / "clang"
+    found = sorted(clang.glob(f"*/lib/linux/libclang_rt.builtins-{arch}-android.a"))
+    if not found:
+        sys.exit(f"build_apk: no libclang_rt.builtins-{arch}-android.a under {clang}")
+    path = found[-1].as_posix()
+    if " " in path:
+        sys.exit(f"build_apk: {path} has a space, which RUSTFLAGS would split: move the NDK")
+    return path
+
+
 def build_library(profile, ndk, sdk, abi=ABI):
     env = dict(os.environ, ANDROID_NDK_HOME=str(ndk), ANDROID_HOME=str(sdk))
     # Preserve source identity in local diagnostic reports, including source builds.
@@ -128,8 +145,9 @@ def build_library(profile, ndk, sdk, abi=ABI):
             ["git", "status", "--porcelain"], cwd=ROOT, text=True))).lower()
     except (OSError, subprocess.CalledProcessError):
         pass  # An exported source archive may not have Git metadata.
+    tls = f"{TLS_FLAGS} -C link-arg={emutls_runtime(ndk, abi)}"
     env["RUSTFLAGS"] = " ".join(
-        flags for flags in (env.get("RUSTFLAGS", ""), PAGE_FLAGS, BUILD_ID_FLAGS, TLS_FLAGS) if flags
+        flags for flags in (env.get("RUSTFLAGS", ""), PAGE_FLAGS, BUILD_ID_FLAGS, tls) if flags
     )
     env["RUSTC_BOOTSTRAP"] = "1"
     # The std's source (`TLS_FLAGS`): CI installs it with the toolchain (`--component rust-src`), and the mod
@@ -387,6 +405,10 @@ def main():
     built = ROOT / "target" / triple / profile_dir / f"lib{LIBRARY}.so"
     if not built.is_file():
         sys.exit(f"build_apk: {built} not built")
+    # The check the phone's dynamic linker makes when it opens the library (`emutls_runtime`), made here first.
+    undefined = subprocess.check_output([str(ndk_tool(ndk, "llvm-nm")), "-D", "--undefined-only", str(built)], text=True)
+    if "__emutls_get_address" in undefined.split():
+        sys.exit(f"build_apk: {built} leaves __emutls_get_address undefined, and no phone defines it")
 
     out = ROOT / "target" / "android"
     out.mkdir(parents=True, exist_ok=True)
