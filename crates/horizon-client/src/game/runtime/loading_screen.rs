@@ -777,10 +777,20 @@ impl Loading {
         // hold that lock past wgpu's timeout while the boot renderer is drawing on Android.
         #[cfg(target_os = "android")]
         if boot.info().backend == wgpu::Backend::Gl {
-            let (renderer, pixels) =
-                startup::time("renderer.world", || parts.build(None, Some(lent)))?;
+            let built = startup::time("renderer.world", || parts.build(None, Some(lent)))
+                .map(|(renderer, pixels)| (renderer, pixels.into_owned()));
+            // As a build on the thread that fails (`poll_world_renderer`): these resources are
+            // done with. Android keeps the loop running after a failure, and would build from
+            // them again every frame.
+            let (renderer, pixels) = match built {
+                Ok(built) => built,
+                Err(e) => {
+                    self.loaded = None;
+                    return Err(e);
+                }
+            };
             if atlas.is_some() {
-                gui.atlas.pixels = pixels.into_owned();
+                gui.atlas.pixels = pixels;
             }
             self.world_renderer = Some(WorldRenderer::Built(Box::new(renderer)));
             return Ok(());
