@@ -2,15 +2,23 @@ use super::{HudAtlas, PackedImage, Result, SMALLEST_SHRUNK_SIDE, TextureFlags, h
 use std::collections::HashMap;
 
 impl HudAtlas {
-    /// Fit static sprites to a small adapter without shrinking pixel icons, glyphs or dynamic
-    /// map/skin/GUI slots. Terrain uses separate texture arrays and is unchanged.
+    /// Fit static sprites to a small adapter. Menu button backgrounds give up one level of
+    /// detail before world sprites. Glyphs and dynamic map/skin/GUI slots keep their size.
     pub(super) fn fit_mobile_atlas(
         images: &mut [PackedImage],
         gui_sizes: &mut HashMap<String, (u32, u32)>,
         flags: &HashMap<String, TextureFlags>,
         limit: u32,
     ) -> Result<()> {
-        let shrink_rank = |(name, w, h, rgba): &PackedImage| {
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        enum Priority {
+            ButtonBackground,
+            World,
+            Interface,
+        }
+
+        let shrink_rank = |(name, w, h, rgba): &PackedImage,
+                           original_sizes: &HashMap<String, (u32, u32)>| {
             let path = name.split_once(':').map_or(name.as_str(), |(_, path)| path);
             let side = (*w).max(*h);
             // The two standard skin layouts use at most 64×64 texels. The slots for
@@ -23,8 +31,25 @@ impl HudAtlas {
             {
                 return None;
             }
-            let interface = path.starts_with("gui/") || path.starts_with("ui/");
-            Some((interface, std::cmp::Reverse(side)))
+            let button_background = matches!(
+                path,
+                "gui/sprites/widget/button"
+                    | "gui/sprites/widget/button_disabled"
+                    | "gui/sprites/widget/button_highlighted"
+                    | "gui/sprites/widget/realms_button"
+                    | "gui/sprites/widget/realms_button_disabled"
+                    | "gui/sprites/widget/realms_button_highlighted"
+                    | "gui/bedrock/controls/large_button"
+                    | "gui/bedrock/controls/large_button_pressed"
+            );
+            let priority = if button_background && !original_sizes.contains_key(name) {
+                Priority::ButtonBackground
+            } else if path.starts_with("gui/") || path.starts_with("ui/") {
+                Priority::Interface
+            } else {
+                Priority::World
+            };
+            Some((priority, std::cmp::Reverse(side)))
         };
         let pack = |dimensions: &[PackedImage]| {
             let mut sorted = dimensions.to_vec();
@@ -56,15 +81,19 @@ impl HudAtlas {
         loop {
             // Repack after reducing one size group. Small sprites can keep all their
             // texels when making room in a few large sprites is enough.
-            let Some(rank @ (interface, std::cmp::Reverse(side))) =
-                images.iter().filter_map(shrink_rank).min()
+            let Some(rank @ (priority, std::cmp::Reverse(side))) = images
+                .iter()
+                .filter_map(|image| shrink_rank(image, gui_sizes))
+                .min()
             else {
                 return Err(error);
             };
             let mut group: Vec<_> = images
                 .iter()
                 .enumerate()
-                .filter_map(|(index, image)| (shrink_rank(image) == Some(rank)).then_some(index))
+                .filter_map(|(index, image)| {
+                    (shrink_rank(image, gui_sizes) == Some(rank)).then_some(index)
+                })
                 .collect();
             group.sort_by_key(|&index| {
                 let (_, w, h, _) = &images[index];
@@ -101,9 +130,13 @@ impl HudAtlas {
                     .or_insert((image.1, image.2));
                 *image = halved(image);
             }
+            let category = match priority {
+                Priority::ButtonBackground => "button background",
+                Priority::World => "non-UI",
+                Priority::Interface => "interface",
+            };
             log::info!(
-                "Reduced {count} {} atlas sprites with a {side}px side to fit the adapter's {limit}px texture limit",
-                if interface { "interface" } else { "non-UI" }
+                "Reduced {count} {category} atlas sprites with a {side}px side to fit the adapter's {limit}px texture limit"
             );
             let Some(next_error) = remaining else {
                 return Ok(());
@@ -116,6 +149,28 @@ impl HudAtlas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_atlas_reduces_button_backgrounds_before_world_sprites() {
+        let mut images = [
+            (
+                "minecraft:gui/sprites/widget/button".into(),
+                400,
+                20,
+                vec![255; 400 * 20 * 4],
+            ),
+            ("entity/mob".into(), 400, 240, vec![255; 400 * 240 * 4]),
+        ];
+        let mut full_sizes = HashMap::new();
+        HudAtlas::fit_mobile_atlas(&mut images, &mut full_sizes, &HashMap::new(), 768).unwrap();
+
+        assert_eq!((images[0].1, images[0].2), (200, 10));
+        assert_eq!((images[1].1, images[1].2), (400, 240));
+        assert_eq!(
+            full_sizes,
+            HashMap::from([(images[0].0.clone(), (400, 20))])
+        );
+    }
 
     #[test]
     fn small_atlas_reduces_only_the_sprites_needed_from_the_last_size_group() {
