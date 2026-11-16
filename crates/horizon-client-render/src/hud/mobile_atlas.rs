@@ -128,7 +128,7 @@ impl HudAtlas {
                 gui_sizes
                     .entry(image.0.clone())
                     .or_insert((image.1, image.2));
-                *image = halved(image);
+                *image = halved(image, priority == Priority::ButtonBackground);
             }
             let category = match priority {
                 Priority::ButtonBackground => "button background",
@@ -152,12 +152,21 @@ mod tests {
 
     #[test]
     fn small_atlas_reduces_button_backgrounds_before_world_sprites() {
+        let mut button = vec![255; 400 * 20 * 4];
+        for y in 0..20 {
+            for x in 0..400 {
+                if x == 0 || x == 399 || y == 0 || y == 19 {
+                    let start = (y * 400 + x) * 4;
+                    button[start..start + 4].copy_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
         let mut images = [
             (
                 "minecraft:gui/sprites/widget/button".into(),
                 400,
                 20,
-                vec![255; 400 * 20 * 4],
+                button,
             ),
             ("entity/mob".into(), 400, 240, vec![255; 400 * 240 * 4]),
         ];
@@ -170,6 +179,15 @@ mod tests {
             full_sizes,
             HashMap::from([(images[0].0.clone(), (400, 20))])
         );
+        for (index, pixel) in images[0].3.chunks_exact(4).enumerate() {
+            let (x, y) = (index % 200, index / 200);
+            let expected = if x == 0 || x == 199 || y == 0 || y == 9 {
+                [0, 0, 0, 255]
+            } else {
+                [255; 4]
+            };
+            assert_eq!(pixel, expected, "button pixel ({x}, {y})");
+        }
     }
 
     #[test]

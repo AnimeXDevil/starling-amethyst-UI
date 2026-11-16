@@ -160,12 +160,21 @@ fn atlas_limit() -> u32 {
 }
 /// `image` at half its size, by every other texel: no new colors or alpha, so what was cut out
 /// stays cut out.
-fn halved((name, w, h, data): &PackedImage) -> PackedImage {
+fn halved((name, w, h, data): &PackedImage, preserve_outline: bool) -> PackedImage {
     let (half_w, half_h) = (w.div_ceil(2), h.div_ceil(2));
+    // Button backgrounds store their outline on the last row and column as well.
+    let source_coordinate = |index, half, original| {
+        if preserve_outline && index != 0 && index + 1 == half {
+            original - 1
+        } else {
+            2 * index
+        }
+    };
     let mut half = Vec::with_capacity((half_w * half_h * 4) as usize);
     for y in 0..half_h {
+        let row = source_coordinate(y, half_h, *h) * w;
         for x in 0..half_w {
-            let at = ((y * 2 * w + x * 2) * 4) as usize;
+            let at = ((row + source_coordinate(x, half_w, *w)) * 4) as usize;
             half.extend_from_slice(&data[at..at + 4]);
         }
     }
@@ -1621,7 +1630,7 @@ impl HudAtlas {
                     full_sizes
                         .entry(image.0.clone())
                         .or_insert((image.1, image.2));
-                    *image = halved(image);
+                    *image = halved(image, false);
                 }
             }
             images.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
@@ -5055,7 +5064,7 @@ texture=wide",
     #[test]
     fn half_size_keeps_every_other_texel() {
         let data: Vec<u8> = (0..9u8).flat_map(|i| [i, i, i, 255]).collect();
-        let half = halved(&("a".to_owned(), 3, 3, data));
+        let half = halved(&("a".to_owned(), 3, 3, data), false);
         assert_eq!((half.1, half.2), (2, 2));
         let kept: Vec<u8> = half.3.chunks(4).map(|p| p[0]).collect();
         assert_eq!(kept, [0, 2, 6, 8]);
