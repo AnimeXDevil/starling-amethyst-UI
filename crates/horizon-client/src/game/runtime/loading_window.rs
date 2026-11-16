@@ -11,6 +11,7 @@ fn start_marker(previous: Option<&Renderer>) -> Option<std::path::PathBuf> {
     previous.is_none().then(|| {
         let marker = Game::options_path().with_file_name(horizon_client::graphics::RENDERER_MARKER);
         let _ = std::fs::write(&marker, "the renderer was starting\n");
+        horizon_client::graphics::note_start_marker(&marker);
         marker
     })
 }
