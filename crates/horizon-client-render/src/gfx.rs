@@ -404,6 +404,7 @@ pub(crate) mod core_sky;
 pub(crate) mod core_text;
 mod cull;
 mod dx12_compiler;
+mod emissive_lookup;
 mod end_sky;
 pub mod entity_skin;
 mod entity_source;
@@ -1293,8 +1294,7 @@ pub struct Renderer {
     pub config: wgpu::SurfaceConfiguration,
     solid: SolidPipeline,
     /// `solid` split in two passes for the world pass (terrain.wgsl's `opaque_quad`).
-    solid_opaque: SolidPipeline,
-    solid_cutout: SolidPipeline,
+    solid_split: Option<(SolidPipeline, SolidPipeline)>,
     /// Cheaper pipelines for those two passes, on Adreno's Vulkan (`solid_paths`).
     solid_paths: Option<solid_paths::SolidPaths>,
     solid_settled_single: Option<wgpu::RenderPipeline>,
@@ -1635,6 +1635,7 @@ pub struct Renderer {
     /// Which pixels of each block sprite may shine in HDR output (terrain.wgsl's
     /// `emission_thresholds`), measured when HDR output turns on.
     emission_stats: hdr_stats::EmissionStats,
+    emissive_lookup: Option<emissive_lookup::Lookup>,
     /// What this renderer's destination offers and its device draws.
     output_caps: output::OutputCapabilities,
     /// An output that failed to apply, not tried again until something it needs changes.
@@ -1899,38 +1900,43 @@ fn terrain_group(
     lightmap: &wgpu::TextureView,
     lightmap_sampler: &wgpu::Sampler,
     emission_thresholds: &wgpu::TextureView,
+    emissive_overlays: Option<&wgpu::TextureView>,
 ) -> wgpu::BindGroup {
     let view = |binding, view| wgpu::BindGroupEntry {
         binding,
         resource: wgpu::BindingResource::TextureView(view),
     };
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: globals.as_entire_binding(),
+        },
+        view(1, &sprites[0]),
+        wgpu::BindGroupEntry {
+            binding: 2,
+            resource: wgpu::BindingResource::Sampler(sprite_sampler),
+        },
+        view(3, lightmap),
+        wgpu::BindGroupEntry {
+            binding: 4,
+            resource: wgpu::BindingResource::Sampler(lightmap_sampler),
+        },
+        view(5, &sprites[1]),
+        view(6, &sprites[2]),
+        view(7, &sprites[3]),
+        view(8, &sprites[4]),
+        view(9, &sprites[5]),
+        view(10, &sprites[6]),
+        view(11, &sprites[7]),
+        view(12, emission_thresholds),
+    ];
+    if let Some(overlays) = emissive_overlays {
+        entries.push(view(13, overlays));
+    }
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
         layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: globals.as_entire_binding(),
-            },
-            view(1, &sprites[0]),
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(sprite_sampler),
-            },
-            view(3, lightmap),
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: wgpu::BindingResource::Sampler(lightmap_sampler),
-            },
-            view(5, &sprites[1]),
-            view(6, &sprites[2]),
-            view(7, &sprites[3]),
-            view(8, &sprites[4]),
-            view(9, &sprites[5]),
-            view(10, &sprites[6]),
-            view(11, &sprites[7]),
-            view(12, emission_thresholds),
-        ],
+        entries: &entries,
     })
 }
 /// CPU texture uploads prepared by the resource worker. Consumed by renderer
@@ -3142,63 +3148,75 @@ impl Renderer {
             ("SPRITE_ARRAYS", f64::from(sprite_arrays)),
             ("SPRITE_SPLIT", f64::from(split)),
         ];
+        let mut terrain_entries = vec![
+            entry(
+                0,
+                vf,
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+            ),
+            entry(
+                1,
+                vf,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                    multisampled: false,
+                },
+            ),
+            entry(
+                1 + 1,
+                vf,
+                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            ),
+            entry(
+                3,
+                vf,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+            ),
+            entry(
+                4,
+                vf,
+                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            ),
+            entry(5, vf, sprite_array),
+            entry(6, vf, sprite_array),
+            entry(7, vf, sprite_array),
+            entry(8, vf, sprite_array),
+            entry(9, vf, sprite_array),
+            entry(10, vf, sprite_array),
+            entry(11, vf, sprite_array),
+            entry(
+                12,
+                vf,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+            ),
+        ];
+        if gl {
+            terrain_entries.push(entry(
+                13,
+                wgpu::ShaderStages::VERTEX,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Uint,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+            ));
+        }
         let bindings = kept.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Horizon terrain bindings"),
-            entries: &[
-                entry(
-                    0,
-                    vf,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                ),
-                entry(
-                    1,
-                    vf,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                ),
-                entry(
-                    1 + 1,
-                    vf,
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                ),
-                entry(
-                    3,
-                    vf,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-                entry(
-                    4,
-                    vf,
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                ),
-                entry(5, vf, sprite_array),
-                entry(6, vf, sprite_array),
-                entry(7, vf, sprite_array),
-                entry(8, vf, sprite_array),
-                entry(9, vf, sprite_array),
-                entry(10, vf, sprite_array),
-                entry(11, vf, sprite_array),
-                entry(
-                    12,
-                    vf,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-            ],
+            entries: &terrain_entries,
         });
         let layout = kept.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Horizon terrain layout"),
@@ -3412,22 +3430,27 @@ impl Renderer {
         // `solid` in two passes (terrain.wgsl's `opaque_quad`, `mesher::Part`), for the
         // world pass without a shader pack: no cutout first, through a shader that never
         // discards, then the rest.
-        let solid_opaque = solid_in(
-            &layout,
-            "Terrain solid opaque",
-            "vs_terrain_opaque",
-            "fs_opaque",
-            &terrain_buffers,
-            wgpu::Face::Back,
-        );
-        let solid_cutout = solid_in(
-            &layout,
-            "Terrain solid cutout",
-            "vs_terrain_cutout",
-            "fs_solid",
-            &terrain_buffers,
-            wgpu::Face::Back,
-        );
+        let split_terrain = splits_solid(&adapter.get_info());
+        let solid_split = split_terrain.then(|| {
+            (
+                solid_in(
+                    &layout,
+                    "Terrain solid opaque",
+                    "vs_terrain_opaque",
+                    "fs_opaque",
+                    &terrain_buffers,
+                    wgpu::Face::Back,
+                ),
+                solid_in(
+                    &layout,
+                    "Terrain solid cutout",
+                    "vs_terrain_cutout",
+                    "fs_solid",
+                    &terrain_buffers,
+                    wgpu::Face::Back,
+                ),
+            )
+        });
         // The water mirror's camera sees the world from the other side of the plane, and a
         // mirrored world view's picture is flipped (`world_views::Flipped`): each turns the
         // winding round, so their terrain culls the front.
@@ -3832,6 +3855,8 @@ impl Renderer {
         });
         let emission_stats =
             hdr_stats::EmissionStats::new(&device, split, sprite_textures.len() as u32, gl);
+        let emissive_lookup = gl.then(|| emissive_lookup::Lookup::new(&device));
+        let emissive_view = emissive_lookup.as_ref().map(|lookup| &lookup.view);
         let group = terrain_group(
             &device,
             "Horizon terrain resources",
@@ -3842,6 +3867,7 @@ impl Renderer {
             &lightmap_view,
             &lightmap_sampler,
             &emission_stats.view,
+            emissive_view,
         );
         let fluid_sampler = device.create_sampler(&fluid::SAMPLER);
         let fluid_group = terrain_group(
@@ -3854,6 +3880,7 @@ impl Renderer {
             &lightmap_view,
             &lightmap_sampler,
             &emission_stats.view,
+            emissive_view,
         );
         let terrain_model_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Native cutout model (unmipped)"),
@@ -3870,6 +3897,7 @@ impl Renderer {
             &lightmap_view,
             &lightmap_sampler,
             &emission_stats.view,
+            emissive_view,
         );
         let crosshair_group = terrain_group(
             &device,
@@ -3881,6 +3909,7 @@ impl Renderer {
             &lightmap_view,
             &lightmap_sampler,
             &emission_stats.view,
+            emissive_view,
         );
         let mirror_group = terrain_group(
             &device,
@@ -3892,6 +3921,7 @@ impl Renderer {
             &lightmap_view,
             &lightmap_sampler,
             &emission_stats.view,
+            emissive_view,
         );
         let index_quads = 1 << 16;
         let indices = Self::quad_indices(&device, index_quads);
@@ -5016,7 +5046,7 @@ impl Renderer {
         // With flat draws' page groups the per-section solid draws read their vertices from
         // the page too (`Flat::page_group`), in either layout of the solid quads
         // (`mesher::packed`): only the origins stay a vertex buffer, at slot 1.
-        let (solid, solid_opaque, solid_cutout, solid_mirror, flipped) = match &flat {
+        let (solid, solid_split, solid_mirror, flipped) = match &flat {
             Some(f) => {
                 let pulled_layout = kept.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Horizon terrain layout (pulled)"),
@@ -5030,18 +5060,22 @@ impl Renderer {
                 let (back, front) = (wgpu::Face::Back, wgpu::Face::Front);
                 (
                     solid("Terrain solid", "vs_section", "fs_solid", back),
-                    solid(
-                        "Terrain solid opaque",
-                        "vs_section_opaque",
-                        "fs_opaque",
-                        back,
-                    ),
-                    solid(
-                        "Terrain solid cutout",
-                        "vs_section_cutout",
-                        "fs_solid",
-                        back,
-                    ),
+                    split_terrain.then(|| {
+                        (
+                            solid(
+                                "Terrain solid opaque",
+                                "vs_section_opaque",
+                                "fs_opaque",
+                                back,
+                            ),
+                            solid(
+                                "Terrain solid cutout",
+                                "vs_section_cutout",
+                                "fs_solid",
+                                back,
+                            ),
+                        )
+                    }),
                     pipeline_in(
                         &pulled_layout,
                         "Terrain solid (mirrored)",
@@ -5057,7 +5091,7 @@ impl Renderer {
                     solid("Terrain solid (flipped)", "vs_section", "fs_solid", front),
                 )
             }
-            None => (solid, solid_opaque, solid_cutout, solid_mirror, flipped),
+            None => (solid, solid_split, solid_mirror, flipped),
         };
         // The solid quads in the compact layout where every pass reads it; the first world
         // frames settle it for the picked pack (`follow_packed_layout`).
@@ -5317,8 +5351,7 @@ impl Renderer {
             device_lost,
             config,
             solid,
-            solid_opaque,
-            solid_cutout,
+            solid_split,
             solid_paths,
             solid_settled_single,
             settled_single_on: true,
@@ -5530,6 +5563,7 @@ impl Renderer {
             hdr: None,
             hdr_lighting_setting: true,
             emission_stats,
+            emissive_lookup,
             output_caps,
             output_rejected: None,
             auto_off_since: None,
@@ -7958,6 +7992,7 @@ impl Renderer {
         self.rebuild_terrain_group();
     }
     fn rebuild_terrain_group(&mut self) {
+        let emissive_view = self.emissive_lookup.as_ref().map(|lookup| &lookup.view);
         self.sprite_views = sprite_views(
             &self.sprite_textures,
             &self.sprite_unused,
@@ -7973,6 +8008,7 @@ impl Renderer {
             &self.lightmap_view,
             &self.lightmap_sampler,
             &self.emission_stats.view,
+            emissive_view,
         );
         self.fluid_group = terrain_group(
             &self.device,
@@ -7984,6 +8020,7 @@ impl Renderer {
             &self.lightmap_view,
             &self.lightmap_sampler,
             &self.emission_stats.view,
+            emissive_view,
         );
         self.terrain_model_group = terrain_group(
             &self.device,
@@ -7995,6 +8032,7 @@ impl Renderer {
             &self.lightmap_view,
             &self.lightmap_sampler,
             &self.emission_stats.view,
+            emissive_view,
         );
     }
     /// Block sprite layers per array on this device: a sprite's array is its layer over it, its
@@ -8645,6 +8683,9 @@ impl Renderer {
                 },
             )
         };
+        if let Some(lookup) = &mut self.emissive_lookup {
+            lookup.update(&self.queue, frame.emissive_layers);
+        }
         let globals = Globals {
             view_proj: jittered.to_cols_array_2d(),
             fog_color,
@@ -11182,25 +11223,26 @@ impl Renderer {
                     // and phase 2's lists with quads for it.
                     let (opaque, cutout) = (opaque_end as u32, cutout_start as u32);
                     type Draws = std::ops::Range<u32>;
-                    let passes: &[(&wgpu::RenderPipeline, Draws, Draws)] = match material {
-                        None if split_solid => &[
-                            (
-                                solid_passes
-                                    .opaque(false)
-                                    .unwrap_or(self.solid_opaque.get(hdr)),
-                                0..opaque,
-                                phase1_draws..phase2_cutout,
-                            ),
-                            (
-                                solid_passes
-                                    .cutout(false)
-                                    .unwrap_or(self.solid_cutout.get(hdr)),
-                                cutout..phase1_draws,
-                                phase2_cutout..solid_draws,
-                            ),
-                        ],
-                        _ => &[(solid_pipeline, 0..phase1_draws, phase1_draws..solid_draws)],
-                    };
+                    let passes: &[(&wgpu::RenderPipeline, Draws, Draws)] =
+                        match (material, &self.solid_split) {
+                            (None, Some((opaque_pipeline, cutout_pipeline))) => &[
+                                (
+                                    solid_passes
+                                        .opaque(false)
+                                        .unwrap_or(opaque_pipeline.get(hdr)),
+                                    0..opaque,
+                                    phase1_draws..phase2_cutout,
+                                ),
+                                (
+                                    solid_passes
+                                        .cutout(false)
+                                        .unwrap_or(cutout_pipeline.get(hdr)),
+                                    cutout..phase1_draws,
+                                    phase2_cutout..solid_draws,
+                                ),
+                            ],
+                            _ => &[(solid_pipeline, 0..phase1_draws, phase1_draws..solid_draws)],
+                        };
                     // The vanilla solid pipelines read the page themselves; a native
                     // material's take it as vertices.
                     let pulled = material.is_none() && self.flat.is_some();

@@ -51,8 +51,13 @@ pub(super) const NO_ANSWER: &str =
 
 /// The server thread holds its `Game` by value and runs every tick on it.
 /// It reserves the same guest limit and host headroom as the main thread.
+#[cfg(not(target_os = "android"))]
 const SERVER_THREAD_STACK: usize =
     horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM;
+
+/// Android uses the original server stack size because its host does not load Wasm guests.
+#[cfg(target_os = "android")]
+const SERVER_THREAD_STACK: usize = 8 * 1024 * 1024;
 
 /// The server thread's stack size: [`SERVER_THREAD_STACK`], or what `RUST_MIN_STACK` asks for
 /// when that is larger. std reads the variable only for a thread spawned without a size, and
@@ -1572,19 +1577,21 @@ pub(super) mod tests {
         assert!(text.contains("in native mod example:posted, hook server_tick"));
     }
 
-    /// The server thread keeps guest headroom, and a larger `RUST_MIN_STACK` still
-    /// reaches it (#2430).
+    /// The server thread keeps its platform stack floor and accepts a larger `RUST_MIN_STACK`.
     #[test]
-    fn the_server_thread_stack_keeps_guest_headroom_and_larger_overrides() {
-        let minimum = 136 * 1024 * 1024;
+    fn the_server_thread_stack_keeps_its_floor_and_larger_overrides() {
+        let minimum = if cfg!(target_os = "android") { 8 } else { 136 } * 1024 * 1024;
         assert_eq!(super::stack_for(None), minimum);
         assert_eq!(
             super::stack_for(Some("1048576")),
             minimum,
-            "smaller asks keep guest headroom"
+            "smaller requests keep the platform minimum"
         );
         assert_eq!(super::stack_for(Some("268435456")), 256 * 1024 * 1024);
-        assert_eq!(super::stack_for(Some("16777216")), minimum);
+        assert_eq!(
+            super::stack_for(Some("16777216")),
+            minimum.max(16 * 1024 * 1024)
+        );
         assert_eq!(
             super::stack_for(Some("lots")),
             minimum,

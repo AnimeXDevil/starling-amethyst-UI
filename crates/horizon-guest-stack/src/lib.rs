@@ -4,18 +4,23 @@
 mod constants;
 pub use constants::{GUEST_STACK_BYTES, HOST_HEADROOM};
 
-/// Spawn guarantees the reservation even on platforms without a stack-size query.
+/// Reserve the guest stack on hosts that run Wasm mods. Starling's Android host runs native mods
+/// and uses normal Rust worker stacks. A 136 MiB reservation per worker can exhaust 32-bit Android
+/// address space during loading.
 pub fn builder() -> std::thread::Builder {
-    std::thread::Builder::new().stack_size(GUEST_STACK_BYTES + HOST_HEADROOM)
+    let worker = std::thread::Builder::new();
+    #[cfg(not(target_os = "android"))]
+    let worker = worker.stack_size(GUEST_STACK_BYTES + HOST_HEADROOM);
+    worker
 }
 
-/// Starts a thread that may enter a guest: guest-sized and named `name`, and in debug builds it
-/// asserts at its start that the reservation took, so a test that starts it fails loudly if not.
+/// Starts a named worker. On Wasm hosts debug builds verify its guest stack reservation.
 pub fn spawn<T: Send + 'static>(
     name: String,
     body: impl FnOnce() -> T + Send + 'static,
 ) -> std::io::Result<std::thread::JoinHandle<T>> {
     builder().name(name).spawn(move || {
+        #[cfg(not(target_os = "android"))]
         debug_assert_eq!(
             check_current(),
             Ok(()),
@@ -234,6 +239,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "android"))]
     fn guest_worker_reserves_the_required_stack() {
         super::builder()
             .spawn(|| super::check_current().unwrap())

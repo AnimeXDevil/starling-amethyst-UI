@@ -57,25 +57,20 @@ fn custom_sky_color(in: Out) -> vec4<f32> {
         color = hdr_written(color, 1.0 - 0.24 * layer.hdr_light.y, layer.hdr_settings, layer.hdr_gains);
     }
     // On a frame of linear light (`FRAME_LINEAR`) the layer's colour is decoded as it is stored.
-    switch layer.mode {
-        // dst * src: white leaves the sky alone. Decoded, the product stays exact:
-        // (dst * src)^2.2 = dst^2.2 * src^2.2.
-        case MULTIPLY: { return frame_stored(vec4(mix(vec3(1.0), t.rgb, k), 1.0)); }
-        // 2 * dst * src: grey leaves it alone. Decoded as entity.wgsl's crumbling, (2 src)^2.2 / 2,
-        // so it stays exact too.
-        case OVERLAY: {
-            let factor = mix(vec3(0.5), t.rgb, k);
-            if FRAME_LINEAR { return vec4(pow(2.0 * factor, vec3(2.2)) * 0.5, 1.0); }
-            return vec4(factor, 1.0);
-        }
-        case REPLACE: { return frame_stored(vec4(color, 1.0)); }
-        // mix(dst, src, alpha): alpha is coverage, kept.
-        case ALPHA: { return frame_stored(vec4(color, k)); }
-        // add, subtract, dodge, burn, screen: the layer premultiplied, black leaves it alone. On
-        // linear light add and subtract add and take away light, as `"linear"` means to; dodge,
-        // burn and screen come out near their gamma results, not exactly.
-        default: { return vec4(frame_stored(vec4(color, 1.0)).rgb * k, 1.0); }
+    // Adreno 304's GLES compiler rejects the unsigned constants in GLSL switch labels.
+    // dst * src: white leaves the sky alone. The linear-light product stays exact.
+    if layer.mode == MULTIPLY { return frame_stored(vec4(mix(vec3(1.0), t.rgb, k), 1.0)); }
+    // 2 * dst * src: grey leaves it alone. Decoded as entity.wgsl's crumbling, (2 src)^2.2 / 2.
+    if layer.mode == OVERLAY {
+        let factor = mix(vec3(0.5), t.rgb, k);
+        if FRAME_LINEAR { return vec4(pow(2.0 * factor, vec3(2.2)) * 0.5, 1.0); }
+        return vec4(factor, 1.0);
     }
+    if layer.mode == REPLACE { return frame_stored(vec4(color, 1.0)); }
+    // mix(dst, src, alpha): alpha is coverage, kept.
+    if layer.mode == ALPHA { return frame_stored(vec4(color, k)); }
+    // Add, subtract, dodge, burn, screen use a premultiplied layer.
+    return vec4(frame_stored(vec4(color, 1.0)).rgb * k, 1.0);
 }
 
 @fragment fn fs_custom_sky(in: Out) -> @location(0) vec4<f32> {
