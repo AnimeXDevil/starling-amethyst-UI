@@ -64,6 +64,14 @@ PAGE_FLAGS = "-C link-arg=-Wl,-z,max-page-size=16384"
 # A BuildId in the library, so the native tombstones in diagnostic ZIPs name it and its frames can be matched to
 # the unstripped copy kept beside the APK (`lib<LIBRARY>-symbols.so`, docs/android-diagnostics.md).
 BUILD_ID_FLAGS = "-C link-arg=-Wl,--build-id=sha1"
+# Rust's Android targets keep each `thread_local!` in a pthread key, and bionic gives a process 128 of them, the
+# system's and the GPU driver's included: the game outgrew them once Wasmtime ran in it, and aborted with "out of TLS
+# keys" on the first use of one more (saving a world). With `cfg(target_thread_local)` they are the targets' own
+# thread-local storage (LLVM's emulated TLS on Android), which has no such limit. No released std is built that way,
+# so the std is built with the library from the toolchain's rust-src (`-Zbuild-std`); RUSTC_BOOTSTRAP lets the
+# pinned stable Rust take both flags.
+TLS_FLAGS = "-Z has-thread-local=yes"
+BUILD_STD = "-Zbuild-std=std,panic_unwind"
 ICONS = {
     "mipmap-mdpi": "48x48",
     "mipmap-xxhdpi": "128x128",
@@ -120,10 +128,19 @@ def build_library(profile, ndk, sdk, abi=ABI):
             ["git", "status", "--porcelain"], cwd=ROOT, text=True))).lower()
     except (OSError, subprocess.CalledProcessError):
         pass  # An exported source archive may not have Git metadata.
-    env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " " + PAGE_FLAGS + " " + BUILD_ID_FLAGS).strip()
+    env["RUSTFLAGS"] = " ".join(
+        flags for flags in (env.get("RUSTFLAGS", ""), PAGE_FLAGS, BUILD_ID_FLAGS, TLS_FLAGS) if flags
+    )
+    env["RUSTC_BOOTSTRAP"] = "1"
+    # The std's source (`TLS_FLAGS`): CI installs it with the toolchain (`--component rust-src`), and the mod
+    # service's build cache holds it, with its crates, for its sandbox, which has no network.
+    sysroot = subprocess.check_output(["rustc", "--print", "sysroot"], cwd=ROOT, text=True, env=env).strip()
+    if not (Path(sysroot) / "lib" / "rustlib" / "src" / "rust" / "library").is_dir():
+        sys.exit("build_apk: the Rust toolchain has no rust-src, which the std build needs: "
+                 "rustup component add rust-src")
     run(
         "cargo", "ndk", "-t", abi, "--platform", MIN_SDK,
-        "build", "--profile", profile, "-p", "horizon-android",
+        "build", BUILD_STD, "--profile", profile, "-p", "horizon-android",
         cwd=ROOT, env=env,
     )
 
