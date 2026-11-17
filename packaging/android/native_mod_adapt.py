@@ -793,6 +793,48 @@ def embedded_content(text, mod_dir):
     return "".join(blocks)
 
 
+# Cancellable injections whose target returns more on the fork than the Nightly the mod was written for: the
+# helper's ControlFlow carries the new return type, and its Break the value meaning "drawn, nothing more".
+RETURNS_NOW = {
+    # Nothing then; the tooltip the panel wants drawn now (JEI, REI).
+    "draw_mod_browser": (
+        (r"ControlFlow<\(\)>", "ControlFlow<Option<BrowserTooltip>>"),
+        (r"ControlFlow::Break\(\(\)\)", "ControlFlow::Break(None)"),
+    ),
+    # Nothing then; the tooltip lines now (Cinematic Interactions).
+    "draw_recipe_book": (
+        (r"ControlFlow<\(\)>", "ControlFlow<Option<Vec<(Text, u32)>>>"),
+        (r"ControlFlow::Break\(\(\)\)", "ControlFlow::Break(None)"),
+    ),
+    # The hand's vertices then; with their textured runs now (Fair Freecam).
+    "hand_geometry": (
+        (r"ControlFlow<Vec<Vertex>>", "ControlFlow<(Vec<Vertex>, Vec<(u32, i32)>)>"),
+        (r"ControlFlow::Break\(Vec::new\(\)\)", "ControlFlow::Break((Vec::new(), Vec::new()))"),
+    ),
+}
+
+
+def returns_now(text, mod_dir):
+    """The helpers of cancellable injections at a target in RETURNS_NOW, on its new return type."""
+    for block in re.split(r"(?m)^(?=\[\[injection\]\])", text):
+        target = re.search(r'^\s*target\s*=\s*"([^"]*)"', block, re.M)
+        helper = re.search(r'^\s*helper\s*=\s*"([^"]*)"', block, re.M)
+        if not (target and helper and re.search(r"^\s*cancellable\s*=\s*true", block, re.M)):
+            continue
+        rules = RETURNS_NOW.get(target[1].rsplit("::", 1)[-1])
+        path = mod_dir / helper[1]
+        if not rules or not path.is_file():
+            continue
+        code = path.read_text(encoding="utf-8")
+        new = code
+        for old, replacement in rules:
+            new = re.sub(old, replacement, new)
+        if new != code:
+            path.write_text(new, encoding="utf-8")
+            print(f"native_mod_adapt: {mod_dir.name}/{helper[1]}: {target[1]} returns more now")
+    return text
+
+
 def main():
     source, mods = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
     modules = owners(source)
@@ -803,6 +845,7 @@ def main():
         old = manifest.read_text(encoding="utf-8")
         new = adapt(old, source, modules)
         new = embedded_content(new, manifest.parent)
+        new = returns_now(new, manifest.parent)
 
         def moved(match, name=manifest.parent.name):
             target = relocate(match[2], tree)
