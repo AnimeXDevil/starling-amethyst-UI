@@ -20,8 +20,9 @@ use crate::control::Request;
 pub const SEED: i64 = 1234;
 /// The world the benchmark creates under `saves/`, replaced on every run.
 pub const WORLD: &str = "horizon-benchmark";
-/// Written into the world so a later run only ever replaces its own world.
-const MARKER: &str = "horizon-benchmark.txt";
+/// Written into the world so a later run only ever replaces its own world; Starling leaves a
+/// world with it out of the world list (`title::list_worlds`).
+pub const MARKER: &str = "horizon-benchmark.txt";
 
 /// A straight flight over terrain: name, start, end, pitch (`tools/graphics_bench.py`'s paths).
 type Scene = (&'static str, [f64; 3], [f64; 3], f64);

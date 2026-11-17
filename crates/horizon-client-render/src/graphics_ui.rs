@@ -126,6 +126,8 @@ pub enum H {
     /// Opens Starling's performance calibration (`options_ui::Page::PerfCalibration`): the
     /// fastest way of drawing the same picture on this phone. Android only.
     PerfCalibrate,
+    /// What Calibrate... does, a line to read above it.
+    PerfCalibrateNote,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -675,15 +677,21 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
     pages
 }
 
-/// The Performance page's Calibration group: Calibrate..., on Android.
+/// What the Calibration group says above Calibrate...
+const CALIBRATE_NOTE: &str = "Picks the fastest drawing for this phone.";
+
+/// The Performance page's Calibration group, on Android: what it does, then Calibrate...
 fn calibration_group() -> (&'static str, Vec<Setting>) {
     (
         "Calibration",
-        vec![h(
-            H::PerfCalibrate,
-            Cost::None,
-            "Tries the ways of drawing that look the same, in a test world, and keeps the fastest.",
-        )],
+        vec![
+            h(H::PerfCalibrateNote, Cost::None, CALIBRATE_NOTE),
+            h(
+                H::PerfCalibrate,
+                Cost::None,
+                "Tries the ways of drawing that look the same, in a test world, and keeps the fastest.",
+            ),
+        ],
     )
 }
 
@@ -987,6 +995,7 @@ impl H {
                 Setup::Changed => "Use Automatic Setup",
             })),
             H::PerfCalibrate => Text::literal(lang::get("Calibrate...")),
+            H::PerfCalibrateNote => Text::literal(lang::get(CALIBRATE_NOTE)),
             H::HdrPaperWhite | H::HdrPeak | H::HdrUiBrightness => self.nits_label(s, out),
             H::HdrBlackLevel => labelled("Black Level", format!("{:.2}", g.black_level_nits())),
             H::HdrLighting => labelled("HDR Lighting", on_off(g.hdr_lighting)),
@@ -1230,7 +1239,9 @@ impl Item {
             && self.slider(s).is_none()
             && !matches!(
                 self,
-                Item::Horizon(H::HdrCalibrate | H::ShaderPacks | H::PerfCalibrate)
+                Item::Horizon(
+                    H::HdrCalibrate | H::ShaderPacks | H::PerfCalibrate | H::PerfCalibrateNote
+                )
             )
     }
     /// On/off settings and their value.
@@ -1403,6 +1414,8 @@ fn row(setting: Setting, s: &Settings, out: &EffectiveOutput) -> Row<Item> {
     let item = setting.item;
     let (name, value) = parts(item, s, out);
     let value = match (item.switch(s, out), item.slider(s)) {
+        // A line to read: the focus skips it and nothing presses it.
+        _ if item == Item::Horizon(H::PerfCalibrateNote) => Value::Note,
         (Some(on), _) => Value::Switch(on),
         (None, Some(position)) => Value::Slider {
             position,

@@ -2884,6 +2884,8 @@ enum Row {
     Heading(String),
     /// A line of grey text (a path).
     Note(String),
+    /// Grey text in as many lines as the page's width takes (a page's explanations).
+    Paragraph(String),
     /// A button, and another after it.
     Buttons(Widget, Option<Widget>),
     /// Skin Customization's name box, after its label.
@@ -3830,8 +3832,8 @@ impl OptionsUi {
         match self.page() {
             Page::Diagnostics => {
                 let mut rows = vec![
-                    Row::Note(lang::get("starling.diagnostics.notice")),
-                    Row::Note(lang::get("starling.diagnostics.overhead")),
+                    Row::Paragraph(lang::get("starling.diagnostics.notice")),
+                    Row::Paragraph(lang::get("starling.diagnostics.overhead")),
                     Row::Buttons(
                         button(
                             0.0,
@@ -3873,10 +3875,10 @@ impl OptionsUi {
                         None,
                     ),
                 ];
-                rows.extend(self.diagnostics_status.iter().cloned().map(Row::Note));
+                rows.extend(self.diagnostics_status.iter().cloned().map(Row::Paragraph));
                 if !self.perf_lab.is_empty() {
-                    rows.push(Row::Note(lang::get("starling.perf.title")));
-                    rows.push(Row::Note(lang::get("starling.perf.about")));
+                    rows.push(Row::Paragraph(lang::get("starling.perf.title")));
+                    rows.push(Row::Paragraph(lang::get("starling.perf.about")));
                     for (i, label) in self.perf_lab.iter().enumerate() {
                         rows.push(Row::Buttons(
                             button(
@@ -3889,17 +3891,17 @@ impl OptionsUi {
                             None,
                         ));
                     }
-                    rows.extend(self.perf_lab_notes.iter().cloned().map(Row::Note));
+                    rows.extend(self.perf_lab_notes.iter().cloned().map(Row::Paragraph));
                 }
                 rows
             }
             Page::PerfCalibration => {
-                let mut rows = vec![Row::Note(lang::get("starling.calibrate.about"))];
+                let mut rows = vec![Row::Paragraph(lang::get("starling.calibrate.about"))];
                 if self.calibrate.is_empty() && self.calibrate_notes.is_empty() {
                     // Before the game is up (the startup menu), there is nothing to run it in.
-                    rows.push(Row::Note(lang::get("starling.calibrate.later")));
+                    rows.push(Row::Paragraph(lang::get("starling.calibrate.later")));
                 }
-                rows.extend(self.calibrate_notes.iter().cloned().map(Row::Note));
+                rows.extend(self.calibrate_notes.iter().cloned().map(Row::Paragraph));
                 for (i, label) in self.calibrate.iter().enumerate() {
                     rows.push(Row::Buttons(
                         button(

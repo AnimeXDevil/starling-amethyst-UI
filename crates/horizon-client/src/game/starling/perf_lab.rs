@@ -1160,8 +1160,9 @@ const PACE: Pace = Pace {
 const CALIBRATE_LIFT: f64 = 24.0;
 const CALIBRATE_YAW: f64 = 0.0;
 const CALIBRATE_PITCH: f64 = 15.0;
-/// How long the game may take to get back to the title screen once the run is done.
-const CALIBRATE_LEAVE: Duration = Duration::from_secs(120);
+/// How long the game waits, back on the title screen, for the test world's last save before it
+/// gives up deleting the world (it stays out of the world list all the same).
+const CALIBRATE_CLEANUP: Duration = Duration::from_secs(30);
 /// The run's error when the game asked it to stop (`CalibrationState::stop`).
 const STOPPED: &str = "stopped";
 
@@ -1175,13 +1176,12 @@ struct CalibrationState {
     /// The test world is loaded and the run times it: a menu, a pause or leaving the game
     /// stops it from here on.
     measuring: bool,
-    /// Blocks done, blocks in all and seconds left, for the line over the hotbar.
-    progress: Option<(usize, usize, u32)>,
+    /// Blocks done, blocks in all and when the last should end, for the line over the hotbar.
+    progress: Option<(usize, usize, Instant)>,
     /// The game asks the run to stop.
     stop: bool,
-    /// The run is done with the test world: the game leaves it for the title screen.
-    leave: bool,
-    /// What the run found, or why it stopped; the world is gone by then.
+    /// What the run found, or why it stopped: the game leaves the test world, deletes it, and
+    /// then puts it in use.
     finished: Option<Result<Calibrated, String>>,
 }
 
@@ -1199,6 +1199,10 @@ struct Calibration {
     told: Option<Instant>,
     /// The game has left the test world for the title screen.
     left: bool,
+    /// What the run found, held until the test world is deleted, and since when the game has
+    /// been back on the title screen to delete it.
+    result: Option<Result<Calibrated, String>>,
+    on_title: Option<Instant>,
 }
 
 /// What a calibration times on this device: its own way of drawing first, then each single
@@ -1332,7 +1336,8 @@ fn calibration_rounds(
     let steps = order.len() + if n > 2 { 4 } else { 0 };
     let per_block = pace.warmup.as_secs_f64() + f64::from(pace.block);
     let tell = |done: usize| {
-        lock(shared).progress = Some((done, steps, ((steps - done) as f64 * per_block) as u32));
+        let left = Duration::from_secs_f64((steps - done) as f64 * per_block);
+        lock(shared).progress = Some((done, steps, Instant::now() + left));
     };
     let mut fps = vec![Vec::new(); n];
     let mut last = None;
@@ -1409,22 +1414,8 @@ fn calibrate(
     calibration_rounds(control, shared, candidates, pace)
 }
 
-/// Waits for the game to be back on the title screen, then deletes the test world (only ever
-/// the benchmark's own: `benchmark::replace_world`), giving its last save a moment to finish.
-fn leave_test_world(control: &Control, game_dir: &Path) -> Result<(), String> {
-    benchmark::poll(control, CALIBRATE_LEAVE, |s| s["screen"] == "title")?;
-    let mut last = Ok(());
-    for _ in 0..5 {
-        thread::sleep(Duration::from_secs(1));
-        last = benchmark::replace_world(game_dir);
-        if last.is_ok() {
-            break;
-        }
-    }
-    last
-}
-
-/// The calibration thread: the run, then out of the test world whatever happened in it.
+/// The calibration thread: the run; the game then leaves the test world and deletes it,
+/// whatever happened in it.
 fn calibration_thread(
     control: Control,
     shared: Shared,
@@ -1433,22 +1424,41 @@ fn calibration_thread(
 ) {
     let started = Instant::now();
     let found = calibrate(&control, &shared, &game_dir, &candidates, PACE);
-    {
-        let mut s = lock(&shared);
-        s.measuring = false;
-        s.wanted = None;
-        s.leave = true;
-    }
-    if let Err(e) = leave_test_world(&control, &game_dir) {
-        log::warn!("Starling: calibration: the test world stays: {e}");
-    }
     let result = found.map(|(choices, fps, auto_fps)| Calibrated {
         choices,
         fps: round(fps),
         auto_fps: round(auto_fps),
         seconds: started.elapsed().as_secs_f64().round(),
     });
-    lock(&shared).finished = Some(result);
+    let mut s = lock(&shared);
+    s.measuring = false;
+    s.wanted = None;
+    s.finished = Some(result);
+}
+
+/// Deletes the test world once nothing has it open: as Select World's Delete does, where the
+/// session lock lets it, else the folder itself (`benchmark::replace_world`). Only ever the
+/// world the benchmark marked as its own; true once it is gone.
+fn delete_test_world(saves: &Path) -> bool {
+    let world = saves.join(benchmark::WORLD);
+    if !world.exists() {
+        return true;
+    }
+    if !world.join(benchmark::MARKER).exists() {
+        log::warn!(
+            "Starling: calibration: {} is not the test world: it stays",
+            world.display()
+        );
+        return true;
+    }
+    if let Err(e) = horizon_client::title::world_management::delete(saves, benchmark::WORLD) {
+        log::warn!("Starling: calibration: deleting the test world: {e}");
+        let game_dir = saves.parent().unwrap_or(saves);
+        if let Err(e) = benchmark::replace_world(game_dir) {
+            log::warn!("Starling: calibration: deleting the test world: {e}");
+        }
+    }
+    !world.exists()
 }
 
 /// Minutes and seconds, as the calibration's lines say them.
@@ -1554,6 +1564,8 @@ impl Game<'_> {
             before,
             told: None,
             left: false,
+            result: None,
+            on_title: None,
         });
         if self.screen == Screen::Options
             && let Err(e) =
@@ -1563,16 +1575,26 @@ impl Game<'_> {
         }
     }
 
-    /// Each frame while Calibrate... runs: the way of drawing it asks for, its stop when the
-    /// player opens a menu, pauses or leaves the game, its line over the hotbar, out of the test
-    /// world once it is done, and its end.
+    /// Whether Calibrate... runs: the touch controls hide and take no finger meanwhile.
+    pub(super) fn perf_calibrating(&self) -> bool {
+        self.perf_lab.calibration.is_some()
+    }
+
+    /// Each frame while Calibrate... runs: the player counts as present (no idle frame cap), the
+    /// way of drawing it asks for, its stop when the player opens a menu, pauses or leaves the
+    /// game, its line over the hotbar once a second, and once it is done, out of the test world,
+    /// the world deleted, and its end.
     fn perf_calibrate_frame(&mut self) {
         let Some(shared) = self.perf_lab.calibration.as_ref().map(|c| c.shared.clone()) else {
             return;
         };
+        let now = Instant::now();
+        // The camera is held and the fingers ignored: Inactivity FPS Limit's AFK would cap the
+        // frames it times, as a held key keeps it off (touch.rs).
+        self.last_input = now;
         let in_world = self.player.is_some() && self.title.is_none();
         let away = self.pause || self.screen != Screen::Playing || !self.focused;
-        let (progress, leave, finished) = {
+        let (progress, finished) = {
             let mut s = lock(&shared);
             if let Some(choices) = s.wanted.take() {
                 self.perf_lab.choose(choices);
@@ -1581,38 +1603,83 @@ impl Game<'_> {
             if s.measuring && in_world && away {
                 s.stop = true;
             }
-            (s.progress, s.leave, s.finished.take())
+            (s.progress, s.finished.take())
         };
+        let on_title = self.title.is_some();
+        // The world is closed and saved: nothing holds it open any more.
+        let closed = on_title && self.pending_save.is_none() && self.integrated.is_none();
         let Some(run) = self.perf_lab.calibration.as_mut() else {
             return;
         };
-        let out = leave && in_world && !run.left;
+        if finished.is_some() {
+            run.result = finished;
+        }
+        let done = run.result.is_some();
+        let out = done && in_world && !run.left;
         if out {
             run.left = true;
         }
         let tell = in_world
-            && !leave
+            && !done
             && run
                 .told
-                .is_none_or(|t| t.elapsed() >= Duration::from_secs(1));
+                .is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1));
         if tell {
-            run.told = Some(Instant::now());
+            run.told = Some(now);
+        }
+        // Back on the title screen: the test world goes once its last save is done, tried once
+        // a second.
+        let since = if done && on_title {
+            *run.on_title.get_or_insert(now)
+        } else {
+            now
+        };
+        let clean = done
+            && on_title
+            && (closed || now.duration_since(since) >= CALIBRATE_CLEANUP)
+            && run
+                .told
+                .is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1));
+        if clean {
+            run.told = Some(now);
         }
         if out {
             self.perf_calibrate_leave_world();
         }
         if tell {
             let line = match progress {
-                Some((done, steps, left)) => lang::tr(
+                Some((done, steps, end)) => lang::tr(
                     "starling.calibrate.running",
-                    &[&(done + 1), &steps, &clock(left)],
+                    &[
+                        &(done + 1),
+                        &steps,
+                        &clock(end.saturating_duration_since(now).as_secs_f64().ceil() as u32),
+                    ],
                 ),
                 None => lang::get("starling.calibrate.loading"),
             };
             self.titles.set_overlay(Text::literal(line), false);
         }
-        if let Some(result) = finished {
-            self.perf_calibrate_done(result);
+        if clean {
+            let saves = Self::game_dir().join("saves");
+            let gone = delete_test_world(&saves);
+            let late = now.duration_since(since) >= CALIBRATE_CLEANUP;
+            if gone || late {
+                if !gone {
+                    log::warn!("Starling: calibration: the test world stays (hidden)");
+                }
+                if let Some(title) = self.title.as_mut() {
+                    title.worlds_changed();
+                }
+                let result = self
+                    .perf_lab
+                    .calibration
+                    .as_mut()
+                    .and_then(|run| run.result.take());
+                if let Some(result) = result {
+                    self.perf_calibrate_done(result);
+                }
+            }
         }
     }
 
@@ -1913,7 +1980,8 @@ mod calibration_tests {
         assert_eq!(timed, expected);
         assert_eq!(found.0, both);
         assert!((found.1 - 59.0).abs() < 0.5 && (found.2 - 50.0).abs() < 0.5);
-        assert_eq!(lock(&shared).progress, Some((15, 16, 1)));
+        let (done, steps, _) = lock(&shared).progress.unwrap();
+        assert_eq!((done, steps), (15, 16));
     }
 
     #[test]

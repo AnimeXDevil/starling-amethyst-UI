@@ -697,6 +697,27 @@ impl OptionsUi {
                             });
                             y += 16.0;
                         }
+                        Row::Paragraph(text) => {
+                            // Minecraft's font draws nearly every glyph at most 6 pixels wide.
+                            let chars = (((w - 20.0) / 6.0).floor() as usize).max(16);
+                            for line in wrap_words(&text, chars) {
+                                out.push(Widget {
+                                    x: 0.0,
+                                    y: y + 4.0,
+                                    w,
+                                    h: 9.0,
+                                    kind: WKind::Text {
+                                        text: Text::literal(line),
+                                        color: 0xFFA0A0A0,
+                                        centered: true,
+                                    },
+                                    list: false,
+                                    row: 0,
+                                });
+                                y += 11.0;
+                            }
+                            y += 5.0;
+                        }
                         Row::Big(opt) => {
                             out.push(option_widget(s, opt, cx - 155.0, y + 2.0, 310.0));
                             y += 25.0;
