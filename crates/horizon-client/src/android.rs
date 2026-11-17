@@ -346,6 +346,7 @@ pub fn restart_app_saying(message: &str) {
 
 /// `StarlingActivity.restart(String)`: the restart screen shows `message`.
 fn call_restart(message: &str) {
+    keep_restart_look();
     with_activity(|env, activity| {
         let text = env.new_string(message)?;
         env.call_method(
@@ -356,6 +357,29 @@ fn call_restart(message: &str) {
         )
         .map(drop)
     });
+}
+
+/// The launcher's colours for the restart screen, which draws its intro as it ends
+/// (LauncherActivity's `RestartView`): the active theme's background, plate, plate border,
+/// accent, text, muted text and bar track, ARGB, in `restart-look` in the private files.
+fn keep_restart_look() {
+    let theme = horizon_client::android_control_theme::active_theme();
+    // The theme keeps ABGR (`color::hex`); Java's colours are ARGB.
+    let argb = |c: u32| (c & 0xff00_ff00) | (c & 0xff) << 16 | (c >> 16 & 0xff);
+    let look = [
+        theme.bg_solid,
+        theme.surface,
+        theme.border_strong,
+        theme.accent,
+        theme.text_primary,
+        theme.text_muted,
+        theme.surface_bright,
+    ]
+    .map(|c| format!("{:08x}", argb(c)))
+    .join(" ");
+    if let Err(e) = std::fs::write(logging::private_home().join("restart-look"), look) {
+        log::warn!("Starling: the restart screen's colours were not kept: {e}");
+    }
 }
 
 /// Whether this process runs the game, not Horizon Android's launcher (ha_launcher).
