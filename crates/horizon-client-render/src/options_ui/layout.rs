@@ -41,6 +41,15 @@ impl OptionsUi {
             self.relayout();
         }
     }
+    /// The calibration page's lines and buttons, from the game while it shows: the page lays out
+    /// again only when one of them changed, so a tap lands on the buttons it shows.
+    pub fn set_calibrate(&mut self, notes: Vec<String>, buttons: Vec<String>) {
+        if self.calibrate_notes != notes || self.calibrate != buttons {
+            self.calibrate_notes = notes;
+            self.calibrate = buttons;
+            self.relayout();
+        }
+    }
     /// The page's layout at `(w, h)`: made on the first read after an open, a
     /// resize or a revision change, then read as is.
     pub(super) fn built_layout(
