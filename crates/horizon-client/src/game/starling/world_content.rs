@@ -226,17 +226,17 @@ pub(super) enum Entry {
 /// before): that set is its own, kept once it opens with it.
 pub(super) fn entry(folder: &str) -> Entry {
     let kept = recorded(folder);
-    let running = running();
+    let now = running();
     decide(
         folder,
         kept.clone()
-            .unwrap_or_else(|| world_default(enabled(), &loaded(), &running)),
-        &running,
+            .unwrap_or_else(|| world_default(enabled(), &loaded(), &now)),
+        &now,
         installed().as_ref(),
         next_start(),
         || {
             if kept.is_none() {
-                record(folder, &running());
+                record(folder, &now);
             }
         },
     )
