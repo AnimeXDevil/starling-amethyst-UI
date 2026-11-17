@@ -303,6 +303,9 @@ pub(super) enum Action {
     ChooseOrientation(crate::ha_launcher::catalog::Orientation),
     ChooseRenderer(crate::ha_launcher::catalog::RendererMode),
     ChooseProfile(u32),
+    /// Starling: a profile's Delete, then its confirmation (the profile's folder goes).
+    DeleteProfile(u32),
+    ConfirmDeleteProfile(u32),
     Dismiss,
     Immersive,
     Cutout,
@@ -426,8 +429,21 @@ pub(super) fn button(
     action: Action,
     accent: bool,
 ) {
+    let radius = (rect[3] * 0.42).clamp(10.0, 22.0);
+    button_rounded(ui, targets, rect, label, action, accent, radius);
+}
+
+/// As [`button`], with corners of `radius` (Starling's choosers: squarer than the pills).
+pub(super) fn button_rounded(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    label: &str,
+    action: Action,
+    accent: bool,
+    radius: f32,
+) {
     let [x, y, w, h] = rect;
-    let radius = (h * 0.42).clamp(10.0, 22.0);
     ui.rounded(
         x,
         y,
@@ -6308,6 +6324,29 @@ impl Launcher {
                 self.catalog.config.save(&self.home)?;
                 self.catalog.refresh(&self.home);
                 self.chooser = None;
+            }
+            Some(Action::DeleteProfile(profile)) => {
+                self.chooser = Some(super::chooser::Chooser::confirm_delete_profile(profile));
+            }
+            Some(Action::ConfirmDeleteProfile(profile)) => {
+                // Profile 0 is the game folder itself: it has no Delete.
+                if profile != 0 {
+                    let dir = self
+                        .home
+                        .join("profiles")
+                        .join(format!("profile-{profile}"));
+                    if let Err(e) = std::fs::remove_dir_all(&dir)
+                        && e.kind() != std::io::ErrorKind::NotFound
+                    {
+                        self.catalog.status = format!("Profile {profile} was not deleted: {e}");
+                    }
+                    if self.catalog.config.profile == profile {
+                        self.catalog.config.profile = 0;
+                        self.catalog.config.save(&self.home)?;
+                        self.catalog.refresh(&self.home);
+                    }
+                }
+                self.open_chooser(chooser::Kind::Profile);
             }
             Some(Action::Dismiss) => {
                 self.exit_confirmation = false;

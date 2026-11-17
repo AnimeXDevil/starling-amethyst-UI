@@ -1,10 +1,10 @@
 //! Explicit, scrollable selections. Values never cycle on repeated button taps.
 use super::{
     Launcher,
-    pages::{Action, button},
+    pages::{Action, button_rounded},
 };
 use crate::ha_launcher::catalog::RendererMode;
-use crate::ha_launcher::client::ui_theme::{Face, Ui};
+use crate::ha_launcher::client::ui_theme::{Face, Ui, color::with_alpha};
 
 pub(super) enum Kind {
     Aspect,
@@ -24,6 +24,8 @@ pub(super) struct Chooser {
     help: &'static str,
     device: Option<String>,
     choices: Vec<(String, String, Action, bool)>,
+    /// Starling: a Delete at the right of a choice (a profile's), by its index.
+    deletes: Vec<Option<Action>>,
     pub scroll: f32,
 }
 impl Launcher {
@@ -41,6 +43,7 @@ impl Launcher {
             None
         };
         let c = &self.catalog.config;
+        let mut deletes = Vec::new();
         let (title, help, choices) = match kind {
             Kind::Aspect => (
                 "Aspect ratio",
@@ -220,6 +223,11 @@ impl Launcher {
                 ids.sort_unstable();
                 ids.dedup();
                 let next = ids.last().copied().unwrap_or(0).checked_add(1);
+                // Every profile but the game folder itself (0) can be deleted.
+                deletes = ids
+                    .iter()
+                    .map(|&id| (id != 0).then_some(Action::DeleteProfile(id)))
+                    .collect();
                 let mut choices: Vec<_> = ids
                     .into_iter()
                     .map(|id| {
@@ -326,6 +334,7 @@ impl Launcher {
             title,
             help,
             choices,
+            deletes,
             device,
             scroll: 0.0,
         });
@@ -346,6 +355,32 @@ impl Chooser {
                 ),
                 ("Cancel".into(), String::new(), Action::Dismiss, true),
             ],
+            deletes: Vec::new(),
+            scroll: 0.0,
+        }
+    }
+    /// Starling: deleting profile `id` (its folder: worlds, mods, packs, settings) asks first;
+    /// Cancel goes back to the profiles.
+    pub(super) fn confirm_delete_profile(id: u32) -> Self {
+        Self {
+            title: "Delete profile?",
+            help: "Deletes its worlds, mods, packs and settings. This cannot be undone.",
+            device: Some(format!("Profile {id}")),
+            choices: vec![
+                (
+                    "Delete".into(),
+                    format!("Delete Profile {id} for good"),
+                    Action::ConfirmDeleteProfile(id),
+                    false,
+                ),
+                (
+                    "Cancel".into(),
+                    "Back to the profiles".into(),
+                    Action::Profile,
+                    true,
+                ),
+            ],
+            deletes: Vec::new(),
             scroll: 0.0,
         }
     }
@@ -415,7 +450,7 @@ impl Chooser {
                 y,
                 w - 64.0,
                 74.0,
-                14.0,
+                10.0,
                 if *selected {
                     theme.surface_selected
                 } else {
@@ -427,7 +462,7 @@ impl Chooser {
                 y,
                 w - 64.0,
                 74.0,
-                14.0,
+                10.0,
                 if *selected { 1.6 } else { 1.0 },
                 if *selected {
                     theme.accent
@@ -470,15 +505,26 @@ impl Chooser {
             if let Some(c) = ui.clip_rect([32.0, y, w - 64.0, 74.0]) {
                 targets.push((c, *action));
             }
+            // After the card's own target: the last one under a finger wins.
+            if let Some(delete) = self.deletes.get(i).copied().flatten() {
+                let r = [w - 48.0 - 96.0, y + 17.0, 96.0, 40.0];
+                ui.rounded(r[0], r[1], r[2], r[3], 10.0, with_alpha(theme.danger, 0.16));
+                ui.border(r[0], r[1], r[2], r[3], 10.0, theme.danger);
+                ui.centered_fit(Face::Medium, 14.0, r, theme.danger, "Delete");
+                if let Some(c) = ui.clip_rect(r) {
+                    targets.push((c, delete));
+                }
+            }
         }
         ui.set_clip(None);
-        button(
+        button_rounded(
             ui,
             targets,
             [32.0, h - 74.0, 160.0, 44.0],
             "Cancel",
             Action::Dismiss,
             false,
+            10.0,
         );
     }
 }
