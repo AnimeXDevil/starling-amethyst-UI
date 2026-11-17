@@ -52,6 +52,15 @@ pub(super) struct FilesOffer {
     buttons: Cell<[[f32; 4]; 2]>,
 }
 
+/// The restart that moves the player's files into the Starling folder (android.rs
+/// `game_folder`), saying so meanwhile.
+pub(super) fn restart_moving_files() {
+    crate::android::restart_app_saying(&horizon_client::lang::get_or(
+        "starling.restart.files",
+        "Moving your files into the Starling folder…",
+    ));
+}
+
 /// Written when the player turns the offer down (here or in the setup, game/setup.rs): it is not
 /// made again.
 pub(super) fn declined() -> PathBuf {
@@ -253,7 +262,7 @@ impl Game<'_> {
                 crate::android::open_file_access_settings();
                 offer.stage = Some(Stage::Waiting);
             }
-            (Card::Folder(Stage::Restart), 0) => crate::android::restart_app(),
+            (Card::Folder(Stage::Restart), 0) => restart_moving_files(),
             (Card::Folder(stage), _) => {
                 if stage != Stage::Restart {
                     let _ = std::fs::write(declined(), b"");

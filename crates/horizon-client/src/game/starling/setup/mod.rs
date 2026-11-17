@@ -911,7 +911,9 @@ impl Loading {
             }
             #[cfg(target_os = "android")]
             Action::Folder => match folder_offer(&self.setup) {
-                Some(super::files_offer::Stage::Restart) => crate::android::restart_app(),
+                Some(super::files_offer::Stage::Restart) => {
+                    super::files_offer::restart_moving_files()
+                }
                 _ => {
                     crate::android::open_file_access_settings();
                     self.setup.folder_asked = true;
