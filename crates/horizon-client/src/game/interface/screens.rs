@@ -560,7 +560,8 @@ impl Game<'_> {
             .into_iter()
             .chain(added)
             .chain(
-                (cfg!(target_os = "android") && !self.options.split_guest).then_some((LAUNCHER, 31)),
+                (cfg!(target_os = "android") && !self.options.split_guest)
+                    .then_some((LAUNCHER, 31)),
             )
     }
     pub(super) fn pause_click(&mut self) -> Result<()> {
