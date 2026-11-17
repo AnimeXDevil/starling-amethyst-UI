@@ -582,7 +582,7 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                         h(
                             H::GpuDrivers,
                             None,
-                            "A custom Vulkan driver for this phone's GPU instead of the system's: Turnip, PanVK, RADV and others. Next start.",
+                            "A custom Vulkan driver, like Turnip, instead of the system's. Next start.",
                         ),
                         h(
                             H::TranslucentBatching,
@@ -592,7 +592,7 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                         h(
                             H::RayTracing,
                             None,
-                            "Experimental: hardware ray tracing (ray queries) for shader packs that trace rays, where the GPU offers it. Next start.",
+                            "Experimental: hardware ray tracing for shader packs that use it. Next start.",
                         ),
                     ],
                 ),

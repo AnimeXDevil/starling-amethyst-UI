@@ -1050,7 +1050,7 @@
   "Ray Tracing": "Raytracing",
   "Hardware ray tracing (ray queries) where the GPU offers it. Next start.": "Hardware-Raytracing (Ray-Queries), wo die GPU es anbietet. Nach Neustart.",
   "Ray Tracing (Experimental)": "Raytracing (experimentell)",
-  "Experimental: hardware ray tracing (ray queries) for shader packs that trace rays, where the GPU offers it. Next start.": "Experimentell: Hardware-Raytracing (Ray-Queries) für Shader-Pakete, die Strahlen verfolgen, wo die GPU es anbietet. Nach Neustart.",
+  "Experimental: hardware ray tracing for shader packs that use it. Next start.": "Experimentell: Hardware-Raytracing für Shader-Pakete, die es nutzen. Nach Neustart.",
   "GPU Drivers...": "GPU-Treiber …",
-  "A custom Vulkan driver for this phone's GPU instead of the system's: Turnip, PanVK, RADV and others. Next start.": "Ein eigener Vulkan-Treiber für die GPU dieses Telefons statt des Systemtreibers: Turnip, PanVK, RADV und andere. Nach Neustart."
+  "A custom Vulkan driver, like Turnip, instead of the system's. Next start.": "Ein eigener Vulkan-Treiber, etwa Turnip, statt dem des Systems. Nach Neustart."
 }
