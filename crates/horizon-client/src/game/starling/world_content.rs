@@ -108,9 +108,7 @@ fn loaded_cell() -> &'static Mutex<BTreeSet<String>> {
     LOADED.get_or_init(Default::default)
 }
 pub(super) fn set_loaded(ids: BTreeSet<String>) {
-    *loaded_cell()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = ids;
+    *loaded_cell().lock().unwrap_or_else(PoisonError::into_inner) = ids;
 }
 fn loaded() -> BTreeSet<String> {
     loaded_cell()
@@ -407,7 +405,11 @@ mod tests {
         let probe_and_create = set(&["create", "probe"]);
         // Both loaded, only Create adds blocks: a new world plays with Create alone, which is
         // what runs, so it opens without starting again.
-        let default = world_default(probe_and_create.clone(), &probe_and_create, &set(&["create"]));
+        let default = world_default(
+            probe_and_create.clone(),
+            &probe_and_create,
+            &set(&["create"]),
+        );
         assert_eq!(default, set(&["create"]));
         assert_eq!(
             decide("w", default, &set(&["create"]), None, None, || {}),
