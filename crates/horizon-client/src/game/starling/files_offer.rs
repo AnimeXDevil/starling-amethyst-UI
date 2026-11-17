@@ -5,8 +5,8 @@
 //! `game_folder`). Turned down, it comes back from the folder buttons (Open Pack Folder...).
 //!
 //! After it, the offer of Horizon Android's worlds and resource packs (HorizonImport.java), for a
-//! player who set Starling up before the setup made it (game/setup.rs): on every start while
-//! Horizon Android is installed, until they came over.
+//! player who set Starling up before the setup made it (game/setup.rs): on a start while Horizon
+//! Android is installed, until they answer it (Bring them over, then Done; or Not now).
 use super::Game;
 use super::setup::{HORIZON_LATER, horizon_answered};
 use horizon_client::{
@@ -283,6 +283,8 @@ impl Game<'_> {
                 offer.horizon = None;
             }
             (Card::Horizon(false), _) => {
+                // Not now: not asked again on the next start either (setup.rs `horizon_answered`).
+                let _ = std::fs::write(horizon_answered(), b"");
                 HORIZON_LATER.store(true, std::sync::atomic::Ordering::Relaxed);
                 offer.horizon = None;
             }

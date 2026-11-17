@@ -68,8 +68,9 @@ impl FrameGraph {
     }
     /// Starling: over a menu (the title, the options, a screen over the world), the frames per
     /// second alone in a small box at the top right, where the full overlay covered the
-    /// screen's own buttons. The graph and the times are for the world.
-    pub fn draw_compact(&self, mode: Overlay, batch: &mut HudBatch, atlas: &HudAtlas) {
+    /// screen's own buttons. The graph and the times are for the world. `top` is where it starts:
+    /// under the touch controls' Back at the top right, which it covered at 2.
+    pub fn draw_compact(&self, mode: Overlay, batch: &mut HudBatch, atlas: &HudAtlas, top: f32) {
         if matches!(mode, Overlay::Off | Overlay::Stats) || self.frames.is_empty() {
             return;
         }
@@ -77,12 +78,12 @@ impl FrameGraph {
         let line = format!("{:.0} fps", 1000.0 / frame.max(0.001));
         let width = atlas.font.width(&line) + 6.0;
         let x = batch.width - width - 2.0;
-        batch.fill(atlas, x, 2.0, width, 14.0, rgba(0, 0, 0, 144));
+        batch.fill(atlas, x, top, width, 14.0, rgba(0, 0, 0, 144));
         batch.text_styled(
             atlas,
             &Text::literal(line),
             x + 3.0,
-            4.0,
+            top + 2.0,
             rgba(255, 255, 255, 255),
             true,
         );
@@ -199,7 +200,7 @@ mod tests {
                 },
             );
             if compact {
-                graph.draw_compact(Overlay::Graph, &mut batch, &atlas);
+                graph.draw_compact(Overlay::Graph, &mut batch, &atlas, 2.0);
             } else {
                 graph.draw(Overlay::Graph, &mut batch, &atlas);
             }
