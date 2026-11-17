@@ -113,5 +113,7 @@ pub fn apply_menu_slot_rules(
     if let Some(rules) = rules.filter(|rules| rules.listens(menu)) {
         rules.rule(menu, slot, stack, context, &mut may_place, &mut max_stack);
     }
+    // Starling: the old hook after the typed ones, for the mods made for it.
+    super::native_menu_slot_rules(menu, slot, stack, &mut may_place, &mut max_stack);
     (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
 }

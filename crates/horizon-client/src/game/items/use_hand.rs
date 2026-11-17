@@ -711,6 +711,8 @@ impl Game<'_> {
         // BlockItem.place: the used statistic and the placed_block trigger.
         self.award_stat("used", &stack.item, 1);
         self.trigger_block("minecraft:placed_block", target, &stack);
+        // Starling: the old hook, for the mods made for it (native_compat.rs).
+        self.native_place_block(&stack, target, state);
         self.check_wither_spawn(target)?;
         self.check_golem_spawn(target)?;
         self.consume_held();
