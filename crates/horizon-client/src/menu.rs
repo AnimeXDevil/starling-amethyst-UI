@@ -27,6 +27,20 @@ pub use models::{
 };
 mod slot_context;
 pub use slot_context::{SlotSnapshot, apply_menu_slot_rules, lan_container};
+
+/// Starling: a mod menu type's slot `slot`, whether it takes `stack` and how many it holds, as the
+/// mods made for the fork's Nightly of 08/11 say (its `native_menu_slot_rules`, API 130): after the
+/// typed `menu_slot_rules` (`apply_menu_slot_rules`). They inject here; it does nothing itself.
+#[inline(always)]
+pub fn native_menu_slot_rules(
+    menu: &str,
+    slot: usize,
+    stack: &ItemStack,
+    may_place: &mut bool,
+    max_stack: &mut u32,
+) {
+    let _ = (menu, slot, stack, may_place, max_stack);
+}
 use std::sync::Arc;
 
 mod bundle;
