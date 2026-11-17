@@ -124,6 +124,11 @@ pub(crate) struct State {
     path: Vec<(Arc<str>, u32)>,
     refusals: std::collections::HashSet<String>,
     epoch_budget: u64,
+    /// This thread's CPU time when the running top-level call began, where the system keeps one
+    /// per thread: [`cpu_deadline`] measures the call's budget in it.
+    cpu_started: Option<Duration>,
+    /// When the running top-level call began, for [`WALL_BACKSTOP`].
+    wall_started: Option<Instant>,
     group: usize,
     lending: Arc<AtomicUsize>,
 }
@@ -146,6 +151,8 @@ impl State {
             path: Vec::with_capacity(64),
             refusals: Default::default(),
             epoch_budget: 0,
+            cpu_started: None,
+            wall_started: None,
             group: 0,
             lending: Arc::default(),
         }
@@ -284,6 +291,49 @@ thread_local! {
 pub(crate) static CALL_BUDGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn note(reason: String) {
     LAST_REFUSAL.with(|last| *last.borrow_mut() = Some(reason));
+}
+
+/// This thread's CPU time, where the system keeps one per thread.
+fn thread_cpu() -> Option<Duration> {
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    {
+        let now = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
+        Some(Duration::new(
+            now.tv_sec.try_into().ok()?,
+            now.tv_nsec.try_into().ok()?,
+        ))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+    {
+        None
+    }
+}
+
+/// A call stopped by [`cpu_deadline`] although it had not spent its budget: it has run this many
+/// times its budget in wall time, blocked somewhere other than its own work.
+const WALL_BACKSTOP: u32 = 100;
+
+/// What a call does when it reaches its epoch deadline. The epoch clock counts wall time, about
+/// 1 ms a tick. A phone can take the game's thread off the CPU for half a second: under memory
+/// pressure, or with a busy core. Counted that way, a mod that did a few milliseconds of work would
+/// be stopped for good. So a call goes on while its thread has spent less than its budget
+/// ([`State::epoch_budget`], in milliseconds) of CPU since the call began, and stops once it has.
+/// It also stops as before on a thread without a CPU clock, and after [`WALL_BACKSTOP`] times its
+/// budget in wall time.
+fn cpu_deadline(cx: StoreContextMut<'_, State>) -> wasmtime::Result<wasmtime::UpdateDeadline> {
+    let state = cx.data();
+    let budget = Duration::from_millis(state.epoch_budget);
+    if let (Some(started), Some(wall)) = (state.cpu_started, state.wall_started)
+        && wall.elapsed() < budget * WALL_BACKSTOP
+        && let Some(now) = thread_cpu()
+    {
+        let used = now.saturating_sub(started);
+        if used < budget {
+            let rest = (budget - used).as_millis().clamp(1, u128::from(u64::MAX)) as u64;
+            return Ok(wasmtime::UpdateDeadline::Continue(rest));
+        }
+    }
+    Err(wasmtime::Error::new(wasmtime::Trap::Interrupt))
 }
 /// Why this thread's last guest call answered nothing: an epoch deadline, a trap with its
 /// code, a refusal by the stack guard, the group's state or the guest's own refusal.
@@ -842,6 +892,7 @@ impl WasmMod {
         let limits = Limits::new(group.join("+").into(), memory_mib);
         let mut store = Store::new(engine, State::new(limits));
         store.limiter(|state| &mut state.limits);
+        store.epoch_deadline_callback(cpu_deadline);
         store.set_epoch_deadline(30_000);
         let mut armed = false;
         let mut group = Group::link_cached_with(store, members, cache, |store, module, name| {
@@ -1057,6 +1108,8 @@ impl WasmMod {
                 };
                 store.set_epoch_deadline(budget);
                 store.data_mut().epoch_budget = budget;
+                store.data_mut().cpu_started = thread_cpu();
+                store.data_mut().wall_started = Some(Instant::now());
                 store.as_context_mut()
             }
         };
