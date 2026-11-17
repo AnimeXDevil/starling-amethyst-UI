@@ -31,6 +31,9 @@ if [ ! -x "$tools/bin/horizon-mixins" ]; then
 fi
 
 commit=$(git -C "$source" rev-parse HEAD)
+# horizon-mod-host's build script names the game build by `git rev-parse HEAD` unless this says it:
+# the build folder below is a copy without the repository (native_build.sh sets it the same way).
+export HORIZON_GAME_BUILD_ID=$commit
 work=${WORK:-$(mktemp -d)}
 mkdir -p "$work"
 build=$work/build
