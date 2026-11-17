@@ -13,6 +13,12 @@ pub struct Mod;
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
 
+/// A tick's work: rounds of integer math, and values sorted and put in a map. A twentieth of the
+/// first version's (20,000 and 2,048): on an F-03L (ARMv7, Pulley) that one ran past a hook's
+/// 100 ms budget and the game stopped the mod, so it measured nothing there.
+const ROUNDS: u32 = 1_000;
+const VALUES: u32 = 128;
+
 /// The next value of a xorshift stream.
 fn next(x: &mut u64) -> u64 {
     *x ^= *x << 13;
@@ -26,11 +32,11 @@ fn work(seed: u64) -> u64 {
     let mut x = seed | 1;
     // Integer math: the stream folded into an FNV-1a hash.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for _ in 0..20_000 {
+    for _ in 0..ROUNDS {
         hash = (hash ^ (next(&mut x) & 0xff)).wrapping_mul(0x0100_0000_01b3);
     }
     // Memory: a vector filled from the stream, then sorted.
-    let mut values: Vec<u32> = (0..2048u32).map(|i| (next(&mut x) as u32) ^ i).collect();
+    let mut values: Vec<u32> = (0..VALUES).map(|i| (next(&mut x) as u32) ^ i).collect();
     values.sort_unstable();
     hash ^= u64::from(values[values.len() / 2]);
     // A map: every fourth value in, then every eighth looked up.

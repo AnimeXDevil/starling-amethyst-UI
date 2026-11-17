@@ -1,6 +1,6 @@
 id = "starling_wasm_bench"
 name = "Starling Wasm Bench"
-version = "0.1.0"
+version = "0.2.0"
 description = "Does the same work on every server tick, so /modprofile report gives how long a tick of wasm mod work takes on this phone's engine (Cranelift on 64-bit, Pulley on 32-bit). Every ten seconds it says its checksum in the chat, the same on any engine."
 api = "0.2"
 side = "both"
