@@ -57,28 +57,13 @@ fn install_platform() -> Result<(), String> {
 
 /// The engine's start with the wasm mods of the game folder, loaded as the desktop's mod host loads
 /// them (horizon-mod-host's `load_code`) with no native code beside them: a phone's native mods are
-/// compiled into this library (packaging/android/native_build.sh), not loaded.
-#[cfg(target_pointer_width = "64")]
+/// compiled into this library (packaging/android/native_build.sh), not loaded. 32-bit Android runs
+/// them on Pulley, Wasmtime's interpreter, which Wasmtime picks where it has no compiler.
 fn start(startup: horizon_client::entry::Startup) {
     horizon_client::entry::start(
         Default::default(),
         |native, launch| horizon_mod_host::load_code(Vec::new(), &[], native, launch),
         horizon_mod_host::code_runtime(),
-        startup,
-    );
-}
-
-/// 32-bit Android loads no code mods: Wasmtime has no compiler for it, only its interpreter.
-#[cfg(target_pointer_width = "32")]
-fn start(startup: horizon_client::entry::Startup) {
-    horizon_client::entry::start(
-        Default::default(),
-        |_, _| (Vec::new(), ()),
-        horizon_client::entry::CodeRuntime {
-            initialize: |_| {},
-            refusal: |_| None,
-            startup_refused: |_| false,
-        },
         startup,
     );
 }

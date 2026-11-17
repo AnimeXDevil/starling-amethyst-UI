@@ -4,9 +4,11 @@
 mod constants;
 pub use constants::{GUEST_STACK_BYTES, HOST_HEADROOM};
 
-/// Reserve the guest stack on hosts that run Wasm mods. 32-bit Android loads none and keeps normal
-/// Rust worker stacks: a 136 MiB reservation per worker exhausted its address space while loading
-/// (#590). 64-bit Android reserves it, as the desktop does: there it is address space, not memory.
+/// Reserve the guest stack on hosts whose wasm runs on the thread's own stack (Cranelift's code).
+/// 32-bit Android keeps normal Rust worker stacks: a 136 MiB reservation per worker exhausted its
+/// address space while loading (#590), and its wasm runs on Pulley, whose frames are on the heap
+/// (`GUEST_STACK_BYTES`). 64-bit Android reserves it, as the desktop does: there it is address
+/// space, not memory.
 pub fn builder() -> std::thread::Builder {
     let worker = std::thread::Builder::new();
     #[cfg(not(all(target_os = "android", target_pointer_width = "32")))]
@@ -117,6 +119,11 @@ fn prepare() -> std::io::Result<()> {
 /// Refuse guest entry when the calling thread's stack reservation is too small.
 /// Cache the platform query once per thread; the hot path reads only thread-local state.
 pub fn check_current() -> Result<(), &'static str> {
+    // 32-bit Android runs wasm on Pulley, whose frames are on the heap (`GUEST_STACK_BYTES`): a
+    // thread needs no guest reservation of its own there.
+    if cfg!(all(target_os = "android", target_pointer_width = "32")) {
+        return Ok(());
+    }
     thread_local! {
         static CHECK: std::cell::OnceCell<Result<(), &'static str>> = const { std::cell::OnceCell::new() };
     }
