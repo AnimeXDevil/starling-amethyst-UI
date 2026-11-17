@@ -168,6 +168,17 @@ jobs:
           name: starling-wasm-probe
           path: packaging/android/wasm-probe/target/horizon-mod/*.hmod
           if-no-files-found: error
+      # The same work on every server tick, for `/modprofile report` on each engine.
+      - name: Build the wasm bench mod
+        if: inputs.wasm_probe && matrix.abi == 'arm64-v8a'
+        working-directory: packaging/android/wasm-bench
+        run: ../../../target/debug/cargo-horizon-mod horizon-mod build --wasm
+      - uses: actions/upload-artifact@v4
+        if: inputs.wasm_probe && matrix.abi == 'arm64-v8a'
+        with:
+          name: starling-wasm-bench
+          path: packaging/android/wasm-bench/target/horizon-mod/*.hmod
+          if-no-files-found: error
 
   release:
     # Publish once, only after every architecture has built and signed successfully.
