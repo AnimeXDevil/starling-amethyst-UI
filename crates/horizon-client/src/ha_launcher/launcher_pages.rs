@@ -451,9 +451,28 @@ pub(super) fn button(
     } else {
         15.0
     };
-    let fitted = ui.fit_text(Face::Medium, font, label, (w - 2.0 * padding).max(16.0));
+    // A label ending in " v" opens a list (Horizon Android's convention): the "v" is drawn as a
+    // chevron at the right, not as a letter after the text.
+    let dropdown = label.strip_suffix(" v");
+    let label = dropdown.unwrap_or(label);
+    let chevron = if dropdown.is_some() { 12.0 + 6.0 } else { 0.0 };
+    let fitted = ui.fit_text(
+        Face::Medium,
+        font,
+        label,
+        (w - 2.0 * padding - chevron).max(16.0),
+    );
     let text_w = ui.measure(Face::Medium, font, &fitted);
-    let left_align = matches!(action, Action::Field(_)) || label.ends_with(" v");
+    if dropdown.is_some() {
+        ui.icon(
+            Icon::ChevronDown,
+            x + w - padding - 12.0,
+            y + (h - 12.0) * 0.5,
+            12.0,
+            if accent { my3_on_accent() } else { my3_muted() },
+        );
+    }
+    let left_align = matches!(action, Action::Field(_)) || dropdown.is_some();
     let tx = if left_align {
         x + padding
     } else {

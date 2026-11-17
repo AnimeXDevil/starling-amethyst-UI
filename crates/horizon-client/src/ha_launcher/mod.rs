@@ -299,7 +299,10 @@ pub fn start(private: &Path, home: &Path) -> Start {
 /// (`StarlingActivity.restart`).
 pub fn play() {
     let _ = std::fs::write(horizon_client::logging::private_home().join(PLAY), b"");
-    crate::android::restart_app();
+    crate::android::restart_app_saying(&horizon_client::lang::get_or(
+        "starling.restart.play",
+        "Starting the game…",
+    ));
 }
 
 /// Set by the Launcher button: the game ends as Quit ends it (the world saved first), then the app

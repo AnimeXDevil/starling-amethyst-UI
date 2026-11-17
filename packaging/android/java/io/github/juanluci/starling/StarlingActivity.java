@@ -750,8 +750,19 @@ public class StarlingActivity extends NativeActivity {
      * in a process of its own, waits for this one to end.
      */
     public void restart() {
+        restart(null);
+    }
+
+    /**
+     * As {@link #restart()}, with what the restart screen says meanwhile (the reason, in the
+     * player's language: the world's mods, the launcher, the files moving); null for the default.
+     */
+    public void restart(String message) {
         Intent again = new Intent(this, LauncherActivity.class);
         again.putExtra(LauncherActivity.AFTER, android.os.Process.myPid());
+        if (message != null && !message.isEmpty()) {
+            again.putExtra(LauncherActivity.MESSAGE, message);
+        }
         again.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(again);
         runOnUiThread(new Runnable() {
