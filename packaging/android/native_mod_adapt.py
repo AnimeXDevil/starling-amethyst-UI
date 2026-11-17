@@ -742,6 +742,57 @@ def inline_includes(source):
                 file.unlink()
 
 
+# The embedded-content injection of the bundles that carry their content mod in `data/` (Deepbore Quarry,
+# Wayfarer Stones, Eating Animation): written against `content_root(root, enabled, [disabled,] dev) -> PathBuf`,
+# while the fork's is `content_root(root, sources: &ModsState) -> Result<ResourceRoot>`, whose `dev` it reads.
+# The injection gets `sources`, and its helper adds the written file to a copy of their `dev`.
+CONTENT_ROOT_BINDINGS = (
+    'bindings = [\n'
+    '  { name = "root", ty = "&std::path::Path", value = "root" },\n'
+    '  { name = "sources", ty = "&ModsState", value = "sources" },\n'
+    ']'
+)
+CONTENT_ROOT_HELPER = re.compile(
+    r"(fn \w+_embedded_content\(\s*root: &std::path::Path,).*?\) -> core::ops::ControlFlow<std::path::PathBuf> \{",
+    re.S,
+)
+CONTENT_ROOT_TAIL = re.compile(
+    r"let mut with = dev\.to_vec\(\);\s*with\.push\(file\);\s*"
+    r"core::ops::ControlFlow::Break\(content_root\(root, [^;]*?&with\)\)"
+)
+
+
+def embedded_content(text, mod_dir):
+    """The embedded-content injection and its helper, on the fork's `content_root`."""
+    blocks = re.split(r"(?m)^(?=\[\[injection\]\])", text)
+    for i, block in enumerate(blocks):
+        target = re.search(r'^\s*target\s*=\s*"([^"]*)"', block, re.M)
+        helper = re.search(r'^\s*helper\s*=\s*"([^"]*)"', block, re.M)
+        if not (target and helper and target[1].endswith("::content_root")):
+            continue
+        path = mod_dir / helper[1]
+        if not path.is_file():
+            continue
+        code = path.read_text(encoding="utf-8")
+        new = CONTENT_ROOT_HELPER.sub(
+            r"\1\n    sources: &ModsState,\n) -> core::ops::ControlFlow<"
+            r"horizon_client::Result<horizon_assets::resource_source::ResourceRoot>> {",
+            code,
+        )
+        new = new.replace("if dev.contains(&file)", "if sources.dev.contains(&file)")
+        new = CONTENT_ROOT_TAIL.sub(
+            "let mut with = sources.clone();\n    with.dev.push(file);\n"
+            "    core::ops::ControlFlow::Break(content_root(root, &with))",
+            new,
+        )
+        if new == code or "dev.to_vec()" in new:
+            continue
+        path.write_text(new, encoding="utf-8")
+        blocks[i] = re.sub(r"(?ms)^bindings\s*=\s*\[.*?^\]", CONTENT_ROOT_BINDINGS, block)
+        print(f"native_mod_adapt: {mod_dir.name}: embedded content on the fork's content_root")
+    return "".join(blocks)
+
+
 def main():
     source, mods = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
     modules = owners(source)
@@ -751,6 +802,7 @@ def main():
     for manifest in mods.glob("*/horizon-mixin.toml"):
         old = manifest.read_text(encoding="utf-8")
         new = adapt(old, source, modules)
+        new = embedded_content(new, manifest.parent)
 
         def moved(match, name=manifest.parent.name):
             target = relocate(match[2], tree)
