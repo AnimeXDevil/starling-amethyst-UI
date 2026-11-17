@@ -440,8 +440,8 @@ const PLAYER_FILES: &[&str] = &[
     "options.txt",
 ];
 
-/// Folders whose images are the game's own (world icons, skins, pack art), kept out of the
-/// gallery; screenshots are not.
+/// Folders whose images are the game's own (world icons, skins, pack art), made ahead with a
+/// `.nomedia` so the gallery never lists what lands in them; screenshots are not.
 const NO_MEDIA: &[&str] = &[
     "saves",
     "backups",
@@ -449,8 +449,43 @@ const NO_MEDIA: &[&str] = &[
     "datapacks",
     "shaderpacks",
     "horizon-mods",
+    "horizon-native-mods",
     "assets",
+    "downloads",
+    "skins",
 ];
+
+/// Keeps a game folder's images out of the phone's gallery (and the photo pickers that read
+/// it): a `.nomedia` in each of its folders but `screenshots`, the ones in `NO_MEDIA` made
+/// first, and the same in each of the launcher's profiles (`profiles/profile-N`, a game folder
+/// of its own). Pack icons, mod art and the catalog's pictures showed among the player's photos.
+fn hide_from_gallery(home: &Path) {
+    for name in NO_MEDIA {
+        let _ = std::fs::create_dir_all(home.join(name));
+    }
+    for entry in std::fs::read_dir(home).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        match entry.file_name().to_str() {
+            Some("screenshots") => {}
+            Some("profiles") => {
+                for profile in std::fs::read_dir(&path).into_iter().flatten().flatten() {
+                    if profile.path().is_dir() {
+                        hide_from_gallery(&profile.path());
+                    }
+                }
+            }
+            _ => {
+                let marker = path.join(".nomedia");
+                if !marker.exists() {
+                    let _ = std::fs::write(marker, b"");
+                }
+            }
+        }
+    }
+}
 
 /// The game folder: shared storage's once allowed (and what the player made in the app's own
 /// files moved there the first time), else the app's own files. Notes for the log, which
@@ -497,12 +532,7 @@ fn game_folder(private: &Path, notes: &mut Vec<String>) -> PathBuf {
             }
         }
     }
-    for name in NO_MEDIA {
-        let dir = shared.join(name);
-        if std::fs::create_dir_all(&dir).is_ok() && !dir.join(".nomedia").exists() {
-            let _ = std::fs::write(dir.join(".nomedia"), b"");
-        }
-    }
+    hide_from_gallery(shared);
     shared.clone()
 }
 
@@ -1325,6 +1355,15 @@ pub fn main(
     };
     let in_game = matches!(chosen, crate::ha_launcher::Start::Game(_));
     IN_GAME.store(in_game, std::sync::atomic::Ordering::Relaxed);
+    // A profile made since `game_folder` looked (the launcher makes its folder): its own folders
+    // stay out of the gallery from this start.
+    if home != folder
+        && SHARED_FOLDER
+            .get()
+            .is_some_and(|shared| home.starts_with(shared))
+    {
+        hide_from_gallery(&home);
+    }
     let (args, env) = command_line(&private);
     // SAFETY: no other thread of ours runs yet; the game reads these from its threads afterwards.
     unsafe {
