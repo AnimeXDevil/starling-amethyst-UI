@@ -4954,7 +4954,8 @@ impl Game<'_> {
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         self.draw_debug_overlay(&mut batch, size);
-        // Starling: over a menu, the frames per second alone (perf_overlay.rs `draw_compact`).
+        // Starling: over a menu, the frames per second alone (perf_overlay.rs `draw_compact`),
+        // under the touch controls' Back (20 high at 3, android_control_ui.rs).
         if cfg!(target_os = "android") && (self.title.is_some() || self.screen != Screen::Playing) {
             self.frame_graph.draw_compact(
                 self.settings.horizon.overlay,
