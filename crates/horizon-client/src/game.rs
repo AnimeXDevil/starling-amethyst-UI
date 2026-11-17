@@ -4961,6 +4961,7 @@ impl Game<'_> {
                 self.settings.horizon.overlay,
                 &mut batch,
                 &self.gui.atlas,
+                25.0,
             );
         } else {
             self.frame_graph
