@@ -6,17 +6,20 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.database.Cursor;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.provider.OpenableColumns;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.widget.TextView;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -108,14 +111,10 @@ public final class LauncherActivity extends Activity {
                 // As it is, then.
             }
         }
-        TextView text = new TextView(this);
         // The game says why it starts again (the world's mods, the launcher...); else, generic.
-        text.setText(message != null && !message.isEmpty() ? message : "Starting Starling again…");
-        text.setTextColor(0xFFFFFFFF);
-        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        text.setGravity(Gravity.CENTER);
-        text.setBackgroundColor(0xFF000000);
-        setContentView(text);
+        setContentView(new RestartView(this,
+                message != null && !message.isEmpty() ? message : "Starting Starling again…",
+                restartLook(this)));
         View decor = getWindow().getDecorView();
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
@@ -131,6 +130,138 @@ public final class LauncherActivity extends Activity {
                     | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+    }
+
+    /**
+     * The launcher's colours as the game kept them before asking for the restart (android.rs
+     * `keep_restart_look`): background, plate, plate border, accent, text, muted text and bar
+     * track. Horizon Android's default dark theme when there are none.
+     */
+    private static int[] restartLook(Context context) {
+        int[] look = {0xFF13111C, 0xFF1E1A2B, 0xFF5A5468, 0xFF8B78F0, 0xFFF5F2FC, 0xFFA39BBF,
+                0xFF2C2839};
+        File file = new File(context.getFilesDir(), "restart-look");
+        try (FileInputStream in = new FileInputStream(file)) {
+            byte[] bytes = new byte[256];
+            int n = in.read(bytes);
+            String[] parts = new String(bytes, 0, Math.max(n, 0), "UTF-8").trim().split(" ");
+            if (parts.length == look.length) {
+                int[] read = new int[look.length];
+                for (int i = 0; i < read.length; i++) {
+                    read[i] = (int) Long.parseLong(parts[i], 16);
+                }
+                return read;
+            }
+        } catch (Exception e) {
+            // The default look, then.
+        }
+        return look;
+    }
+
+    /**
+     * The restart screen: Horizon Android's launcher intro as it ends (android_control_theme.rs
+     * `draw_horizon_intro`, its first frame in the new process), the bar moving until the game
+     * is back, and the game's line under it.
+     */
+    private static final class RestartView extends View {
+        private final String message;
+        private final int[] look;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private final long start = SystemClock.uptimeMillis();
+
+        RestartView(Context context, String message, int[] look) {
+            super(context);
+            this.message = message;
+            this.look = look;
+        }
+
+        private static int alpha(int color, float a) {
+            return (Math.round((color >>> 24) * a) << 24) | (color & 0x00FFFFFF);
+        }
+
+        private void rounded(float x, float y, float w, float h, float r, int color) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(color);
+            rect.set(x, y, x + w, y + h);
+            canvas.drawRoundRect(rect, r, r, paint);
+        }
+
+        private void stroke(float x, float y, float w, float h, float r, float width, int color) {
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(width);
+            paint.setColor(color);
+            rect.set(x, y, x + w, y + h);
+            canvas.drawRoundRect(rect, r, r, paint);
+        }
+
+        /** Text centred on `cx` with its top at `top`, as the launcher's `text_centered`. */
+        private void text(String s, float cx, float top, float size, Typeface face, int color) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setTypeface(face);
+            paint.setTextSize(size);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setColor(color);
+            canvas.drawText(s, cx, top - paint.ascent(), paint);
+        }
+
+        private Canvas canvas;
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            this.canvas = canvas;
+            int bg = look[0], plate = look[1], plateBorder = look[2], accent = look[3];
+            int textColor = look[4], muted = look[5], track = look[6];
+            float width = getWidth(), height = getHeight();
+            // The launcher's units: its screen is about 450 of them tall in landscape.
+            float u = Math.max(height / 450f, 1f);
+            float w = width / u, h = height / u;
+            canvas.drawColor(bg);
+
+            float cx = w * 0.5f;
+            float cy = Math.max(110f, Math.min(h * 0.37f, h - 150f));
+            float size = Math.max(64f, Math.min(h * 0.19f, 88f));
+            // The mark: a ring, a plate, two pillars and the tilted bridge between them.
+            float ring = size * 0.64f;
+            rounded((cx - ring) * u, (cy - ring) * u, ring * 2 * u, ring * 2 * u, ring * 0.36f * u,
+                    alpha(accent, 0.14f));
+            stroke((cx - ring) * u, (cy - ring) * u, ring * 2 * u, ring * 2 * u, ring * 0.36f * u,
+                    1.5f * u, alpha(accent, 0.38f));
+            float plateR = size * 0.46f;
+            rounded((cx - plateR) * u, (cy - plateR) * u, plateR * 2 * u, plateR * 2 * u,
+                    plateR * 0.32f * u, alpha(plate, 0.94f));
+            stroke((cx - plateR) * u, (cy - plateR) * u, plateR * 2 * u, plateR * 2 * u,
+                    plateR * 0.32f * u, 1.4f * u, alpha(plateBorder, 0.85f));
+            float barW = Math.max(size * 0.135f, 3f), barH = Math.max(size * 0.56f, 10f);
+            float offset = size * 0.185f;
+            rounded((cx - offset - barW / 2) * u, (cy - barH / 2) * u, barW * u, barH * u,
+                    barW / 2 * u, textColor);
+            rounded((cx + offset - barW / 2) * u, (cy - barH / 2) * u, barW * u, barH * u,
+                    barW / 2 * u, accent);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(Math.max(barW * 0.92f, 2.5f) * u);
+            paint.setColor(accent);
+            canvas.drawLine((cx - offset) * u, (cy + size * 0.065f) * u, (cx + offset) * u,
+                    (cy - size * 0.065f) * u, paint);
+
+            float titleY = cy + size * 0.68f;
+            text("HORIZON", cx * u, titleY * u, 24f * u,
+                    Typeface.create("sans-serif-medium", Typeface.BOLD), textColor);
+            float subY = titleY + 32f;
+            text("RUST EDITION  •  ANDROID LAUNCHER", cx * u, subY * u, 11.5f * u,
+                    Typeface.create("sans-serif-medium", Typeface.NORMAL), alpha(muted, 0.9f));
+            // The bar fills towards its end while the game comes back (a few seconds).
+            float t = (SystemClock.uptimeMillis() - start) / 1000f;
+            float progress = 1f - (float) Math.exp(-t / 1.6f);
+            float bw = Math.max(180f, Math.min(w * 0.34f, 260f)), bh = 6f;
+            float bx = cx - bw / 2, by = subY + 28f;
+            rounded(bx * u, by * u, bw * u, bh * u, 3f * u, track);
+            rounded(bx * u, by * u, Math.max(bw * Math.max(progress, 0.05f), bh) * u, bh * u,
+                    3f * u, accent);
+            text(message, cx * u, (by + 12f) * u, 11f * u, Typeface.DEFAULT, alpha(muted, 0.88f));
+            postInvalidateOnAnimation();
         }
     }
 
