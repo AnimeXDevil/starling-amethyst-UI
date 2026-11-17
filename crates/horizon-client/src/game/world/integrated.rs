@@ -55,8 +55,8 @@ pub(super) const NO_ANSWER: &str =
 const SERVER_THREAD_STACK: usize =
     horizon_guest_stack::GUEST_STACK_BYTES + horizon_guest_stack::HOST_HEADROOM;
 
-/// 32-bit Android keeps the original server stack: it loads no Wasm guests, and its address space
-/// is short (`horizon_guest_stack::builder`).
+/// 32-bit Android keeps the original server stack: its wasm runs on Pulley, whose frames are on the
+/// heap, and its address space is short (`horizon_guest_stack::builder`).
 #[cfg(all(target_os = "android", target_pointer_width = "32"))]
 const SERVER_THREAD_STACK: usize = 8 * 1024 * 1024;
 

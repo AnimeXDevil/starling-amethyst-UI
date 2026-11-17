@@ -7,7 +7,8 @@ before its `start`). Sync 7 shipped an APK without them: it stopped at start, "e
 installed". A sync that adds an install to `main_with` fails here until the phone does it too.
 
 The phone's `start` (android_lib.rs) loads the code as `main_with` does, through the host's `load_code` and
-`code_runtime`, on 64-bit Android, where Wasmtime compiles wasm mods to the phone's code.
+`code_runtime`: on 64-bit Android Wasmtime compiles wasm mods to the phone's code, on 32-bit it runs them on
+Pulley, its interpreter.
 """
 
 import re
