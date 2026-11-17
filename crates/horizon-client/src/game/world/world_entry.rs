@@ -170,6 +170,18 @@ impl Game<'_> {
         }
     }
 
+    /// Waits until the world resources the title's start loads on a worker (`rest_loader`) are
+    /// in: the items, mobs and recipes `Resources::rest` holds.
+    pub(super) fn wait_world_rest(&mut self) -> Result<()> {
+        while self.rest_loader.is_some() {
+            self.poll_world_rest()?;
+            if self.rest_loader.is_some() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn poll_world_rest(&mut self) -> Result<()> {
         if let Some(loader) = &self.rest_loader
             && loader.ready()?
