@@ -76,6 +76,20 @@ impl Game<'_> {
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
     pub(in crate::game) fn native_tick(&mut self) {}
+    /// The client accepted a play login (the old `native_client_player_network_logging_in`,
+    /// without the identity the fork's `native_client_player_logging_in` passes). Client only.
+    pub(in crate::game) fn native_client_player_network_logging_in(&mut self) {}
+    /// A block item placed `state` at `pos` from `stack`, after the placement's sound and its
+    /// placed_block trigger (the old `native_place_block`, API 14). Server-side, for every player
+    /// of the world. The fork tells its typed hooks elsewhere (`on_block_placed_by`).
+    pub(in crate::game) fn native_place_block(
+        &mut self,
+        stack: &ItemStack,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) {
+        let _ = (stack, pos, state);
+    }
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(in crate::game) fn native_frame(&mut self, elapsed: Duration) {
         let _ = elapsed;
