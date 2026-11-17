@@ -186,10 +186,13 @@ pub fn start(requests: Sender<Request>, setup: Setup) {
         .expect("spawn the benchmark thread");
 }
 
-struct Control(Sender<Request>);
+/// The game's own command queue, as `horizon-ctl` reaches it; Starling's Calibrate... drives it
+/// too (`game/starling/perf_lab.rs`).
+pub struct Control(pub Sender<Request>);
 
 impl Control {
-    fn call(&self, line: &str) -> Result<Value, String> {
+    /// Sends a command and waits for its reply; the game's refusal is the error.
+    pub fn call(&self, line: &str) -> Result<Value, String> {
         let (reply, response) = mpsc::channel();
         self.0
             .send(Request {
@@ -207,7 +210,7 @@ impl Control {
             None => Ok(value),
         }
     }
-    fn status(&self) -> Value {
+    pub fn status(&self) -> Value {
         self.call("status").unwrap_or(Value::Null)
     }
 }
@@ -371,16 +374,7 @@ fn measure(
         (_, Some((name, value))) => apply_set(control, name, value)?,
         _ => {}
     }
-    replace_world(&setup.game_dir)?;
-    control.call(&format!("open {WORLD} {SEED} creative"))?;
-    // The world opens on a worker: its folder may not exist yet when `open` replies.
-    std::fs::create_dir_all(setup.game_dir.join("saves").join(WORLD)).map_err(|e| e.to_string())?;
-    std::fs::write(
-        setup.game_dir.join("saves").join(WORLD).join(MARKER),
-        "Created by horizon-client --benchmark; replaced by the next run.\n",
-    )
-    .map_err(|e| e.to_string())?;
-    let loaded = wait_loaded(control, |_| true)?;
+    let loaded = open_world(control, &setup.game_dir)?;
     report.metric("startup.world_ms", &[ms(loaded - setup.started)]);
 
     if setup.profile {
@@ -411,6 +405,44 @@ fn measure(
         }
     }
     Ok(())
+}
+
+/// Creates the benchmark world afresh from the title screen (`game_dir`: the folder `saves/` is
+/// in), marked as the benchmark's, and waits for the view around the spawn to load; returns when
+/// it had.
+pub fn open_world(control: &Control, game_dir: &Path) -> Result<Instant, String> {
+    replace_world(game_dir)?;
+    control.call(&format!("open {WORLD} {SEED} creative"))?;
+    // The world opens on a worker: its folder may not exist yet when `open` replies.
+    let world = game_dir.join("saves").join(WORLD);
+    std::fs::create_dir_all(&world).map_err(|e| e.to_string())?;
+    std::fs::write(
+        world.join(MARKER),
+        "Created by horizon-client --benchmark; replaced by the next run.\n",
+    )
+    .map_err(|e| e.to_string())?;
+    wait_loaded(control, |_| true)
+}
+
+/// Noon and clear, with the time and the weather held, so every frame sees the same sky.
+pub fn hold_weather(control: &Control) -> Result<(), String> {
+    for line in [
+        "command gamerule advance_time false",
+        "command gamerule advance_weather false",
+        "command weather clear",
+        "time 6000",
+    ] {
+        control.call(line)?;
+    }
+    Ok(())
+}
+
+/// Holds the camera at `at`, flying, facing `yaw` and `pitch`.
+pub fn hold(control: &Control, at: [f64; 3], yaw: f64, pitch: f64) -> Result<(), String> {
+    let [x, y, z] = at;
+    // A zero-length flight holds the player at the start, flying.
+    control.call(&format!("fly {x} {y} {z} {x} {y} {z} 0.1 {pitch}"))?;
+    control.call(&format!("look {yaw:.3} {pitch}")).map(drop)
 }
 
 /// Reads a switch before the run and puts it back after, whatever the run did and however it ended.
@@ -485,7 +517,7 @@ fn load_scene(
 }
 
 /// Whether a status position is within 2 blocks of `target`.
-fn near(target: [f64; 3]) -> impl Fn(&Value) -> bool {
+pub fn near(target: [f64; 3]) -> impl Fn(&Value) -> bool {
     move |p| {
         let p: Vec<f64> = p
             .as_array()
@@ -517,7 +549,7 @@ fn fly(
 }
 
 /// The frames of a `fly ... raw` or `bench ... raw` reply.
-fn frames_of(reply: &Value, phase: &str, repeat: u32) -> Result<Frames, String> {
+pub fn frames_of(reply: &Value, phase: &str, repeat: u32) -> Result<Frames, String> {
     let series = |key: &str| -> Vec<f32> {
         reply[key]
             .as_array()
@@ -565,14 +597,7 @@ fn trip(
     report: &mut Report,
     steady: &mut Vec<(Instant, Instant)>,
 ) -> Result<(), String> {
-    for line in [
-        "command gamerule advance_time false",
-        "command gamerule advance_weather false",
-        "command weather clear",
-        "time 6000",
-    ] {
-        control.call(line)?;
-    }
+    hold_weather(control)?;
     let (from, to) = (TRAVEL_FROM, TRAVEL_TO);
     load_scene(control, "travel", from, to, TRAVEL_PITCH, report)?;
     let flight = fly(
@@ -677,7 +702,7 @@ fn ab_blocks(
 }
 
 /// Removes the previous run's world, never one the benchmark didn't create.
-fn replace_world(game_dir: &Path) -> Result<(), String> {
+pub fn replace_world(game_dir: &Path) -> Result<(), String> {
     let world = game_dir.join("saves").join(WORLD);
     if !world.exists() {
         return Ok(());
@@ -691,7 +716,8 @@ fn replace_world(game_dir: &Path) -> Result<(), String> {
     std::fs::remove_dir_all(&world).map_err(|e| e.to_string())
 }
 
-fn poll(
+/// Asks for the status until `ready` takes it, for `limit` at most.
+pub fn poll(
     control: &Control,
     limit: Duration,
     ready: impl Fn(&Value) -> bool,
@@ -721,7 +747,7 @@ const QUIET_MESHES_PER_S: f64 = 100.0;
 /// Right after a teleport (and at spawn) the game reports nothing queued and steady counts for over
 /// a second before it starts loading: the counts must change once, or stay full for 5 s, and the
 /// resident chunks reach [`view_chunks`], before "steady" means loaded.
-fn wait_loaded(control: &Control, near: impl Fn(&Value) -> bool) -> Result<Instant, String> {
+pub fn wait_loaded(control: &Control, near: impl Fn(&Value) -> bool) -> Result<Instant, String> {
     let deadline = Instant::now() + LOAD_LIMIT;
     let (mut last, mut changed, mut meshing) = (None, Instant::now(), Instant::now());
     let mut previous: Option<(Instant, f64)> = None;

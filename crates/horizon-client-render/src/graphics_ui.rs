@@ -123,6 +123,9 @@ pub enum H {
     GraphicsApi,
     TranslucentBatching,
     HdrSmoothGradients,
+    /// Opens Starling's performance calibration (`options_ui::Page::PerfCalibration`): the
+    /// fastest way of drawing the same picture on this phone. Android only.
+    PerfCalibrate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -649,6 +652,12 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
             rows.retain(|r| !matches!(r.item, Item::Horizon(H::ParallelTick)));
         }
     }
+    // Starling finds the fastest way of drawing on the phone it runs on (game/starling/perf_lab.rs).
+    if cfg!(target_os = "android")
+        && let Some((_, groups)) = pages.iter_mut().find(|(p, _)| *p == Page::Performance)
+    {
+        groups.insert(0, calibration_group());
+    }
     // Only Windows and Linux have more than one graphics API, translucent batching (Metal
     // draws flat) and GPU culling (Metal draws no count the GPU wrote).
     if cfg!(target_os = "macos") {
@@ -664,6 +673,18 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
         }
     }
     pages
+}
+
+/// The Performance page's Calibration group: Calibrate..., on Android.
+fn calibration_group() -> (&'static str, Vec<Setting>) {
+    (
+        "Calibration",
+        vec![h(
+            H::PerfCalibrate,
+            Cost::None,
+            "Tries the ways of drawing that look the same, in a test world, and keeps the fastest.",
+        )],
+    )
 }
 
 /// BlueMap download radii, in chunks.
@@ -965,6 +986,7 @@ impl H {
                 Setup::Automatic => "Calibrate Anyway...",
                 Setup::Changed => "Use Automatic Setup",
             })),
+            H::PerfCalibrate => Text::literal(lang::get("Calibrate...")),
             H::HdrPaperWhite | H::HdrPeak | H::HdrUiBrightness => self.nits_label(s, out),
             H::HdrBlackLevel => labelled("Black Level", format!("{:.2}", g.black_level_nits())),
             H::HdrLighting => labelled("HDR Lighting", on_off(g.hdr_lighting)),
@@ -1206,7 +1228,10 @@ impl Item {
     fn steps(self, s: &Settings, out: &EffectiveOutput) -> bool {
         self.switch(s, out).is_none()
             && self.slider(s).is_none()
-            && !matches!(self, Item::Horizon(H::HdrCalibrate | H::ShaderPacks))
+            && !matches!(
+                self,
+                Item::Horizon(H::HdrCalibrate | H::ShaderPacks | H::PerfCalibrate)
+            )
     }
     /// On/off settings and their value.
     pub fn switch(self, s: &Settings, out: &EffectiveOutput) -> Option<bool> {
@@ -1508,6 +1533,7 @@ impl Screen for GraphicsScreen {
                 vec![Output::Event(Event::Changed)]
             }
             Item::Horizon(H::HdrCalibrate) => vec![Output::Push(OptionsPage::HdrCalibration)],
+            Item::Horizon(H::PerfCalibrate) => vec![Output::Push(OptionsPage::PerfCalibration)],
             // The list of either kind, as the Shaders page opens it from anywhere.
             Item::Horizon(H::ShaderPacks) => {
                 s.shader_options = None;
