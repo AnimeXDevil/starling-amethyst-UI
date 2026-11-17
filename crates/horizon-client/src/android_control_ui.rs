@@ -1076,6 +1076,19 @@ pub fn point_between_strips(px: [f32; 2], scale: f32, left: f32) -> [f32; 2] {
     [px[0] / scale - left, px[1] / scale]
 }
 
+/// Where the hub's title ends, and the line under it ("Configure touch controls..."), from the
+/// hub's left edge.
+const HUB_TITLE_END: f32 = 190.0;
+const HUB_LINE_END: f32 = 292.0;
+
+/// The hub's Launcher button, in its header left of the controls' badge (drawn and hit there).
+/// On a hub too narrow for it beside the line under the title, the line goes; on one too narrow
+/// for it beside the title, there is none (the pause menu still has Launcher).
+fn hub_launcher_button(dx: f32, dy: f32, dw: f32) -> Option<[f32; 4]> {
+    let r = [dx + dw - 272.0, dy + 10.0, 76.0, 28.0];
+    (r[0] >= dx + HUB_TITLE_END).then_some(r)
+}
+
 fn button(b: &mut HudBatch, a: &HudAtlas, label: &str, x: f32, y: f32, w: f32) {
     if !crate::android_controls::theme_button(
         b,
@@ -2283,6 +2296,10 @@ impl TouchUi {
 
         // 3. Main Horizon Control Hub Dialog
         if phase == TouchPhase::Started {
+            if hub_launcher_button(dx, dy, dw).is_some_and(inside) {
+                self.floating_menu = false;
+                return Some(InGameMenuAction::OpenLauncher);
+            }
             if !inside([dx, dy, dw, dh]) || inside([dx + dw - 76.0, dy + 10.0, 64.0, 30.0]) {
                 self.floating_menu = false;
                 self.resolution_scale_dragging = false;
@@ -2679,19 +2696,14 @@ impl TouchUi {
                     return Some(InGameMenuAction::Close);
                 }
                 let sys_y = body_y + 292.0;
-                let third = (cw - 20.0) / 3.0;
-                for (i, action) in [
-                    InGameMenuAction::ForceKill,
-                    InGameMenuAction::OpenLogs,
-                    InGameMenuAction::OpenLauncher,
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    if inside([cx + i as f32 * (third + 10.0), sys_y, third, 38.0]) {
-                        self.floating_menu = false;
-                        return Some(action);
-                    }
+                let half = (cw - 10.0) * 0.5;
+                if inside([cx, sys_y, half, 38.0]) {
+                    self.floating_menu = false;
+                    return Some(InGameMenuAction::ForceKill);
+                }
+                if inside([cx + half + 10.0, sys_y, half, 38.0]) {
+                    self.floating_menu = false;
+                    return Some(InGameMenuAction::OpenLogs);
                 }
             }
         }
@@ -2865,14 +2877,17 @@ impl TouchUi {
             text_c,
             "Horizon Control Hub",
         );
-        ui.text(
-            Face::Regular,
-            9.6,
-            dx + 52.0,
-            dy + 25.0,
-            muted_c,
-            "Configure touch controls, virtual mouse & feedback",
-        );
+        // The line under the title gives way to the Launcher button on a narrow hub.
+        if hub_launcher_button(dx, dy, dw).is_none_or(|r| r[0] >= dx + HUB_LINE_END) {
+            ui.text(
+                Face::Regular,
+                9.6,
+                dx + 52.0,
+                dy + 25.0,
+                muted_c,
+                "Configure touch controls, virtual mouse & feedback",
+            );
+        }
 
         // Active Control System Pill Badge in Header
         let mode_badge_txt = if settings.control_style == ControlStyle::Mcpe {
@@ -2888,6 +2903,14 @@ impl TouchUi {
             );
             ui.border(badge_r[0], badge_r[1], badge_r[2], badge_r[3], 8.0, accent);
             ui.centered_fit(Face::SemiBold, 9.5, badge_r, accent_hi, mode_badge_txt);
+        }
+
+        // Starling: the way back to Horizon Android's launcher, from any screen, in the header
+        // beside the controls' badge.
+        if let Some(r) = hub_launcher_button(dx, dy, dw) {
+            ui.rounded(r[0], r[1], r[2], r[3], 9.0, card_bg);
+            ui.border(r[0], r[1], r[2], r[3], 9.0, border_c);
+            ui.centered_fit(Face::SemiBold, 11.0, r, text_c, "Launcher");
         }
 
         // "Done" Button in top-right
@@ -3870,31 +3893,32 @@ impl TouchUi {
                 );
 
                 let sys_y = body_y + 292.0;
-                let third = (cw - 20.0) / 3.0;
+                let half = (cw - 10.0) * 0.5;
                 ui.rounded(
                     cx,
                     sys_y,
-                    third,
+                    half,
                     38.0,
                     10.0,
                     color::with_alpha(danger_c, 0.22),
                 );
-                ui.border(cx, sys_y, third, 38.0, 10.0, danger_c);
+                ui.border(cx, sys_y, half, 38.0, 10.0, danger_c);
                 ui.centered_fit(
                     Face::SemiBold,
                     10.8,
-                    [cx, sys_y, third, 38.0],
+                    [cx, sys_y, half, 38.0],
                     danger_c,
                     "Force Kill",
                 );
-                // Open Logs, then the launcher (Horizon Android's, where an instance can open
-                // directly): the way back to it from any screen, not only the title's.
-                for (i, label) in [(1.0, "Open Logs"), (2.0, "Launcher")] {
-                    let x = cx + i * (third + 10.0);
-                    ui.rounded(x, sys_y, third, 38.0, 10.0, card_bg);
-                    ui.border(x, sys_y, third, 38.0, 10.0, border_c);
-                    ui.centered_fit(Face::SemiBold, 10.8, [x, sys_y, third, 38.0], text_c, label);
-                }
+                ui.rounded(cx + half + 10.0, sys_y, half, 38.0, 10.0, card_bg);
+                ui.border(cx + half + 10.0, sys_y, half, 38.0, 10.0, border_c);
+                ui.centered_fit(
+                    Face::SemiBold,
+                    10.8,
+                    [cx + half + 10.0, sys_y, half, 38.0],
+                    text_c,
+                    "Open Logs",
+                );
             }
         }
 
@@ -8227,6 +8251,25 @@ mod tests {
             start,
             &mut settings,
         );
+    }
+
+    /// Starling: the hub's Launcher sits in its header between the title's line and the controls'
+    /// badge, or not at all when the hub is too narrow for it.
+    #[test]
+    fn the_hubs_launcher_button_fits_beside_its_title_or_is_not_there() {
+        // The widest hub (`hub_metrics`): beside the title and the line under it.
+        let (dx, dw) = (10.0, 610.0);
+        let r = hub_launcher_button(dx, 20.0, dw).expect("a wide hub has it");
+        assert!(r[0] + r[2] < dx + dw - 188.0, "it ends before the badge");
+        assert!(
+            r[0] >= dx + HUB_LINE_END,
+            "it starts after the title's line"
+        );
+        // A narrower one: beside the title, the line gone.
+        let r = hub_launcher_button(dx, 20.0, 500.0).expect("a middle hub has it");
+        assert!(r[0] >= dx + HUB_TITLE_END && r[0] < dx + HUB_LINE_END);
+        // The narrowest (352): none.
+        assert!(hub_launcher_button(dx, 20.0, 352.0).is_none());
     }
 
     /// The hub's "..." and its "H" button drawn between a camera cutout's strips (as
