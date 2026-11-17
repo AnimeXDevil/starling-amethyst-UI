@@ -26,15 +26,15 @@ pub unsafe extern "C" fn starling_on_create(
 /// android-activity's entry point calls it on the game's thread.
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
-    horizon_client::android::main(app, install_platform);
+    horizon_client::android::main(app, install_platform, start);
 }
 
 /// What the desktop's mod host installs before the engine starts (horizon-mod-host's `main_with`,
 /// crates/horizon-mod-host/src/loading.rs), in its order: the engine's seal, the mods'
 /// instrumentation, the engine platform socket (packages, registration data, parts, profiler) and
-/// the render points. The phone starts the engine from here instead of through that host, which
-/// also loads wasm mods (a phone has none); without these the game stops at its first mod guard
-/// ("engine platform socket is not installed").
+/// the render points. The phone starts the engine from here instead of through `main_with`, which
+/// loads native libraries next to an executable the phone does not have; without these the game
+/// stops at its first mod guard ("engine platform socket is not installed").
 fn install_platform() -> Result<(), String> {
     horizon_engine_slots::install_seal(mod_points::__private::seal)
         .map_err(|error| format!("engine seal: {error}"))?;
@@ -53,6 +53,34 @@ fn install_platform() -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     mod_render::render::install();
     Ok(())
+}
+
+/// The engine's start with the wasm mods of the game folder, loaded as the desktop's mod host loads
+/// them (horizon-mod-host's `load_code`) with no native code beside them: a phone's native mods are
+/// compiled into this library (packaging/android/native_build.sh), not loaded.
+#[cfg(target_pointer_width = "64")]
+fn start(startup: horizon_client::entry::Startup) {
+    horizon_client::entry::start(
+        Default::default(),
+        |native, launch| horizon_mod_host::load_code(Vec::new(), &[], native, launch),
+        horizon_mod_host::code_runtime(),
+        startup,
+    );
+}
+
+/// 32-bit Android loads no code mods: Wasmtime has no compiler for it, only its interpreter.
+#[cfg(target_pointer_width = "32")]
+fn start(startup: horizon_client::entry::Startup) {
+    horizon_client::entry::start(
+        Default::default(),
+        |_, _| (Vec::new(), ()),
+        horizon_client::entry::CodeRuntime {
+            initialize: |_| {},
+            refusal: |_| None,
+            startup_refused: |_| false,
+        },
+        startup,
+    );
 }
 
 /// `StarlingActivity.onStorage`, called on the UI thread before the game's thread starts.

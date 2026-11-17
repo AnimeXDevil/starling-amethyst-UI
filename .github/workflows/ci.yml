@@ -5,7 +5,7 @@ name: checks
 # is built by android.yml.
 on:
   push:
-    # android in JuanLuci/starling; starling and integration in starling-client/starling.
+    # starling and integration in starling-client/starling (android: Horizon Android's, and JuanLuci/starling's).
     branches: [android, starling, integration]
   pull_request:
     types: [opened, synchronize, reopened]
@@ -30,7 +30,8 @@ jobs:
   # Python and the Rust cache steps are GitHub's only.
   verify:
     runs-on: ${{ vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    # Since sync 7 a full run takes 43-47 minutes on GitHub's runners, so 45 cancelled half of them.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with:

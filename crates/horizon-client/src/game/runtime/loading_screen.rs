@@ -740,10 +740,8 @@ impl Loading {
         ui.finish();
         self.imports.draw(&gui.atlas, batch);
     }
-    /// The resources are in: the world's renderer starts on a thread of its own, on the boot
-    /// renderer's device, and the title stays on the screen and answers meanwhile. Built at the
-    /// handoff on the main thread, it held the title still for as long: 3.5 s on an Adreno 740,
-    /// 11 s on a PowerVR B-Series.
+    /// Build the world's renderer on the boot renderer's device. Backends that can share it
+    /// during initialization build on a worker while the title stays responsive.
     fn begin_world_renderer(&mut self) -> Result<()> {
         let (Some(boot), Some(gui), Some(Ok(loaded)), Some(window)) = (
             &self.boot_renderer,
@@ -773,9 +771,31 @@ impl Loading {
             shader_packs::picked_pack_shape(&self.settings),
             // What a renderer reads from the display comes after its first frames.
             Default::default(),
-        )
-        .into_owned();
+        );
         let lent = boot.lend();
+        // EGL serializes operations on the shared context. Slow GLES shader compilation can
+        // hold that lock past wgpu's timeout while the boot renderer is drawing on Android.
+        #[cfg(target_os = "android")]
+        if boot.info().backend == wgpu::Backend::Gl {
+            let built = startup::time("renderer.world", || parts.build(None, Some(lent)))
+                .map(|(renderer, pixels)| (renderer, pixels.into_owned()));
+            // As a build on the thread that fails (`poll_world_renderer`): these resources are
+            // done with. Android keeps the loop running after a failure, and would build from
+            // them again every frame.
+            let (renderer, pixels) = match built {
+                Ok(built) => built,
+                Err(e) => {
+                    self.loaded = None;
+                    return Err(e);
+                }
+            };
+            if atlas.is_some() {
+                gui.atlas.pixels = pixels;
+            }
+            self.world_renderer = Some(WorldRenderer::Built(Box::new(renderer)));
+            return Ok(());
+        }
+        let parts = parts.into_owned();
         let generation = loaded.pack.render.generation;
         let thread = std::thread::Builder::new()
             .name("world-renderer".into())

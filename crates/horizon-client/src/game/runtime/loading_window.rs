@@ -11,6 +11,7 @@ fn start_marker(previous: Option<&Renderer>) -> Option<std::path::PathBuf> {
     previous.is_none().then(|| {
         let marker = Game::options_path().with_file_name(horizon_client::graphics::RENDERER_MARKER);
         let _ = std::fs::write(&marker, "the renderer was starting\n");
+        horizon_client::graphics::note_start_marker(&marker);
         marker
     })
 }
@@ -625,6 +626,14 @@ pub(super) fn start_game<'a>(
         game.native_game_shutting_down();
         result?;
         return Ok(None);
+    }
+    // A content mod's client setup reads the items, which a start through the title loads on a
+    // worker (`rest_loader`): with content mods running, or for a world's mods (a start that
+    // enters it next), they finish loading first. Otherwise the setup could run before them and
+    // panic ("world resources joined before entry"), as the start that a world's mods asked for
+    // did on a phone. Any other start doesn't wait.
+    if world_content::next_start().is_some() || !world_content::running().is_empty() {
+        game.wait_world_rest()?;
     }
     // The atlases the initial load stitched, the models it baked, then FMLClientSetupEvent: once
     // per process, here in `run`, after the initial load applied.
