@@ -28,6 +28,29 @@ fn marker_driver(text: &str) -> &str {
 /// like the PowerVR GE8320's in `vkQueueSubmit`), so Auto and Vulkan become OpenGL ES.
 pub const RENDERER_MARKER: &str = "horizon-renderer-pending";
 
+/// The `RENDERER_MARKER`s this process wrote ([`note_start_marker`]).
+static START_MARKERS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+/// A `RENDERER_MARKER` written for a renderer that is starting, for the panic hook to find.
+pub fn note_start_marker(marker: &Path) {
+    START_MARKERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(marker.to_owned());
+}
+/// For the panic hook (`crash::install`): the markers go, as a panic is the game's, which the
+/// hook just caught, not the driver's. A start that panicked before its first frame (a mod's hook
+/// asking for what had not loaded yet, 2026-11-16) sent every start after it to OpenGL ES.
+pub fn forget_start_markers_after_panic() {
+    let markers = std::mem::take(
+        &mut *START_MARKERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for marker in markers {
+        let _ = fs::remove_file(marker);
+    }
+}
+
 /// What the system reports for the display HDR output goes to, in nits in HDR output's
 /// scale: where its SDR white sits (the desktop's white) and the peak. Each renderer keeps its
 /// own display's (`gfx::DisplayReading`).

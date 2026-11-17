@@ -101,6 +101,41 @@ pub(super) fn set_running(ids: BTreeSet<String>) {
         .unwrap_or_else(PoisonError::into_inner) = ids;
 }
 
+/// Every content mod (`Capability::Registries`) this process loaded, blocks and items or not
+/// (`mods::content_root` keeps it).
+fn loaded_cell() -> &'static Mutex<BTreeSet<String>> {
+    static LOADED: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
+    LOADED.get_or_init(Default::default)
+}
+pub(super) fn set_loaded(ids: BTreeSet<String>) {
+    *loaded_cell().lock().unwrap_or_else(PoisonError::into_inner) = ids;
+}
+/// Whether this process loaded any content mod, blocks and items or not.
+pub(super) fn any_loaded() -> bool {
+    !loaded().is_empty()
+}
+fn loaded() -> BTreeSet<String> {
+    loaded_cell()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+/// The set a world that keeps none plays with: the content mods Options > Mods turns on, but not
+/// one that loaded here and adds no blocks or items. Such a mod (a wasm mod declaring
+/// `registries` for its hooks) never joins `running`, so with it the world never matched the
+/// running set: it started the game again on every open, and then called the mod missing.
+fn world_default(
+    turned_on: BTreeSet<String>,
+    loaded: &BTreeSet<String>,
+    running: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    turned_on
+        .into_iter()
+        .filter(|id| !loaded.contains(id) || running.contains(id))
+        .collect()
+}
+
 /// The mods adding blocks or items that Options > Mods turns on (`mods::content_root` keeps it):
 /// the set every world played with before worlds kept their own.
 fn enabled_cell() -> &'static Mutex<BTreeSet<String>> {
@@ -193,15 +228,17 @@ pub(super) enum Entry {
 /// before): that set is its own, kept once it opens with it.
 pub(super) fn entry(folder: &str) -> Entry {
     let kept = recorded(folder);
+    let now = running();
     decide(
         folder,
-        kept.clone().unwrap_or_else(enabled),
-        &running(),
+        kept.clone()
+            .unwrap_or_else(|| world_default(enabled(), &loaded(), &now)),
+        &now,
         installed().as_ref(),
         next_start(),
         || {
             if kept.is_none() {
-                record(folder, &running());
+                record(folder, &now);
             }
         },
     )
@@ -365,6 +402,28 @@ mod tests {
         std::fs::write(&file, serde_json::json!({ "mods": ["create"] }).to_string()).unwrap();
         assert_eq!(read_set(&file), Some(set(&["create"])));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_loaded_mod_without_blocks_or_items_is_not_a_worlds_content() {
+        let probe_and_create = set(&["create", "probe"]);
+        // Both loaded, only Create adds blocks: a new world plays with Create alone, which is
+        // what runs, so it opens without starting again.
+        let default = world_default(
+            probe_and_create.clone(),
+            &probe_and_create,
+            &set(&["create"]),
+        );
+        assert_eq!(default, set(&["create"]));
+        assert_eq!(
+            decide("w", default, &set(&["create"]), None, None, || {}),
+            Entry::Open
+        );
+        // A mod turned on that did not load here is still asked for.
+        assert_eq!(
+            world_default(probe_and_create, &set(&[]), &set(&[])),
+            set(&["create", "probe"])
+        );
     }
 
     #[test]
