@@ -320,7 +320,9 @@ const WALL_BACKSTOP: u32 = 100;
 /// ([`State::epoch_budget`], in milliseconds) of CPU since the call began, and stops once it has.
 /// It also stops as before on a thread without a CPU clock, and after [`WALL_BACKSTOP`] times its
 /// budget in wall time.
-fn cpu_deadline(cx: StoreContextMut<'_, State>) -> wasmtime::Result<wasmtime::UpdateDeadline> {
+fn cpu_deadline(
+    cx: wasmtime::StoreHookState<'_, State>,
+) -> wasmtime::Result<wasmtime::UpdateDeadline> {
     let state = cx.data();
     let budget = Duration::from_millis(state.epoch_budget);
     if let (Some(started), Some(wall)) = (state.cpu_started, state.wall_started)
