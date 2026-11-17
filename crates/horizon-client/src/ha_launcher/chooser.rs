@@ -232,7 +232,8 @@ impl Launcher {
                     .into_iter()
                     .map(|id| {
                         (
-                            format!("Profile {id}"),
+                            // As the Play page counts them: Profile 1 is the game folder (0).
+                            format!("Profile {}", id + 1),
                             if id == 0 {
                                 "Default profile".into()
                             } else {
@@ -246,7 +247,7 @@ impl Launcher {
                 if let Some(id) = next {
                     choices.push((
                         "Create profile".into(),
-                        format!("Create Profile {id}"),
+                        format!("Create Profile {}", id + 1),
                         Action::ChooseProfile(id),
                         false,
                     ));
@@ -365,11 +366,11 @@ impl Chooser {
         Self {
             title: "Delete profile?",
             help: "Deletes its worlds, mods, packs and settings. This cannot be undone.",
-            device: Some(format!("Profile {id}")),
+            device: Some(format!("Profile {}", id + 1)),
             choices: vec![
                 (
                     "Delete".into(),
-                    format!("Delete Profile {id} for good"),
+                    format!("Delete Profile {} for good", id + 1),
                     Action::ConfirmDeleteProfile(id),
                     false,
                 ),

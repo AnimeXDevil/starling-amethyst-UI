@@ -6338,7 +6338,8 @@ impl Launcher {
                     if let Err(e) = std::fs::remove_dir_all(&dir)
                         && e.kind() != std::io::ErrorKind::NotFound
                     {
-                        self.catalog.status = format!("Profile {profile} was not deleted: {e}");
+                        self.catalog.status =
+                            format!("Profile {} was not deleted: {e}", profile + 1);
                     }
                     if self.catalog.config.profile == profile {
                         self.catalog.config.profile = 0;
@@ -6383,7 +6384,7 @@ impl Launcher {
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = if self.catalog.config.open_directly {
                     format!(
-                        "Starling now opens directly in profile {}. Press Launcher on the title screen or in the pause menu to come back.",
+                        "Starling now opens directly in profile {}. Press Launcher in the H menu or the pause menu to come back.",
                         self.catalog.config.profile + 1
                     )
                 } else {
