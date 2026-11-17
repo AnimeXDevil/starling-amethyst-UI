@@ -390,7 +390,15 @@ mod tests {
         .map(|(n, t)| (n.to_owned(), t.as_bytes().to_vec()))
         .into();
         let report = check(&Pack::from_files(files).unwrap()).unwrap();
-        let built = NativePack::new(&device, &queue, &terrain, report, &[], Default::default());
+        let built = NativePack::new(
+            &device,
+            &queue,
+            &terrain,
+            report,
+            &[],
+            Default::default(),
+            None,
+        );
         assert!(built.is_err(), "the pack should be refused");
     }
 
