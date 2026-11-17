@@ -31,6 +31,8 @@ import java.io.OutputStream;
 public final class LauncherActivity extends Activity {
     /** The game's process id: start the game again once it has ended. */
     static final String AFTER = "io.github.juanluci.starling.AFTER";
+    /** What the restart screen says while the game starts again (StarlingActivity.restart). */
+    static final String MESSAGE = "io.github.juanluci.starling.MESSAGE";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,7 +41,7 @@ public final class LauncherActivity extends Activity {
         final int after = intent == null ? 0 : intent.getIntExtra(AFTER, 0);
         Uri file = handedFile(intent);
         if (after != 0) {
-            showRestarting();
+            showRestarting(intent.getStringExtra(MESSAGE));
             new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -97,7 +99,7 @@ public final class LauncherActivity extends Activity {
      * under this see-through activity between the two processes, as if the game had closed.
      */
     @SuppressWarnings("deprecation")
-    private void showRestarting() {
+    private void showRestarting(String message) {
         // Android 8.0 refuses an orientation to a see-through activity (it throws).
         if (Build.VERSION.SDK_INT != Build.VERSION_CODES.O) {
             try {
@@ -107,7 +109,8 @@ public final class LauncherActivity extends Activity {
             }
         }
         TextView text = new TextView(this);
-        text.setText("Opening the world with its mods…");
+        // The game says why it starts again (the world's mods, the launcher...); else, generic.
+        text.setText(message != null && !message.isEmpty() ? message : "Starting Starling again…");
         text.setTextColor(0xFFFFFFFF);
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         text.setGravity(Gravity.CENTER);

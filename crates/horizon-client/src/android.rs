@@ -330,10 +330,32 @@ pub fn hide_keyboard() {
 /// Start the game again in a new process (the game folder is chosen at start). A restart the game
 /// asks for comes back to the game, not to the launcher (ha_launcher).
 pub fn restart_app() {
+    restart_app_saying(&horizon_client::lang::get_or(
+        "starling.restart.again",
+        "Starting Starling again…",
+    ));
+}
+
+/// `restart_app`, with what the restart screen says meanwhile: why the game starts again.
+pub fn restart_app_saying(message: &str) {
     if IN_GAME.load(std::sync::atomic::Ordering::Relaxed) {
         crate::ha_launcher::restart_into_game();
     }
-    with_activity(|env, activity| env.call_method(activity, "restart", "()V", &[]).map(drop));
+    call_restart(message);
+}
+
+/// `StarlingActivity.restart(String)`: the restart screen shows `message`.
+fn call_restart(message: &str) {
+    with_activity(|env, activity| {
+        let text = env.new_string(message)?;
+        env.call_method(
+            activity,
+            "restart",
+            "(Ljava/lang/String;)V",
+            &[jni::objects::JValue::Object(&text)],
+        )
+        .map(drop)
+    });
 }
 
 /// Whether this process runs the game, not Horizon Android's launcher (ha_launcher).
@@ -1379,12 +1401,14 @@ pub fn finish_and_exit() -> ! {
     crate::performance::stop();
     crate::diagnostics::finish();
     // The Launcher button: the app starts again into the launcher once this process is gone.
-    let method = if crate::ha_launcher::launcher_next() {
-        "restart"
+    if crate::ha_launcher::launcher_next() {
+        call_restart(&horizon_client::lang::get_or(
+            "starling.restart.launcher",
+            "Opening the launcher…",
+        ));
     } else {
-        "finish"
-    };
-    with_activity(|env, activity| env.call_method(activity, method, "()V", &[]).map(drop));
+        with_activity(|env, activity| env.call_method(activity, "finish", "()V", &[]).map(drop));
+    }
     std::thread::sleep(std::time::Duration::from_secs(3));
     // Else, or once the activity is gone: Android may keep the process and start a new activity
     // in it, but winit's event loop cannot be made twice in one process, so end it and the next
