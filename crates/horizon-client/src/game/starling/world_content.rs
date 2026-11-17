@@ -227,6 +227,12 @@ pub(super) enum Entry {
 /// A world that keeps no set yet played with the mods Options > Mods turns on (worlds kept none
 /// before): that set is its own, kept once it opens with it.
 pub(super) fn entry(folder: &str) -> Entry {
+    // Calibrate...'s test world (perf_lab.rs) is made, timed and deleted in one go: it plays with
+    // what runs. Starting again for the content mods a new world takes lost the calibration under
+    // way, and the world opened as an ordinary one.
+    if folder == horizon_client::benchmark::WORLD {
+        return Entry::Open;
+    }
     let kept = recorded(folder);
     let now = running();
     decide(
@@ -465,6 +471,13 @@ mod tests {
             decide("w", create.clone(), &none, Some(&create), None, || {}),
             Entry::Restart(create)
         );
+    }
+
+    /// Calibrate... opens its test world whatever content mods are turned on (seen on a POCO:
+    /// a wasm mod turned on made it start again, and the calibration was lost).
+    #[test]
+    fn the_calibration_world_never_starts_the_game_again() {
+        assert_eq!(entry(horizon_client::benchmark::WORLD), Entry::Open);
     }
 
     #[test]
