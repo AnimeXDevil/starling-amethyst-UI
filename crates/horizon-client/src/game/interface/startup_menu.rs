@@ -836,7 +836,7 @@ impl Loading {
                     &horizon_client::logging::private_home(),
                 ),
                 // No world debug list exists before Game construction, nor a renderer to test.
-                Event::DebugEntriesChanged | Event::PerfLab(_) => {}
+                Event::DebugEntriesChanged | Event::PerfLab(_) | Event::Calibrate(_) => {}
                 Event::Changed => {
                     self.save_menu_settings();
                     // Starling: the touch options (vibration, ...) live in horizon-touch.json,

@@ -2027,6 +2027,9 @@ pub enum Page {
     GraphicsHdr,
     /// HDR calibration, full screen (`calibration`).
     HdrCalibration,
+    /// Starling's performance calibration, from the graphics screen's Calibrate...: what it
+    /// found, and its buttons (`calibrate`, set by game/starling/perf_lab.rs).
+    PerfCalibration,
     /// Horizon's controller settings and button binds.
     Controller,
     PadBinds,
@@ -2067,6 +2070,7 @@ pub(crate) enum Act {
     DiagnosticsRecord,
     DiagnosticsGpu,
     PerfLab(u8),
+    Calibrate(u8),
     None,
     Push(Page),
     Done,
@@ -2269,6 +2273,8 @@ pub enum Event {
     ImportPacks(Vec<std::path::PathBuf>),
     /// One of the performance test's switches (`perf_lab`), by index: the next choice.
     PerfLab(u8),
+    /// One of the calibration page's buttons (`calibrate`), by index.
+    Calibrate(u8),
     /// The Pack Options page closed with changes: the player's choices of its entries, the
     /// ones that differ from their defaults (the others went back to theirs).
     PackOptions {
@@ -2497,6 +2503,10 @@ pub struct OptionsUi {
     /// them. Empty: no test section.
     pub perf_lab: Vec<String>,
     pub perf_lab_notes: Vec<String>,
+    /// The calibration page's lines (what the last run found, why it can't run now) and its
+    /// buttons' labels (`Event::Calibrate` with its index), set by the game while it shows.
+    pub calibrate_notes: Vec<String>,
+    pub calibrate: Vec<String>,
     /// A repro recording is running: the AI Agent page's button says stop.
     pub agent_recording: bool,
     /// The Music page's groups (set by the game when it opens the page).
@@ -2652,6 +2662,8 @@ impl Default for OptionsUi {
             diagnostics_status: Vec::new(),
             perf_lab: Vec::new(),
             perf_lab_notes: Vec::new(),
+            calibrate_notes: Vec::new(),
+            calibrate: Vec::new(),
             agent_recording: false,
             music_groups: Vec::new(),
             focus: None,
@@ -3585,6 +3597,7 @@ impl OptionsUi {
             Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr | Page::HdrCalibration => {
                 "options.videoTitle"
             }
+            Page::PerfCalibration => "starling.calibrate.title",
             Page::Controller | Page::PadBinds => "horizon.pages.controller",
             Page::ControllerRadial => "horizon.pages.controller_radial",
             Page::ControllerRadialName => "horizon.radial.name_title",
@@ -3877,6 +3890,27 @@ impl OptionsUi {
                         ));
                     }
                     rows.extend(self.perf_lab_notes.iter().cloned().map(Row::Note));
+                }
+                rows
+            }
+            Page::PerfCalibration => {
+                let mut rows = vec![Row::Note(lang::get("starling.calibrate.about"))];
+                if self.calibrate.is_empty() && self.calibrate_notes.is_empty() {
+                    // Before the game is up (the startup menu), there is nothing to run it in.
+                    rows.push(Row::Note(lang::get("starling.calibrate.later")));
+                }
+                rows.extend(self.calibrate_notes.iter().cloned().map(Row::Note));
+                for (i, label) in self.calibrate.iter().enumerate() {
+                    rows.push(Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            Text::literal(label.clone()),
+                            Act::Calibrate(i as u8),
+                        ),
+                        None,
+                    ));
                 }
                 rows
             }
@@ -5292,6 +5326,7 @@ impl OptionsUi {
                         Act::DiagnosticsRecord => events.push(Event::DiagnosticsRecord),
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
                         Act::PerfLab(i) => events.push(Event::PerfLab(*i)),
+                        Act::Calibrate(i) => events.push(Event::Calibrate(*i)),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
@@ -6552,6 +6587,7 @@ impl OptionsUi {
                         Act::DiagnosticsRecord => events.push(Event::DiagnosticsRecord),
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
                         Act::PerfLab(i) => events.push(Event::PerfLab(i)),
+                        Act::Calibrate(i) => events.push(Event::Calibrate(i)),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         // Starling's pages answer taps only.
                         Act::CustomButtons
