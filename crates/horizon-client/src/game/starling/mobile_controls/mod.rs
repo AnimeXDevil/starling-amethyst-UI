@@ -676,7 +676,13 @@ impl Game<'_> {
         true
     }
     fn android_show_keyboard(&mut self) {
-        if self.mobile.controls.editor.as_ref().is_some_and(|e| e.editing_label) {
+        if self
+            .mobile
+            .controls
+            .editor
+            .as_ref()
+            .is_some_and(|e| e.editing_label)
+        {
             let empty = String::new();
             mobile_platform::show(&empty);
         } else if let Some(ed) = &self.mobile.controls.editor {

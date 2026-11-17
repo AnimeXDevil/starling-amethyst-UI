@@ -39,7 +39,11 @@ impl CustomButton {
             || crate::keybinds::mouse_button(token).is_some()
             || matches!(
                 token,
-            "mouse.scroll.up" | "mouse.scroll.down" | "mouse.virtual.toggle" | "mouse.look" | "mouse.keyboard"
+                "mouse.scroll.up"
+                    | "mouse.scroll.down"
+                    | "mouse.virtual.toggle"
+                    | "mouse.look"
+                    | "mouse.keyboard"
             )
             || token
                 .strip_prefix("action:")

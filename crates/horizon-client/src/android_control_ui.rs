@@ -7529,11 +7529,11 @@ pub fn touch_hud_editor(
                                 _ => {
                                     if let Some(idx) = ed.selected_custom {
                                         if let Some(btn) = tc.settings.custom_buttons.get_mut(idx) {
-    btn.custom_label.clear();
-}
-ed.editing_label = true;
-ed.keyboard_request = true;
-ed.status_msg = Some("Type the label, then press Enter. Empty = default name.".into());
+                                            btn.custom_label.clear();
+                                        }
+                                        ed.editing_label = true;
+                                        ed.keyboard_request = true;
+                                        ed.status_msg = Some("Type the label, then press Enter. Empty = default name.".into());
                                     }
                                 }
                             }
