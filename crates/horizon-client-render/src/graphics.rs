@@ -786,6 +786,44 @@ pub fn gpu_culling_lost() -> bool {
     GPU_CULLING_LOST.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+static RAY_TRACING_WANTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// The Ray Tracing switch (experimental, #470) as `horizon-graphics.txt` had it when it was
+/// read (`Graphics::load`): the device a renderer opens asks for ray queries with it, so a
+/// change applies at the next start.
+pub fn ray_tracing_wanted() -> bool {
+    RAY_TRACING_WANTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static RAY_TRACING_OFFERED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// Whether the adapter offers hardware ray tracing (`Features::EXPERIMENTAL_RAY_QUERY`):
+/// set when the renderer opens its device. The Ray Tracing switch is greyed out where it
+/// is false, whatever `horizon-graphics.txt` says.
+pub fn offer_ray_tracing(on: bool) {
+    RAY_TRACING_OFFERED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn ray_tracing_offered() -> bool {
+    RAY_TRACING_OFFERED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static RAY_TRACING_MISSING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Why the adapter offers no ray queries, for the settings screen: the missing device
+/// extensions `open_backend` enumerated, if it could (`None`: not enumerated, e.g. the
+/// graphics API is not Vulkan). Overwritten on every device open.
+pub fn set_ray_tracing_missing(missing: Option<&[&str]>) {
+    *RAY_TRACING_MISSING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = missing.map(|m| m.join(", "));
+}
+/// [`set_ray_tracing_missing`]'s message, if one was recorded.
+pub fn ray_tracing_missing() -> Option<String> {
+    RAY_TRACING_MISSING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// The farthest LOD Distance, in chunks, on integrated GPUs other than
 /// Apple's: they share the CPU's memory bandwidth, and past it far terrain
 /// costs them more frame time than it is worth.
@@ -984,6 +1022,10 @@ pub struct Graphics {
     /// is made (start, resource-pack reload), like `translucent_batching`, where the renderer's
     /// device draws it (`EffectiveOutput::wide_frame_supported`).
     pub hdr_smooth_gradients: bool,
+    /// Hardware ray tracing (ray queries): asked of a device whose adapter offers it,
+    /// when this is on (off by default). Falls back to a plain device when the
+    /// ray-tracing one fails to open.
+    pub ray_tracing: bool,
     /// The native `horizon:<manifest-id>` or classic filename picked in `shaderpacks/`; empty: none. Its key is
     /// not `shaderPack`, which versions before the clean-room rewrite saved and which stays
     /// ignored.
@@ -1091,6 +1133,7 @@ impl Default for Graphics {
             api: GraphicsApi::Auto,
             translucent_batching: true,
             hdr_smooth_gradients: true,
+            ray_tracing: false,
             shader_pack: String::new(),
             shader_profile: String::new(),
         }
@@ -1141,7 +1184,13 @@ impl Graphics {
                 &crate::logging::private_home(),
             ));
         }
-        if driver_died && cfg!(target_os = "android") && after_driver_crash(g.api) != g.api {
+        if driver_died
+            && cfg!(target_os = "android")
+            // A custom GPU driver keeps Vulkan: its own start counter (gpu_drivers::note_start)
+            // sets it aside after repeated crashes, instead of swinging the API to OpenGL ES.
+            && crate::gpu_drivers::active().is_none()
+            && after_driver_crash(g.api) != g.api
+        {
             g.api = after_driver_crash(g.api);
             g.save(dir);
             log::warn!(
@@ -1149,6 +1198,8 @@ impl Graphics {
                  graphics API is OpenGL ES now (Video Settings, or graphicsApi in {FILE})"
             );
         }
+        // Ray Tracing (experimental, #470): the renderers this start makes read it.
+        RAY_TRACING_WANTED.store(g.ray_tracing, std::sync::atomic::Ordering::Relaxed);
         g
     }
     /// Whether HDR output is held back on a window whose graphics driver is `driver`
@@ -1293,6 +1344,7 @@ impl Graphics {
                 "shadowCache" => g.shadow_cache = flag(g.shadow_cache),
                 "batchTranslucent" => g.translucent_batching = flag(g.translucent_batching),
                 "hdrSmoothGradients" => g.hdr_smooth_gradients = flag(g.hdr_smooth_gradients),
+                "rayTracing" => g.ray_tracing = flag(g.ray_tracing),
                 "graphicsApi" => g.api = GraphicsApi::from_name(value).unwrap_or_default(),
                 "pickedShaderPack" => g.shader_pack = value.to_owned(),
                 // Starling's pick before it took this page's key (`off`: none).
@@ -1324,7 +1376,7 @@ impl Graphics {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nentityCullingPrecheck:{}\nparticleCulling:{}\nleafCulling:{}\nopaqueIce:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\ndynamicResolution:{}\ntargetFps:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nupscalingSharpness:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiNits:{}\nhdrLighting:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nshadersProfile:{}\nbatchTranslucent:{}\nhdrSmoothGradients:{}\ngpuCulling:{}\nparallelTick:{}\n",
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nentityCullingPrecheck:{}\nparticleCulling:{}\nleafCulling:{}\nopaqueIce:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\ndynamicResolution:{}\ntargetFps:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nupscalingSharpness:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiNits:{}\nhdrLighting:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nshadersProfile:{}\nbatchTranslucent:{}\nhdrSmoothGradients:{}\ngpuCulling:{}\nparallelTick:{}\nrayTracing:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
@@ -1385,6 +1437,7 @@ impl Graphics {
             bool_text(self.hdr_smooth_gradients),
             self.gpu_culling.key(),
             self.parallel_tick.name(),
+            bool_text(self.ray_tracing),
         );
         if let Some(driver) = &self.hdr_failed_start {
             text += &format!("hdrFailedStart:{driver}\n");
@@ -1820,6 +1873,7 @@ mod tests {
             api: GraphicsApi::Dx12,
             translucent_batching: false,
             hdr_smooth_gradients: false,
+            ray_tracing: true,
             shader_pack: "Golden Hour".into(),
             shader_profile: "LOW".into(),
         };

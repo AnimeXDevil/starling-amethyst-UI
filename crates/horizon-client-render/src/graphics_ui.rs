@@ -122,12 +122,16 @@ pub enum H {
     ShaderPacks,
     GraphicsApi,
     TranslucentBatching,
+    /// Ray Tracing (experimental, #470): a ray-query device for `[ray_tracing]` shader packs.
+    RayTracing,
     HdrSmoothGradients,
     /// Opens Starling's performance calibration (`options_ui::Page::PerfCalibration`): the
     /// fastest way of drawing the same picture on this phone. Android only.
     PerfCalibrate,
     /// What Calibrate... does, a line to read above it.
     PerfCalibrateNote,
+    /// Opens the custom GPU drivers (`options_ui::Page::GpuDrivers`, #470). Android arm64 only.
+    GpuDrivers,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -576,9 +580,19 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                             "Vulkan, then DirectX 12 (Windows) or OpenGL (Linux) where it fails. Next start.",
                         ),
                         h(
+                            H::GpuDrivers,
+                            None,
+                            "A custom Vulkan driver for this phone's GPU instead of the system's: Turnip, PanVK, RADV and others. Next start.",
+                        ),
+                        h(
                             H::TranslucentBatching,
                             Saves,
                             "Water and glass in one buffer: fewer draw calls, a bit more VRAM. Next start.",
+                        ),
+                        h(
+                            H::RayTracing,
+                            None,
+                            "Experimental: hardware ray tracing (ray queries) for shader packs that trace rays, where the GPU offers it. Next start.",
                         ),
                     ],
                 ),
@@ -659,6 +673,14 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
         && let Some((_, groups)) = pages.iter_mut().find(|(p, _)| *p == Page::Performance)
     {
         groups.insert(0, calibration_group());
+    }
+    // Custom GPU drivers load through libadrenotools: Android on arm64 only (#470).
+    if !(cfg!(target_os = "android") && cfg!(target_arch = "aarch64")) {
+        for (_, groups) in &mut pages {
+            for (_, rows) in groups {
+                rows.retain(|r| r.item != Item::Horizon(H::GpuDrivers));
+            }
+        }
     }
     // Only Windows and Linux have more than one graphics API, translucent batching (Metal
     // draws flat) and GPU culling (Metal draws no count the GPU wrote).
@@ -995,6 +1017,7 @@ impl H {
                 Setup::Changed => "Use Automatic Setup",
             })),
             H::PerfCalibrate => Text::literal(lang::get("Calibrate...")),
+            H::GpuDrivers => Text::literal(lang::get("GPU Drivers...")),
             H::PerfCalibrateNote => Text::literal(lang::get(CALIBRATE_NOTE)),
             H::HdrPaperWhite | H::HdrPeak | H::HdrUiBrightness => self.nits_label(s, out),
             H::HdrBlackLevel => labelled("Black Level", format!("{:.2}", g.black_level_nits())),
@@ -1009,6 +1032,10 @@ impl H {
             H::TranslucentBatching => labelled(
                 "Translucent Batching",
                 on_off(g.translucent_batching && crate::graphics::translucent_batching_offered()),
+            ),
+            H::RayTracing => labelled(
+                "Ray Tracing (Experimental)",
+                on_off(g.ray_tracing && crate::graphics::ray_tracing_offered()),
             ),
             H::HdrSmoothGradients => labelled(
                 "Smooth Gradients",
@@ -1148,6 +1175,7 @@ impl H {
             H::ShadowCache => g.shadow_cache = !g.shadow_cache,
             H::GraphicsApi => g.api = step(GraphicsApi::choices(), g.api, back),
             H::TranslucentBatching => g.translucent_batching = !g.translucent_batching,
+            H::RayTracing => g.ray_tracing = !g.ray_tracing,
             H::HdrSmoothGradients => g.hdr_smooth_gradients = !g.hdr_smooth_gradients,
             H::Pacing => {
                 g.pacing = match g.pacing {
@@ -1220,6 +1248,9 @@ impl Item {
             {
                 Some("Your GPU or graphics API doesn't support it.")
             }
+            Item::Horizon(H::RayTracing) if !crate::graphics::ray_tracing_offered() => {
+                Some("Your GPU or graphics API doesn't support it.")
+            }
             Item::Horizon(H::EntityCullingPrecheck)
                 if s.horizon.entity_culling != EntityCullingMode::Asynchronous =>
             {
@@ -1240,7 +1271,11 @@ impl Item {
             && !matches!(
                 self,
                 Item::Horizon(
-                    H::HdrCalibrate | H::ShaderPacks | H::PerfCalibrate | H::PerfCalibrateNote
+                    H::HdrCalibrate
+                        | H::ShaderPacks
+                        | H::PerfCalibrate
+                        | H::PerfCalibrateNote
+                        | H::GpuDrivers
                 )
             )
     }
@@ -1270,6 +1305,7 @@ impl Item {
             Item::Horizon(H::TranslucentBatching) => {
                 g.translucent_batching && crate::graphics::translucent_batching_offered()
             }
+            Item::Horizon(H::RayTracing) => g.ray_tracing && crate::graphics::ray_tracing_offered(),
             Item::Horizon(H::HdrSmoothGradients) => {
                 g.hdr_smooth_gradients && out.wide_frame_supported
             }
@@ -1353,6 +1389,7 @@ impl Item {
                         | H::ShadowCache
                         | H::GraphicsApi
                         | H::TranslucentBatching
+                        | H::RayTracing
                         | H::HdrSmoothGradients
                 )
                 | Item::Vanilla(
@@ -1431,7 +1468,17 @@ fn row(setting: Setting, s: &Settings, out: &EffectiveOutput) -> Row<Item> {
         ..Row::new(item, name, value)
             .about(about)
             .cost(setting.cost)
-            .blocked(item.blocked(s, out).map(lang::get))
+            .blocked(item.blocked(s, out).map(|why| {
+                // A greyed Ray Tracing switch names the device extensions its driver lacks
+                // (#470): driver vocabulary, never translated.
+                let mut text = lang::get(why);
+                if item == Item::Horizon(H::RayTracing)
+                    && let Some(missing) = crate::graphics::ray_tracing_missing()
+                {
+                    text += &format!(" Missing: {missing}.");
+                }
+                text
+            }))
     }
 }
 
@@ -1547,6 +1594,7 @@ impl Screen for GraphicsScreen {
             }
             Item::Horizon(H::HdrCalibrate) => vec![Output::Push(OptionsPage::HdrCalibration)],
             Item::Horizon(H::PerfCalibrate) => vec![Output::Push(OptionsPage::PerfCalibration)],
+            Item::Horizon(H::GpuDrivers) => vec![Output::Push(OptionsPage::GpuDrivers)],
             // The list of either kind, as the Shaders page opens it from anywhere.
             Item::Horizon(H::ShaderPacks) => {
                 s.shader_options = None;

@@ -264,6 +264,7 @@ mod tests {
             Default::default(),
             None,
             (horizon_shader_api::Api::V0_1, false),
+            None,
         );
         queue.write_buffer(
             &frame.buffer,

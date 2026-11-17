@@ -32,6 +32,7 @@ fn reads_every_key_of_schema_1() {
     assert_eq!(m.authors, ["Horizon"]);
     assert_eq!(m.license.as_deref(), Some("MIT"));
     assert_eq!(m.sky.as_ref().unwrap().file, "sky.wgsl");
+    assert!(m.ray_tracing.is_some());
     assert_eq!(
         m.material.as_ref().unwrap().name.as_deref(),
         Some("Terrain")

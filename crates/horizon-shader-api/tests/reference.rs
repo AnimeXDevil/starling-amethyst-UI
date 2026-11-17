@@ -12,12 +12,13 @@ fn root() -> &'static Path {
 fn validate(text: &str) -> naga::Module {
     let module = naga::front::wgsl::parse_str(text)
         .unwrap_or_else(|e| panic!("{}\n{text}", e.emit_to_string(text)));
-    naga::valid::Validator::new(
-        naga::valid::ValidationFlags::all(),
-        naga::valid::Capabilities::default(),
-    )
-    .validate(&module)
-    .unwrap_or_else(|e| panic!("{}\n{text}", e.emit_to_string(text)));
+    let mut capabilities = naga::valid::Capabilities::default();
+    if text.contains("enable wgpu_ray_query;") {
+        capabilities |= naga::valid::Capabilities::RAY_QUERY;
+    }
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("{}\n{text}", e.emit_to_string(text)));
     module
 }
 

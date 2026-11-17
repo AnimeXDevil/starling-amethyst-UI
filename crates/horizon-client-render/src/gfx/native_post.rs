@@ -320,6 +320,8 @@ pub struct NativePost {
     format: wgpu::TextureFormat,
     /// Under 0.2: the decode, the picture and the tonemap.
     display: Option<Display>,
+    /// The world's TLAS for `rt_trace`/`rt_occluded` ([ray_tracing] packs).
+    tlas: Option<wgpu::Tlas>,
 }
 
 /// The `frame` every stage of a pack reads (group 3, binding 0), written once a frame, and
@@ -356,6 +358,9 @@ pub struct NativeFrame {
     /// Whether the pack's material reads `reflection` (`NativePack::new`): else no mirror
     /// is drawn and `has_reflection` stays 0.
     pub reflects: bool,
+    /// The world's TLAS for `rt_trace`/`rt_occluded` ([ray_tracing] packs): the renderer's
+    /// object, shared, so rebuilds into it reach every group bound with it.
+    tlas: Option<wgpu::Tlas>,
     /// Last frame's view-projection, camera and time (`write`).
     last: Option<([[f32; 4]; 4], glam::DVec3, std::time::Instant)>,
     /// The eased eye light (block, sky) and being in water and lava (`write`); NaN until the
@@ -430,6 +435,19 @@ fn frame_entry(visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
+/// The world's TLAS for the ray-tracing helpers ([ray_tracing] packs), binding 14:
+/// free in the frame and post layouts alike.
+fn tlas_entry(visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding: horizon_shader_api::stages::RT_TLAS_BINDING,
+        visibility,
+        ty: wgpu::BindingType::AccelerationStructure {
+            vertex_return: false,
+        },
+        count: None,
+    }
+}
+
 /// The size of the water mirror for a world of `size`: half of it.
 pub fn reflection_size(size: [u32; 2]) -> [u32; 2] {
     size.map(|s| s.div_ceil(2).max(1))
@@ -452,6 +470,8 @@ impl NativeFrame {
     /// The frame of a pack of the shader API line `api` with the `[shadow]` settings `shadow`, if
     /// any, and the block light colours `lights`, onto a world's frame that holds linear light
     /// when `linear` (a 0.2 pack's).
+    /// `tlas` binds the world's TLAS for `[ray_tracing]` packs (None: the pack doesn't trace
+    /// rays).
     pub fn new(
         device: &wgpu::Device,
         shadow: Option<&horizon_shader_api::manifest::Shadow>,
@@ -459,6 +479,7 @@ impl NativeFrame {
         lights: super::block_light::LightTable,
         pbr: Option<&[wgpu::Texture; 2]>,
         (api, linear): (Api, bool),
+        tlas: Option<&wgpu::Tlas>,
     ) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Native shader pack frame"),
@@ -479,6 +500,9 @@ impl NativeFrame {
             pbr_entry(12),
             pbr_entry(13),
         ];
+        if tlas.is_some() {
+            entries.push(tlas_entry(wgpu::ShaderStages::FRAGMENT));
+        }
         let block_light_entries = [
             wgpu::BindGroupLayoutEntry {
                 binding: 9,
@@ -563,6 +587,7 @@ impl NativeFrame {
             &textures,
             &block_light,
             &pbr,
+            tlas,
         );
         Self {
             textures,
@@ -585,6 +610,7 @@ impl NativeFrame {
             linear,
             decoder: (api == Api::V0_2).then(|| Decoder::new(device, linear)),
             mirror: None,
+            tlas: tlas.cloned(),
             last: None,
             eye: [f32::NAN; 4],
             history_reset: true,
@@ -620,6 +646,7 @@ impl NativeFrame {
         textures: &[(wgpu::TextureView, wgpu::Sampler)],
         block_light: &super::block_light::BlockLight,
         pbr: &[wgpu::TextureView; 2],
+        tlas: Option<&wgpu::Tlas>,
     ) -> wgpu::BindGroup {
         let opaque_depth = opaque_depth.create_view(&Default::default());
         let opaque_color = opaque_color.create_view(&Default::default());
@@ -680,6 +707,12 @@ impl NativeFrame {
             },
         ]);
         entries.extend(pack_texture_group_entries(textures));
+        if let Some(tlas) = tlas {
+            entries.push(wgpu::BindGroupEntry {
+                binding: horizon_shader_api::stages::RT_TLAS_BINDING,
+                resource: wgpu::BindingResource::AccelerationStructure(tlas),
+            });
+        }
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Native shader pack frame"),
             layout,
@@ -786,6 +819,7 @@ impl NativeFrame {
             &self.textures,
             &self.block_light,
             &self.pbr,
+            self.tlas.as_ref(),
         );
     }
 
@@ -1005,6 +1039,7 @@ impl NativePost {
         format: wgpu::TextureFormat,
         frame: &NativeFrame,
         tonemap: Option<&CheckedStage>,
+        tlas: Option<&wgpu::Tlas>,
     ) -> Result<Self, String> {
         let targets = manifest.post_targets();
         let outputs: Vec<Option<usize>> = manifest
@@ -1036,6 +1071,9 @@ impl NativePost {
             .extend((0..targets.len() as u32).map(|j| {
                 texture_entry(horizon_shader_api::stages::POST_TARGET_BINDING + j, float)
             }));
+        if tlas.is_some() {
+            entries.push(tlas_entry(wgpu::ShaderStages::FRAGMENT));
+        }
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Native shader pack post"),
             entries: &entries,
@@ -1160,6 +1198,7 @@ impl NativePost {
             plan,
             format,
             display,
+            tlas: tlas.cloned(),
         })
     }
 
@@ -1368,6 +1407,13 @@ impl NativePost {
                         resource: wgpu::BindingResource::TextureView(view),
                     }
                 }));
+            }
+            // The world's TLAS ([ray_tracing] packs, #470).
+            if let Some(tlas) = &self.tlas {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: horizon_shader_api::stages::RT_TLAS_BINDING,
+                    resource: wgpu::BindingResource::AccelerationStructure(tlas),
+                });
             }
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Native shader pack post"),
@@ -1779,6 +1825,7 @@ mod tests {
             Default::default(),
             None,
             (Api::V0_1, false),
+            None,
         );
         frame.pack.still_ticks = Some(47_811);
         frame.pack.eye_light = [0, 15];
@@ -1836,6 +1883,7 @@ mod tests {
                 Default::default(),
                 None,
                 (Api::V0_1, false),
+                None,
             )
         };
         let (mut used, mut fresh) = (new(), new());
@@ -1903,6 +1951,7 @@ mod tests {
             Default::default(),
             None,
             (Api::V0_1, false),
+            None,
         );
         let mut post = NativePost::new(
             &device,
@@ -1911,6 +1960,7 @@ mod tests {
             &[],
             format,
             &frame,
+            None,
             None,
         )
         .unwrap();
@@ -2019,6 +2069,7 @@ mod tests {
             Default::default(),
             None,
             (Api::V0_1, false),
+            None,
         );
         queue.write_buffer(
             &frame.buffer,
@@ -2032,6 +2083,7 @@ mod tests {
             &[("gain".into(), 1.0)],
             format,
             &frame,
+            None,
             None,
         )
         .unwrap();
@@ -2148,6 +2200,7 @@ mod tests {
             Default::default(),
             None,
             (Api::V0_1, false),
+            None,
         );
         let mut post = NativePost::new(
             &device,
@@ -2156,6 +2209,7 @@ mod tests {
             &[],
             format,
             &frame,
+            None,
             None,
         )
         .unwrap();
@@ -2269,6 +2323,7 @@ mod tests {
             Default::default(),
             None,
             (Api::V0_1, false),
+            None,
         );
         let mut post = NativePost::new(
             &device,
@@ -2277,6 +2332,7 @@ mod tests {
             &[],
             format,
             &frame,
+            None,
             None,
         )
         .unwrap();
@@ -2606,6 +2662,7 @@ mod tests {
                 Default::default(),
                 None,
                 (Api::V0_2, false),
+                None,
             );
             let inputs = FrameInputs {
                 headroom: 1.0,
@@ -2621,6 +2678,7 @@ mod tests {
                 format,
                 &frame,
                 tonemap,
+                None,
             )
             .unwrap();
             assert_eq!(post.labels().last() == Some(&"t.wgsl"), tonemap.is_some());
@@ -2691,6 +2749,7 @@ mod tests {
             Default::default(),
             None,
             (Api::V0_2, false),
+            None,
         );
         let fields = |i: &FrameInputs| (i.hdr, i.headroom, i.paper_white, i.peak, i.black_level);
         assert_eq!(
@@ -2762,6 +2821,7 @@ mod tests {
                 Default::default(),
                 None,
                 (Api::V0_2, false),
+                None,
             );
             let inputs = FrameInputs {
                 hdr: u32::from(hdr),
@@ -2777,6 +2837,7 @@ mod tests {
                 format,
                 &frame,
                 tonemap,
+                None,
             )
             .unwrap();
             assert_eq!(post.tonemaps(), pack_curve);

@@ -172,6 +172,18 @@ impl Arena {
         let usage = wgpu::BufferUsages::INDEX;
         Self::with_usage(device, 4, capacity, usage, LARGE_PAGE_BYTES)
     }
+    /// World-space ray-tracing positions (`BLAS_INPUT`): the triangle soup `rt`
+    /// builds one BLAS per section over. Never compacted: a range stays valid
+    /// until its section is released, unlike the render arenas' ranges.
+    pub fn ray_tracing(device: &wgpu::Device) -> Self {
+        Self::with_usage(
+            device,
+            12,
+            1 << 16,
+            wgpu::BufferUsages::BLAS_INPUT,
+            PAGE_BYTES,
+        )
+    }
     /// The sorted-index arena and, when `split`, the translucent arena
     /// (vertices of `stride`) with large pages, which no shader binds;
     /// otherwise translucent quads stay in the section arena. The indices go in

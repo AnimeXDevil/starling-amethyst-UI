@@ -120,6 +120,7 @@ impl ApplicationHandler for Missing {
                     Some(&self.gui.panorama),
                     None,
                     self.api,
+                    self.ray_tracing,
                 )?;
                 Ok((window, renderer))
             });

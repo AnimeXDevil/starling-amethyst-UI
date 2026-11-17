@@ -512,6 +512,7 @@ impl Split<'_> {
             host.renderer.as_ref(),
             None,
             host.settings.horizon.api,
+            host.settings.horizon.ray_tracing,
             host.settings.horizon.translucent_batching,
             host.settings.vsync,
             &host.settings.horizon,

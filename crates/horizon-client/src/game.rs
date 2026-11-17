@@ -7585,6 +7585,7 @@ impl Game<'_> {
             None,
             None,
             self.settings.horizon.api,
+            self.settings.horizon.ray_tracing,
             self.settings.horizon.translucent_batching,
             self.settings.vsync,
             &self.settings.horizon,
