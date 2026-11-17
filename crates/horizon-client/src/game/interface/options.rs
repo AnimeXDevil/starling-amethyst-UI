@@ -280,6 +280,7 @@ impl Game<'_> {
     pub(super) fn draw_options(&mut self, batch: &mut HudBatch) {
         self.watch_pack_folder();
         self.poll_diagnostics();
+        self.perf_calibrate_page();
         let context = self.controller_settings_context();
         self.show_skin_cloud();
         let mut ui = std::mem::take(&mut self.ui.options);

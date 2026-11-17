@@ -10908,6 +10908,43 @@ mod tests {
         assert_eq!(ui.page(), Page::ModBrowser);
     }
 
+    /// The game sets the calibration page's buttons once the page is open: a tap on Calibrate
+    /// now reaches the game, not the Done that stood there before them (the first phone test
+    /// went back to the graphics screen instead).
+    #[test]
+    fn a_calibration_button_set_after_the_page_opened_is_the_one_tapped() {
+        let atlas = atlas();
+        let size = (960.0, 540.0);
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::PerfCalibration);
+        // The layout as the page opened, before the game set its rows.
+        let _ = ui.built_layout(&s, size.0, size.1);
+        ui.set_calibrate(
+            vec!["Not calibrated yet.".into()],
+            vec!["Calibrate now".into()],
+        );
+        let layout = ui.built_layout(&s, size.0, size.1);
+        let (widgets, ..) = layout.parts();
+        let (x, y, w, h) = widgets
+            .iter()
+            .find(|w| matches!(&w.kind, WKind::Button { act, .. } if *act == Act::Calibrate(0)))
+            .map(|w| (w.x, w.y, w.w, w.h))
+            .expect("Calibrate now on the page");
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            x + w / 2.0,
+            y + h / 2.0,
+            size,
+            [854, 480],
+            false,
+            false,
+        );
+        assert!(events.contains(&Event::Calibrate(0)), "{events:?}");
+        assert_eq!(ui.page(), Page::PerfCalibration);
+    }
+
     #[test]
     fn the_music_page_button_follows_the_extra() {
         let atlas = atlas();

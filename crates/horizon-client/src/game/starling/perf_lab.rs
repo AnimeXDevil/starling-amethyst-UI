@@ -673,7 +673,6 @@ impl Game<'_> {
         if let Some(r) = self.renderer.as_mut() {
             self.perf_lab.apply(r);
         }
-        self.perf_calibrate_page();
         let now = Instant::now();
         if !self.perf_lab_counts() {
             self.perf_lab.counting_since = None;
@@ -1715,8 +1714,9 @@ impl Game<'_> {
         }
     }
 
-    /// The calibration page's lines and buttons, while it shows.
-    fn perf_calibrate_page(&mut self) {
+    /// The calibration page's lines and buttons, while it shows: before the options lay out
+    /// and draw (`draw_options`), as the Diagnostics page's, so a tap lands on what shows.
+    pub(super) fn perf_calibrate_page(&mut self) {
         if self.screen != Screen::Options || self.ui.options.page() != Page::PerfCalibration {
             return;
         }
@@ -1763,8 +1763,7 @@ impl Game<'_> {
                 _ => lang::get("starling.calibrate.auto"),
             })
             .collect();
-        self.ui.options.calibrate_notes = notes;
-        self.ui.options.calibrate = buttons;
+        self.ui.options.set_calibrate(notes, buttons);
     }
 
     /// Out of the test world for the title screen, as the pause menu's Save and Quit to Title
