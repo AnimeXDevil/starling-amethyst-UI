@@ -1988,7 +1988,7 @@ impl<S: Screen> Shell<S> {
     /// The page the plate shows: the open one or, while searching, the one picked, else the
     /// topmost line's.
     /// The page the plate is headed with.
-    #[cfg(any(test, target_os = "android"))]
+    #[cfg(test)]
     pub(crate) fn current_page(&mut self, s: &Settings, size: (f32, f32)) -> Option<S::Page> {
         let view = self.view(s, size);
         self.current(&view)
@@ -2045,6 +2045,27 @@ impl<S: Screen> Shell<S> {
             let [rx, ry, rw, rh] = cols.row(ry);
             ui::hovered((x, y), rx, ry, rw, rh)
         })
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn preview_row(
+        &mut self,
+        s: &Settings,
+        size: (f32, f32),
+        at: (f32, f32),
+    ) -> Option<S::Row> {
+        let view = self.view(s, size);
+        let focused = match (self.keyed, self.focus) {
+            (true, Some(Target::Row(row))) => Some(row),
+            _ => None,
+        };
+        self.dragging
+            .or_else(|| self.row_at(&view, at).map(|(row, _)| row.id).or(focused))
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn selected_page(&self) -> Option<S::Page> {
+        self.page
     }
     /// Press `row`, or (`stepped`) Left or Right on it: `track` is where on its slider's track
     /// (`None` from the keyboard, or off it).

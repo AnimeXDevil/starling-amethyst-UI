@@ -49,9 +49,132 @@ impl HudArea {
             }
         }
     }
+
+    #[cfg(target_os = "android")]
+    pub(super) fn local_point(&self, point: [f32; 2], scale: f32) -> [f32; 2] {
+        std::array::from_fn(|axis| point[axis] / scale - self.origin[axis])
+    }
 }
 
 impl Game<'_> {
+    /// Menus use the framebuffer's GUI scale and lay out within its safe area.
+    pub(in crate::game) fn interface_batch(&self, size: [u32; 2]) -> HudBatch {
+        let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
+        let [left, top, right, bottom] = self.interface_insets(&batch);
+        batch.width -= left + right;
+        batch.height -= top + bottom;
+        batch
+    }
+
+    pub(super) fn interface_area(&self, batch: &mut HudBatch) -> HudArea {
+        let insets = self.interface_insets(batch);
+        HudArea::begin(batch, insets)
+    }
+
+    pub(super) fn draw_interface_overlays(&mut self, batch: &mut HudBatch) {
+        let area = self.interface_area(batch);
+        self.draw_slot_touch(batch);
+        // The confirmation screen takes the dialog's place.
+        if self.command_prompt.is_none() {
+            self.draw_dialog(batch);
+        }
+        self.draw_pack_prompt(batch);
+        self.draw_code_of_conduct(batch);
+        self.draw_link_prompt(batch);
+        area.finish(batch);
+
+        self.draw_touch(batch);
+        self.draw_kinetic_info(batch);
+
+        let area = self.interface_area(batch);
+        self.draw_chat_bar(batch);
+        self.draw_command_prompt(batch);
+        area.finish(batch);
+    }
+
+    fn interface_insets(&self, batch: &HudBatch) -> [f32; 4] {
+        #[cfg(target_os = "android")]
+        if self.screen != Screen::Playing
+            || self.title.is_some()
+            || self.screen_over_playing()
+            || self.remote_loading()
+        {
+            // Keep the editor in place while its sliders preview the menu bounds.
+            let editing = self.screen == Screen::Options && self.ui.options.display_open();
+            return self.menu_margins(batch, editing);
+        }
+        let _ = batch;
+        [0.0; 4]
+    }
+
+    #[cfg(target_os = "android")]
+    fn menu_margins(&self, batch: &HudBatch, editing: bool) -> [f32; 4] {
+        use horizon_client::android_display::{DisplayOption as D, interface_safe_zone};
+        let margins = if editing {
+            [0; 2]
+        } else {
+            [
+                D::InterfaceHorizontal.value(&self.settings),
+                D::InterfaceVertical.value(&self.settings),
+            ]
+        };
+        interface_safe_zone([batch.width, batch.height], margins)
+    }
+
+    #[cfg(target_os = "android")]
+    pub(super) fn button_safe_insets(&self, batch: &HudBatch) -> [f32; 4] {
+        use horizon_client::android_display::{DisplayOption as D, interface_safe_zone};
+        interface_safe_zone(
+            [batch.width, batch.height],
+            [
+                D::ButtonsHorizontal.value(&self.settings),
+                D::ButtonsVertical.value(&self.settings),
+            ],
+        )
+    }
+
+    /// Rebase the pointer when the menu opens, closes, or changes size.
+    pub(super) fn sync_interface_cursor(&mut self, size: [u32; 2]) {
+        #[cfg(target_os = "android")]
+        {
+            let full = HudBatch::new(size, self.settings.gui_scale_inputs());
+            let [x, y, _, _] = self.interface_insets(&full);
+            let [old_x, old_y] = std::mem::replace(&mut self.ui.interface_origin, [x, y]);
+            self.cursor.0 += old_x - x;
+            self.cursor.1 += old_y - y;
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = size;
+    }
+
+    pub(in crate::game) fn interface_point(&self, p: [f32; 2], scale: f32) -> (f32, f32) {
+        let [x, y] = self.interface_origin();
+        (p[0] / scale - x, p[1] / scale - y)
+    }
+
+    pub(in crate::game) fn interface_window_point(
+        &self,
+        point: (f32, f32),
+        scale: f32,
+    ) -> winit::dpi::PhysicalPosition<f64> {
+        let [x, y] = self.interface_origin();
+        winit::dpi::PhysicalPosition::new(
+            f64::from((point.0 + x) * scale),
+            f64::from((point.1 + y) * scale),
+        )
+    }
+
+    pub(in crate::game) fn interface_origin(&self) -> [f32; 2] {
+        #[cfg(target_os = "android")]
+        {
+            self.ui.interface_origin
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            [0.0; 2]
+        }
+    }
+
     pub(super) fn draw_performance_overlays(&mut self, batch: &mut HudBatch) {
         let margins = self.hud_safe_insets(batch);
         let area = HudArea::begin(batch, margins);
@@ -112,8 +235,6 @@ impl Game<'_> {
                     D::SafeHorizontal.value(&self.settings),
                     D::SafeVertical.value(&self.settings),
                 ],
-                crate::android::safe_insets()
-                    .map(|pixels| (pixels as f32 / batch.scale.max(1.0)).ceil()),
             )
         }
         #[cfg(not(target_os = "android"))]
@@ -124,8 +245,24 @@ impl Game<'_> {
     }
 
     #[cfg(target_os = "android")]
-    pub(super) fn draw_safe_zone(&self, batch: &mut HudBatch) {
-        let [left, top, right, bottom] = self.hud_safe_insets(batch);
+    fn draw_safe_zone(
+        &self,
+        batch: &mut HudBatch,
+        zone: horizon_client::android_display::SafeZone,
+    ) {
+        use horizon_client::android_display::SafeZone;
+        let (margins, color) = match zone {
+            SafeZone::Hud => (self.hud_safe_insets(batch), 0xffffffff),
+            SafeZone::Interface => (
+                self.menu_margins(batch, false),
+                horizon_client::hud::rgba(188, 171, 255, 255),
+            ),
+            SafeZone::Buttons => (
+                self.button_safe_insets(batch),
+                horizon_client::hud::rgba(115, 225, 193, 255),
+            ),
+        };
+        let [left, top, right, bottom] = margins;
         let [right, bottom] = [batch.width - right - 2.0, batch.height - bottom - 2.0];
         for (x, y, dx, dy) in [
             (left, top, 1.0, 1.0),
@@ -138,9 +275,23 @@ impl Game<'_> {
                 [x, y.min(y + 12.0 * dy), 2.0, 14.0],
             ] {
                 batch.fill(&self.gui.atlas, x + 1.0, y + 1.0, w, h, 0xff162026);
-                batch.fill(&self.gui.atlas, x, y, w, h, u32::MAX);
+                batch.fill(&self.gui.atlas, x, y, w, h, color);
             }
         }
+    }
+    pub(super) fn preview_display_safe_zone(&mut self, batch: &mut HudBatch) {
+        #[cfg(target_os = "android")]
+        if self.screen == Screen::Options {
+            let [l, t, r, b] = self.interface_insets(batch);
+            if let Some(zone) = self.ui.options.safe_zone_preview(
+                &self.settings,
+                (batch.width - l - r, batch.height - t - b),
+                self.cursor,
+            ) {
+                self.draw_safe_zone(batch, zone);
+            }
+        }
+        let _ = batch;
     }
     /// The HUD's clock this frame (`hud_kit::motion`): still, so overlays show their motion
     /// settled, while the game is paused, frame-stepped (`HORIZON_STILL`, a screenshot

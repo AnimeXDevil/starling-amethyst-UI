@@ -27,7 +27,6 @@ use std::{
     time::{Duration, Instant},
 };
 use winit::{
-    dpi::PhysicalPosition,
     event::{DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
     keyboard::KeyCode,
 };
@@ -1067,7 +1066,7 @@ impl Game<'_> {
             .ok_or("no renderer yet")?;
         let device_id = DeviceId::dummy();
         for (i, &(x, y)) in points.iter().enumerate() {
-            let position = PhysicalPosition::new(f64::from(x * scale), f64::from(y * scale));
+            let position = self.interface_window_point((x, y), scale);
             self.handle_window_event(
                 event_loop,
                 id,
@@ -1666,7 +1665,7 @@ impl Game<'_> {
                     })
                     .ok_or("no renderer yet")?;
                 let device_id = DeviceId::dummy();
-                let position = PhysicalPosition::new(f64::from(x * scale), f64::from(y * scale));
+                let position = self.interface_window_point((x, y), scale);
                 self.handle_window_event(
                     event_loop,
                     id,

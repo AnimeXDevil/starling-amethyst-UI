@@ -1053,8 +1053,7 @@ impl TouchUi {
     }
 }
 /// `draw` laid out on the part of `batch` between the camera cutout's strips (`left` and `right`
-/// GUI pixels wide) as if that were the whole width, then moved in from the left: where
-/// `Game::draw_clear_of_cutout` draws the hub and its keys.
+/// GUI pixels wide) as if that were the whole width, then moved in from the left.
 pub fn draw_between_strips(
     batch: &mut HudBatch,
     left: f32,
@@ -8224,7 +8223,7 @@ mod tests {
     }
 
     /// The hub's "..." and its "H" button drawn between a camera cutout's strips (as
-    /// `Game::draw_clear_of_cutout` draws them: narrowed, then moved in from the left) are where a
+    /// the layout draws them: narrowed, then moved in from the left) are where a
     /// touch on them lands, whatever the inset (#166).
     #[test]
     fn the_hub_buttons_are_hit_where_they_are_drawn_beside_a_cutout() {

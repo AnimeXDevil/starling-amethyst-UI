@@ -10,16 +10,24 @@ pub enum DisplayOption {
     Aspect,
     SafeHorizontal,
     SafeVertical,
+    InterfaceHorizontal,
+    InterfaceVertical,
+    ButtonsHorizontal,
+    ButtonsVertical,
 }
 
 impl DisplayOption {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 10] = [
         Self::Cutout,
         Self::Orientation,
         Self::Rotation,
         Self::Aspect,
         Self::SafeHorizontal,
         Self::SafeVertical,
+        Self::InterfaceHorizontal,
+        Self::InterfaceVertical,
+        Self::ButtonsHorizontal,
+        Self::ButtonsVertical,
     ];
 
     pub const ASPECTS: [(i32, i32, &'static str); 11] = [
@@ -44,21 +52,31 @@ impl DisplayOption {
             Self::Aspect => "starlingDisplayAspect",
             Self::SafeHorizontal => "starlingSafeHorizontal",
             Self::SafeVertical => "starlingSafeVertical",
+            Self::InterfaceHorizontal => "starlingInterfaceHorizontal",
+            Self::InterfaceVertical => "starlingInterfaceVertical",
+            Self::ButtonsHorizontal => "starlingButtonsHorizontal",
+            Self::ButtonsVertical => "starlingButtonsVertical",
         }
     }
 
-    /// The order of the first three choices is shared with DisplayPreferences.java.
     pub const fn max(self) -> i32 {
         match self {
-            Self::Cutout | Self::Orientation => 2,
+            Self::Cutout => 1,
+            Self::Orientation => 2,
             Self::Rotation => 3,
             Self::Aspect => Self::ASPECTS.len() as i32 - 1,
-            Self::SafeHorizontal | Self::SafeVertical => 20,
+            _ => 20,
         }
     }
 
     pub fn value(self, settings: &Settings) -> i32 {
-        settings.file.int(self.key()).clamp(0, self.max())
+        let value = settings.file.int(self.key());
+        if self == Self::Cutout {
+            // The old third choice used the whole window too.
+            i32::from(value == 1)
+        } else {
+            value.clamp(0, self.max())
+        }
     }
 
     pub fn set(self, settings: &mut Settings, value: i32) {
@@ -69,21 +87,47 @@ impl DisplayOption {
 
     pub fn choices(self) -> &'static [&'static str] {
         match self {
-            Self::Cutout => &["Protect HUD", "Avoid cutout", "Use full display"],
+            Self::Cutout => &["Full display", "Avoid cutout"],
             Self::Orientation => &["Landscape", "Portrait", "Both"],
             Self::Rotation => &["Automatic", "Inverted automatic", "Fixed", "Fixed reversed"],
             _ => &[],
         }
     }
+
+    pub const fn margin_preview(self) -> Option<SafeZone> {
+        match self {
+            Self::SafeHorizontal | Self::SafeVertical => Some(SafeZone::Hud),
+            Self::InterfaceHorizontal | Self::InterfaceVertical => Some(SafeZone::Interface),
+            Self::ButtonsHorizontal | Self::ButtonsVertical => Some(SafeZone::Buttons),
+            _ => None,
+        }
+    }
 }
 
-/// Insets for the HUD in whichever units its size uses. A user margin and a camera
-/// inset clear the same edge, so use the larger of the two.
-pub fn safe_zone(size: [f32; 2], percentages: [i32; 2], cutout: [f32; 4]) -> [f32; 4] {
-    let [horizontal, vertical] =
-        std::array::from_fn(|i| (size[i] * percentages[i].clamp(0, 20) as f32 / 100.0).round());
-    let margins = [horizontal, vertical, horizontal, vertical];
-    std::array::from_fn(|i| margins[i].max(cutout[i]).min(size[i % 2] * 0.25))
+#[derive(Clone, Copy)]
+pub enum SafeZone {
+    Hud,
+    Interface,
+    Buttons,
+}
+
+fn margin(size: f32, percentage: i32) -> f32 {
+    (size * percentage.clamp(0, 20) as f32 / 100.0).round()
+}
+
+/// Insets from the current window's edges in GUI pixels.
+pub fn safe_zone(size: [f32; 2], percentages: [i32; 2]) -> [f32; 4] {
+    let [x, y] = std::array::from_fn(|axis| margin(size[axis], percentages[axis]));
+    [x, y, x, y]
+}
+
+/// Preserve space for fixed-size controls and menus at the selected GUI scale.
+pub fn interface_safe_zone(size: [f32; 2], percentages: [i32; 2]) -> [f32; 4] {
+    let [x, y] = std::array::from_fn(|axis| {
+        let limit = ((size[axis] - [320.0, 240.0][axis]) / 2.0).floor().max(0.0);
+        margin(size[axis], percentages[axis]).min(limit)
+    });
+    [x, y, x, y]
 }
 
 #[cfg(test)]
@@ -91,10 +135,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hud_margins_clear_cutout_and_keep_the_requested_vertical_space() {
+    fn margins_follow_the_current_window() {
+        assert_eq!(safe_zone([602.0, 270.0], [0, 0]), [0.0; 4]);
+        assert_eq!(safe_zone([602.0, 270.0], [10, 5]), [60.0, 14.0, 60.0, 14.0]);
+        assert_eq!(safe_zone([583.0, 270.0], [10, 5]), [58.0, 14.0, 58.0, 14.0]);
+    }
+
+    #[test]
+    fn menu_margins_keep_room_for_buttons() {
         assert_eq!(
-            safe_zone([400.0, 240.0], [10, 5], [56.0, 0.0, 0.0, 0.0]),
-            [56.0, 12.0, 40.0, 12.0]
+            interface_safe_zone([602.0, 270.0], [10, 20]),
+            [60.0, 15.0, 60.0, 15.0]
         );
+        assert_eq!(interface_safe_zone([310.0, 230.0], [20, 20]), [0.0; 4]);
     }
 }

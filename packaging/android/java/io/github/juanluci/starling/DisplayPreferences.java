@@ -163,8 +163,7 @@ final class DisplayPreferences {
             else attrs.flags |= WindowManager.LayoutParams.FLAG_DIM_BEHIND;
             window.setAttributes(attrs);
         }
-        if (cutout == 2) activity.reportCutout(0, 0, 0, 0);
-        else activity.reportCutout(Math.max(0, safe[0] - area.left), Math.max(0, safe[1] - area.top),
+        activity.reportCutout(Math.max(0, safe[0] - area.left), Math.max(0, safe[1] - area.top),
                 Math.max(0, safe[2] - (width - area.right)),
                 Math.max(0, safe[3] - (height - area.bottom)));
     }

@@ -62,7 +62,7 @@ impl Page {
     pub fn about(self) -> &'static str {
         match self {
             Page::General => "How far you see, the window and the HUD.",
-            Page::Display => "Screen orientation, aspect ratio, camera cutout and HUD safe zone.",
+            Page::Display => "Screen orientation, aspect ratio, camera cutout and safe zones.",
             Page::Quality => "The sky and weather, lighting, textures and the image.",
             Page::Performance => "Chunk loading, culling and power use.",
             Page::Shaders => "Shader packs, Horizon's and shaders/ folder ones, and their options.",
@@ -653,7 +653,7 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
     if cfg!(target_os = "android") {
         pages.insert(1, (Page::Display, vec![
             ("Display", [
-                (DisplayOption::Cutout, "Choose how the game uses the display around a camera cutout."),
+                (DisplayOption::Cutout, "Choose whether the game window includes the area around the camera cutout."),
                 (DisplayOption::Orientation, "Choose which screen orientations the game may use."),
                 (DisplayOption::Rotation, "Follow the device, follow it upside down, or fix the screen in one position."),
                 (DisplayOption::Aspect, "Fit the game to an aspect ratio within the display."),
@@ -661,6 +661,14 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
             ("HUD Safe Zone", [
                 (DisplayOption::SafeHorizontal, "Move the HUD inward from the left and right edges."),
                 (DisplayOption::SafeVertical, "Move the HUD inward from the top and bottom edges."),
+            ].into_iter().map(display_setting).collect()),
+            ("Button Safe Zone", [
+                (DisplayOption::ButtonsHorizontal, "Move H, the extra buttons and Back inward from the left and right edges."),
+                (DisplayOption::ButtonsVertical, "Move H, the extra buttons and Back inward from the top and bottom edges."),
+            ].into_iter().map(display_setting).collect()),
+            ("Interface Safe Zone", [
+                (DisplayOption::InterfaceHorizontal, "Move menus inward from the left and right edges."),
+                (DisplayOption::InterfaceVertical, "Move menus inward from the top and bottom edges. The applied margin leaves room for menu buttons at the current GUI scale."),
             ].into_iter().map(display_setting).collect()),
         ]));
     }
@@ -1283,9 +1291,9 @@ impl Item {
         match self {
             Item::Vanilla(o) => o.slider_position(s),
             Item::Horizon(h) => h.slider(s),
-            Item::Display(
-                option @ (DisplayOption::SafeHorizontal | DisplayOption::SafeVertical),
-            ) => Some(option.value(s) as f32 / option.max() as f32),
+            Item::Display(option) if option.margin_preview().is_some() => {
+                Some(option.value(s) as f32 / option.max() as f32)
+            }
             Item::Display(_) => None,
             Item::Extra(_) => None,
         }
@@ -1323,6 +1331,18 @@ impl Item {
                     DisplayOption::SafeVertical => {
                         labelled_percent("Vertical Safe Margin", value as u32)
                     }
+                    DisplayOption::InterfaceHorizontal => {
+                        labelled_percent("Horizontal Menu Margin", value as u32)
+                    }
+                    DisplayOption::InterfaceVertical => {
+                        labelled_percent("Vertical Menu Margin", value as u32)
+                    }
+                    DisplayOption::ButtonsHorizontal => {
+                        labelled_percent("Horizontal Button Margin", value as u32)
+                    }
+                    DisplayOption::ButtonsVertical => {
+                        labelled_percent("Vertical Button Margin", value as u32)
+                    }
                 }
             }
             Item::Extra(e) => Text::option_name_value(
@@ -1339,9 +1359,7 @@ impl Item {
             // Options.applyGraphicsPreset, as Video Settings' slider does it.
             Item::Vanilla(o) => crate::options_ui::set_slider(o, s, v),
             Item::Horizon(h) => h.set_slider(s, v),
-            Item::Display(
-                option @ (DisplayOption::SafeHorizontal | DisplayOption::SafeVertical),
-            ) => {
+            Item::Display(option) if option.margin_preview().is_some() => {
                 option.set(s, (v * option.max() as f32).round() as i32);
             }
             Item::Display(_) => {}
@@ -1411,9 +1429,7 @@ impl Item {
         match self {
             Item::Vanilla(o) => o.slider_steps(),
             Item::Horizon(h) => h.slider_steps(),
-            Item::Display(
-                option @ (DisplayOption::SafeHorizontal | DisplayOption::SafeVertical),
-            ) => Some(option.max() as u32),
+            Item::Display(option) if option.margin_preview().is_some() => Some(option.max() as u32),
             Item::Display(_) => None,
             Item::Extra(_) => None,
         }
