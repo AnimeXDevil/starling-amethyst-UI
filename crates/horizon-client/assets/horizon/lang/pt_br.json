@@ -49,6 +49,7 @@
   "CPU occlusion test runs this frame.": "O teste de oclusão da CPU executa este quadro.",
   "Calibrate Anyway...": "Calibrar de qualquer maneira...",
   "Calibration": "Calibração",
+  "Picks the fastest drawing for this phone.": "Escolhe o desenho mais rápido do celular.",
   "Tries the ways of drawing that look the same, in a test world, and keeps the fastest.": "Testa num mundo de teste os jeitos de desenhar que dão a mesma imagem e fica com o mais rápido.",
   "Calibrate...": "Calibrar...",
   "Caps frames per second; a cap saves power and heat.": "Limita quadros por segundo; uma tampa economiza energia e calor.",
