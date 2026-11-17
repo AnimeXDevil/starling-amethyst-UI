@@ -27,6 +27,12 @@ mod_render = { package = "horizon-mod-render", path = "../horizon-mod-render" }
 winit = { version = "0.30.13", features = ["android-native-activity"] }
 jni = "0.21.1"
 
+# The game folder's wasm mods, loaded as the desktop's mod host loads them (`load_code`, android_lib.rs
+# `start`): on 64-bit Android, where Wasmtime compiles them to the phone's code. 32-bit Android has no
+# Wasmtime compiler (only Pulley, its interpreter) and loads none yet.
+[target.'cfg(all(target_os = "android", target_pointer_width = "64"))'.dependencies]
+horizon-mod-host = { path = "../horizon-mod-host", default-features = false }
+
 [features]
 default = ["audio"]
 audio = ["horizon-client/audio"]

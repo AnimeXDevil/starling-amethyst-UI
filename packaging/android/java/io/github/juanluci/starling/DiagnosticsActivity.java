@@ -28,6 +28,9 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 /** A system window in its own process. Opening it does not load the game or create a GPU. */
 public final class DiagnosticsActivity extends Activity {
@@ -69,6 +72,18 @@ public final class DiagnosticsActivity extends Activity {
     }
     private native String makeReport(String privateFolder, String gameFolder, boolean export)
             throws java.io.IOException;
+    /**
+     * The one thread that loads the native library and calls into it, alive as long as the process.
+     * The library's allocator (mimalloc) takes the thread that loads it as the process's main thread
+     * and releases the main heap when that thread ends, but keeps its id: with a new thread per
+     * report, a later one that got the dead thread's thread pointer counted as main and crashed in
+     * `mi_thread_init` (SIGSEGV at 0x18) on the second report of the window.
+     */
+    private static final ExecutorService NATIVE = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        @Override public Thread newThread(Runnable work) {
+            return new Thread(work, "diagnostic-export");
+        }
+    });
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -232,7 +247,7 @@ public final class DiagnosticsActivity extends Activity {
         final String privateFolder = getFilesDir().getAbsolutePath();
         String shared = StarlingActivity.sharedFolder(this);
         final String game = shared == null ? privateFolder : shared;
-        new Thread(new Runnable() {
+        NATIVE.execute(new Runnable() {
             @Override public void run() {
                 try {
                     // Lazy: even a broken native library cannot prevent the system window opening.
@@ -261,7 +276,7 @@ public final class DiagnosticsActivity extends Activity {
                     });
                 }
             }
-        }, "diagnostic-export").start();
+        });
     }
     private void showLog(String result) {
         final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);

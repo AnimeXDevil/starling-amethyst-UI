@@ -1199,10 +1199,10 @@ fn native_panic_stops_group_before_held_resources_drop() {
         let mut random = Random(|| panic!("native callback"));
         let mut frame = Frame::default();
         frame.set_structure_random_mut(&mut random);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>())
-        }));
-        assert!(result.is_err());
+        // The panic stays in the call: the group stops as on a trap, and the call answers nothing.
+        let result = module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>());
+        assert_eq!(result, None);
+        assert!(module.is_stopped());
         assert!(dropped.load(Ordering::Relaxed));
         assert_eq!(call(&module), None);
         let group = module
@@ -1335,17 +1335,16 @@ fn released_dispatch_receiver_cannot_reenter_guest_while_unwinding() {
         let mut host = mod_api::testing::FakeHost::new();
         let mut frame = Frame::default();
         frame.set_server_host_mut(&mut host);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            module.call(
-                CallClass::Hook,
-                frame,
-                0,
-                None,
-                |w| w.put_owned(piece),
-                |r| r.take::<()>(),
-            )
-        }));
-        assert!(result.is_err());
+        // The panic stays in the call (the group stops); the receiver's drop is still refused.
+        let result = module.call(
+            CallClass::Hook,
+            frame,
+            0,
+            None,
+            |w| w.put_owned(piece),
+            |r| r.take::<()>(),
+        );
+        assert_eq!(result, None);
         assert!(refused.load(Ordering::Relaxed));
         assert!(module.is_stopped());
     })
