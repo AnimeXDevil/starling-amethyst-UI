@@ -327,10 +327,17 @@ pub fn hide_keyboard() {
     });
 }
 
-/// Start the game again in a new process (the game folder is chosen at start).
+/// Start the game again in a new process (the game folder is chosen at start). A restart the game
+/// asks for comes back to the game, not to the launcher (ha_launcher).
 pub fn restart_app() {
+    if IN_GAME.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::ha_launcher::restart_into_game();
+    }
     with_activity(|env, activity| env.call_method(activity, "restart", "()V", &[]).map(drop));
 }
+
+/// Whether this process runs the game, not Horizon Android's launcher (ha_launcher).
+static IN_GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// This APK's version (versionName), and whether it is a release, which only can install the
 /// next release over itself (game/update_offer.rs).
@@ -1263,7 +1270,15 @@ pub fn main(
         .unwrap_or_else(|| PathBuf::from("/data/local/tmp/horizon"));
     let _ = std::fs::create_dir_all(&private);
     let mut notes = Vec::new();
-    let home = game_folder(&private, &mut notes);
+    let folder = game_folder(&private, &mut notes);
+    // Horizon Android's launcher, or the game in the instance it chose: one of them a process.
+    let start = crate::ha_launcher::start(&private, &folder);
+    let home = match &start {
+        crate::ha_launcher::Start::Game(instance) => instance.clone(),
+        crate::ha_launcher::Start::Launcher => folder.clone(),
+    };
+    let in_game = matches!(start, crate::ha_launcher::Start::Game(_));
+    IN_GAME.store(in_game, std::sync::atomic::Ordering::Relaxed);
     let (args, env) = command_line(&private);
     // SAFETY: no other thread of ours runs yet; the game reads these from its threads afterwards.
     unsafe {
@@ -1310,6 +1325,22 @@ pub fn main(
     horizon_protocol::set_name_servers(dns_servers);
     let _ = ARGS.set(args.clone());
     let _ = APP.set(app);
+    if !in_game {
+        // The launcher's log is its own, so the game's last one stays for the diagnostics.
+        logging::init(&private.join("launcher"), "Launcher");
+        log::info!(
+            "Starling's launcher: game folder {}, private files {}",
+            folder.display(),
+            private.display()
+        );
+        for note in notes {
+            log::info!("{note}");
+        }
+        winit::platform::android::set_input_hook(input::hook);
+        crate::ha_launcher::run(android_app(), folder);
+        finish_and_exit()
+    }
+    crate::ha_launcher::game_started(&folder, &home);
     if let Err(error) =
         crate::diagnostics::initialize(&private, serde_json::json!({"abi":std::env::consts::ARCH}))
     {
@@ -1347,7 +1378,13 @@ pub fn main(
 pub fn finish_and_exit() -> ! {
     crate::performance::stop();
     crate::diagnostics::finish();
-    with_activity(|env, activity| env.call_method(activity, "finish", "()V", &[]).map(drop));
+    // The Launcher button: the app starts again into the launcher once this process is gone.
+    let method = if crate::ha_launcher::launcher_next() {
+        "restart"
+    } else {
+        "finish"
+    };
+    with_activity(|env, activity| env.call_method(activity, method, "()V", &[]).map(drop));
     std::thread::sleep(std::time::Duration::from_secs(3));
     // Else, or once the activity is gone: Android may keep the process and start a new activity
     // in it, but winit's event loop cannot be made twice in one process, so end it and the next

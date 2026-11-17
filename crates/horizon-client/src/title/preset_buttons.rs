@@ -99,6 +99,17 @@ impl Title {
                 if crate::accounts::in_game() {
                     buttons.push(b(4.0, 4.0, 120.0, &account::main_label(), true, 80));
                 }
+                // Starling on Android: the launcher, under the account.
+                if cfg!(target_os = "android") {
+                    buttons.push(b(
+                        4.0,
+                        28.0,
+                        120.0,
+                        &lang::get("starling.launcher.button"),
+                        true,
+                        81,
+                    ));
+                }
                 buttons
             }
             Mode::Select { worlds, selected } => {
