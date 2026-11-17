@@ -229,6 +229,8 @@ fn pause_icon_focus_ids(friends: bool) -> Vec<u8> {
         .collect()
 }
 const SPLIT_SETTINGS: &str = "horizon.pages.split_settings";
+/// Starling on Android: the row back to the launcher (`ha_launcher`), the world saved first.
+const LAUNCHER: &str = "starling.launcher.button";
 /// The pause menu's first id for the pages crates registered there: id `ADDED_PAGES + i` opens
 /// registered page `i`.
 const ADDED_PAGES: u8 = 40;
@@ -516,6 +518,13 @@ impl Game<'_> {
             // PauseScreen: `new SocialInteractionsScreen(this)`.
             15 => self.open_social(true),
             30 => self.open_split_settings(),
+            // The world saves and the game ends as Quit does; the app starts again in the
+            // launcher (android::finish_and_exit).
+            31 => {
+                #[cfg(target_os = "android")]
+                crate::ha_launcher::back_to_launcher();
+                self.begin_closing_save(true)?;
+            }
             id @ ADDED_PAGES.. => {
                 let page = usize::from(id - ADDED_PAGES);
                 self.open_options_at(false, horizon_client::options_ui::Page::Added(page));
@@ -550,6 +559,10 @@ impl Game<'_> {
             .then_some((SPLIT_SETTINGS, 30))
             .into_iter()
             .chain(added)
+            .chain(
+                (cfg!(target_os = "android") && !self.options.split_guest)
+                    .then_some((LAUNCHER, 31)),
+            )
     }
     pub(super) fn pause_click(&mut self) -> Result<()> {
         let (w, h) = {
@@ -557,7 +570,7 @@ impl Game<'_> {
                 .renderer
                 .as_ref()
                 .map_or([1, 1], |r| [r.config.width, r.config.height]);
-            let b = HudBatch::new(size, self.settings.gui_scale_inputs());
+            let b = self.interface_batch(size);
             (b.width, b.height)
         };
         let fallback;
@@ -606,7 +619,7 @@ impl Game<'_> {
                 .renderer
                 .as_ref()
                 .map_or([1, 1], |r| [r.config.width, r.config.height]);
-            let b = HudBatch::new(size, self.settings.gui_scale_inputs());
+            let b = self.interface_batch(size);
             (b.width, b.height)
         };
         let fallback;
@@ -908,7 +921,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1, 1], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
+        let b = self.interface_batch(size);
         let hit = death_buttons(b.width, b.height, self.level.hardcore)
             .into_iter()
             .find(|d| ui::hovered(self.cursor, d.0, d.1, 200.0, 20.0))

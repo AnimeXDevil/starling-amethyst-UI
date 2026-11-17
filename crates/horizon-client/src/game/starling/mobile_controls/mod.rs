@@ -401,29 +401,29 @@ impl Game<'_> {
                 self.pad_in_menu(),
                 self.mobile.ui.virtual_mouse,
             );
-            // Out of the camera cutout's strips with the controls (#166), the hub with the keys
-            // beside it; `android_aux_touch` and `floating_menu_touch` read them there.
+            let insets = self.button_safe_insets(b);
+            let area = hud_room::HudArea::begin(b, insets);
             note_hub_layout(
                 "draw",
                 b.scale,
-                self.safe_gui_insets(b.scale),
-                self.width_between_cutouts(b.width, b.scale),
+                insets,
+                b.width,
                 self.mobile.ui.utility_offset_y,
             );
-            self.draw_clear_of_cutout(b, |b, _| {
-                self.mobile.ui.draw(b, &self.gui.atlas, self.pad_in_menu());
-                self.mobile
-                    .ui
-                    .draw_floating_menu(b, &self.gui.atlas, &tc.settings);
-            });
+            self.mobile.ui.draw(b, &self.gui.atlas, self.pad_in_menu());
+            self.mobile
+                .ui
+                .draw_floating_menu(b, &self.gui.atlas, &tc.settings);
+            area.finish(b);
         }
         ui::draw_hud_editor(tc, b, &self.gui.atlas, &tc.settings.preset_id, None);
         self.mobile.ui.draw_keyboard(b, &self.gui.atlas);
         if self.mobile.ui.virtual_mouse {
+            let [x, y] = self.interface_origin();
             ui::draw_pointer(
                 b,
                 &self.gui.atlas,
-                self.cursor,
+                (self.cursor.0 + x, self.cursor.1 + y),
                 tc.settings.virtual_mouse_pointer_scale,
             );
         }
@@ -556,9 +556,14 @@ impl Game<'_> {
             self.android_menu_touch(t, events, id);
             return;
         }
+        let [left, top, right, bottom] = self.hud_safe_insets(&b);
         if t.phase == TouchPhase::Started
             && !self.mobile.controls.control_at_point(n)
-            && let Some(slot) = horizon_client::android_controls::hotbar_slot(b.width, b.height, p)
+            && let Some(slot) = horizon_client::android_controls::hotbar_slot(
+                b.width - left - right,
+                b.height - top - bottom,
+                [p[0] - left, p[1] - top],
+            )
         {
             self.selected = slot;
             self.mobile.controls.ignore(t.id);
@@ -631,8 +636,61 @@ impl Game<'_> {
         ))
     }
 
+    fn android_label_typing(&mut self, out: &Output) -> bool {
+        let controls = &mut self.mobile.controls;
+        let Some(ed) = controls.editor.as_mut() else {
+            return false;
+        };
+        if !ed.editing_label {
+            return false;
+        }
+        let Some(idx) = ed.selected_custom else {
+            ed.editing_label = false;
+            return false;
+        };
+        if ed.key_picker {
+            ed.editing_label = false;
+            return false;
+        }
+        let Some(btn) = controls.settings.custom_buttons.get_mut(idx) else {
+            ed.editing_label = false;
+            return false;
+        };
+        let mut done = false;
+        match out {
+            Output::Text(t) => {
+                for ch in t.chars() {
+                    let ok = ch.is_alphanumeric() || ch.is_ascii_graphic() || ch == ' ';
+                    if ok && btn.custom_label.chars().count() < 12 {
+                        btn.custom_label.push(ch);
+                    }
+                }
+            }
+            Output::Backspace | Output::Key(KeyCode::Backspace) => {
+                btn.custom_label.pop();
+            }
+            Output::Enter | Output::Close | Output::Key(KeyCode::Enter | KeyCode::Escape) => {
+                done = true;
+            }
+            _ => {}
+        }
+        if done {
+            ed.editing_label = false;
+            let _ = controls.settings.save();
+        }
+        true
+    }
     fn android_show_keyboard(&mut self) {
-        if let Some(ed) = &self.mobile.controls.editor {
+        if self
+            .mobile
+            .controls
+            .editor
+            .as_ref()
+            .is_some_and(|e| e.editing_label)
+        {
+            let empty = String::new();
+            mobile_platform::show(&empty);
+        } else if let Some(ed) = &self.mobile.controls.editor {
             mobile_platform::show(if ed.editing_save_desc {
                 &ed.save_desc_input
             } else {
@@ -1312,22 +1370,16 @@ impl Game<'_> {
             return Ok(false);
         };
         let mut b = HudBatch::new([size.width, size.height], self.settings.gui_scale_inputs());
-        // The hub as `mobile_draw` lays it out: clear of the camera cutout's strips, beside the
-        // utility keys (#166).
-        let [left, _, right, _] = self.safe_gui_insets(b.scale);
-        b.width = (b.width - left - right).max(0.0);
+        let insets = self.button_safe_insets(&b);
+        let area = hud_room::HudArea::begin(&mut b, insets);
         note_hub_layout(
             "hit",
             b.scale,
-            self.safe_gui_insets(b.scale),
+            insets,
             b.width,
             self.mobile.ui.utility_offset_y,
         );
-        let p = horizon_client::android_control_ui::point_between_strips(
-            [t.location.x as f32, t.location.y as f32],
-            b.scale,
-            left,
-        );
+        let p = area.local_point([t.location.x as f32, t.location.y as f32], b.scale);
         if !self.mobile.ui.owns_relative(t.id)
             && !self.mobile.ui.owns_gesture(t.id)
             && let Some(menu_act) = self.mobile.ui.floating_menu_touch(
@@ -1606,6 +1658,17 @@ impl Game<'_> {
                     let _ = self.mobile.controls.settings.save();
                     std::process::exit(0);
                 }
+                // As the pause menu's Launcher row: a world saves and the game ends as Quit does,
+                // and the app starts again in the launcher (ha_launcher).
+                InGameMenuAction::OpenLauncher => {
+                    #[cfg(target_os = "android")]
+                    crate::ha_launcher::back_to_launcher();
+                    if self.title.is_some() || self.player.is_none() {
+                        events.exit();
+                    } else {
+                        self.begin_closing_save(true)?;
+                    }
+                }
                 InGameMenuAction::OpenLogs => {
                     // Logs are private to the app; the SAF provider shares the Reports
                     // folder the diagnostics exporter writes into.
@@ -1669,8 +1732,7 @@ impl Game<'_> {
         if t.phase == TouchPhase::Moved {
             return Ok(false);
         }
-        // The utility keys as `mobile_draw` lays them out, clear of the cutout's strips: `b` and
-        // `p` already have the strips taken off, at the scale the hub is drawn at.
+        // The button layout and pointer share the hub's safe-area coordinates.
         if t.phase == TouchPhase::Started
             && !self.mobile.ui.owns_relative(t.id)
             && !self.mobile.ui.owns_gesture(t.id)
@@ -1797,6 +1859,12 @@ impl Game<'_> {
     /// Both naming dialogs (the editor's save-as and the hub's copy) type here
     /// instead of showing a keyboard inside the dialog.
     fn android_preset_typing(&mut self, out: &Output) -> bool {
+        if self.android_label_typing(out) {
+            if horizon_client::android_control_ui::output_dismisses(out) {
+                mobile_platform::hide();
+            }
+            return true;
+        }
         let handled = horizon_client::android_control_ui::apply_editor_or_preset_output(
             self.mobile.controls.editor.as_mut(),
             self.mobile.ui.preset_dialog.as_mut(),
@@ -1886,7 +1954,8 @@ impl Game<'_> {
         let Some(b) = self.gui_batch() else {
             return;
         };
-        let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
+        let (x, y) = self.interface_point([t.location.x as f32, t.location.y as f32], b.scale);
+        let p = [x, y];
         let track = self.on_scrollbar([t.location.x as f32, t.location.y as f32]);
         // A list of sliders scrolls under a thumb: a slider takes the finger only moving clearly
         // sideways (`TouchPointer::prefer_slider`'s rule).
@@ -1901,10 +1970,7 @@ impl Game<'_> {
                 id,
                 WindowEvent::CursorMoved {
                     device_id: t.device_id,
-                    position: winit::dpi::PhysicalPosition::new(
-                        f64::from(start[0] * b.scale),
-                        f64::from(start[1] * b.scale),
-                    ),
+                    position: self.interface_window_point((start[0], start[1]), b.scale),
                 },
                 InputOrigin::User,
             );
@@ -2026,10 +2092,7 @@ impl Game<'_> {
             id,
             WindowEvent::CursorMoved {
                 device_id: t.device_id,
-                position: winit::dpi::PhysicalPosition::new(
-                    f64::from(position[0] * b.scale),
-                    f64::from(position[1] * b.scale),
-                ),
+                position: self.interface_window_point(self.cursor, b.scale),
             },
             InputOrigin::User,
         );

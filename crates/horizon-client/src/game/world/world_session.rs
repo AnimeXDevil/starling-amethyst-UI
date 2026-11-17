@@ -27,6 +27,11 @@ impl Game<'_> {
             // A splitscreen player's title never ends the process (P1's does).
             Action::Quit if self.options.split_guest => {}
             Action::Quit => event_loop.exit(),
+            Action::Launcher => {
+                #[cfg(target_os = "android")]
+                crate::ha_launcher::back_to_launcher();
+                event_loop.exit();
+            }
             Action::Options => self.open_options(true),
             Action::Accessibility => {
                 self.open_options_at(true, horizon_client::options_ui::Page::Accessibility)

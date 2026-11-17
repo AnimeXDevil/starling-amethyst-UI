@@ -2027,6 +2027,9 @@ pub enum Page {
     GraphicsHdr,
     /// HDR calibration, full screen (`calibration`).
     HdrCalibration,
+    /// Starling's performance calibration, from the graphics screen's Calibrate...: what it
+    /// found, and its buttons (`calibrate`, set by game/starling/perf_lab.rs).
+    PerfCalibration,
     /// Horizon's controller settings and button binds.
     Controller,
     PadBinds,
@@ -2067,6 +2070,7 @@ pub(crate) enum Act {
     DiagnosticsRecord,
     DiagnosticsGpu,
     PerfLab(u8),
+    Calibrate(u8),
     None,
     Push(Page),
     Done,
@@ -2269,6 +2273,8 @@ pub enum Event {
     ImportPacks(Vec<std::path::PathBuf>),
     /// One of the performance test's switches (`perf_lab`), by index: the next choice.
     PerfLab(u8),
+    /// One of the calibration page's buttons (`calibrate`), by index.
+    Calibrate(u8),
     /// The Pack Options page closed with changes: the player's choices of its entries, the
     /// ones that differ from their defaults (the others went back to theirs).
     PackOptions {
@@ -2497,6 +2503,10 @@ pub struct OptionsUi {
     /// them. Empty: no test section.
     pub perf_lab: Vec<String>,
     pub perf_lab_notes: Vec<String>,
+    /// The calibration page's lines (what the last run found, why it can't run now) and its
+    /// buttons' labels (`Event::Calibrate` with its index), set by the game while it shows.
+    pub calibrate_notes: Vec<String>,
+    pub calibrate: Vec<String>,
     /// A repro recording is running: the AI Agent page's button says stop.
     pub agent_recording: bool,
     /// The Music page's groups (set by the game when it opens the page).
@@ -2652,6 +2662,8 @@ impl Default for OptionsUi {
             diagnostics_status: Vec::new(),
             perf_lab: Vec::new(),
             perf_lab_notes: Vec::new(),
+            calibrate_notes: Vec::new(),
+            calibrate: Vec::new(),
             agent_recording: false,
             music_groups: Vec::new(),
             focus: None,
@@ -2872,6 +2884,8 @@ enum Row {
     Heading(String),
     /// A line of grey text (a path).
     Note(String),
+    /// Grey text in as many lines as the page's width takes (a page's explanations).
+    Paragraph(String),
     /// A button, and another after it.
     Buttons(Widget, Option<Widget>),
     /// Skin Customization's name box, after its label.
@@ -3585,6 +3599,7 @@ impl OptionsUi {
             Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr | Page::HdrCalibration => {
                 "options.videoTitle"
             }
+            Page::PerfCalibration => "starling.calibrate.title",
             Page::Controller | Page::PadBinds => "horizon.pages.controller",
             Page::ControllerRadial => "horizon.pages.controller_radial",
             Page::ControllerRadialName => "horizon.radial.name_title",
@@ -3817,8 +3832,8 @@ impl OptionsUi {
         match self.page() {
             Page::Diagnostics => {
                 let mut rows = vec![
-                    Row::Note(lang::get("starling.diagnostics.notice")),
-                    Row::Note(lang::get("starling.diagnostics.overhead")),
+                    Row::Paragraph(lang::get("starling.diagnostics.notice")),
+                    Row::Paragraph(lang::get("starling.diagnostics.overhead")),
                     Row::Buttons(
                         button(
                             0.0,
@@ -3860,10 +3875,10 @@ impl OptionsUi {
                         None,
                     ),
                 ];
-                rows.extend(self.diagnostics_status.iter().cloned().map(Row::Note));
+                rows.extend(self.diagnostics_status.iter().cloned().map(Row::Paragraph));
                 if !self.perf_lab.is_empty() {
-                    rows.push(Row::Note(lang::get("starling.perf.title")));
-                    rows.push(Row::Note(lang::get("starling.perf.about")));
+                    rows.push(Row::Paragraph(lang::get("starling.perf.title")));
+                    rows.push(Row::Paragraph(lang::get("starling.perf.about")));
                     for (i, label) in self.perf_lab.iter().enumerate() {
                         rows.push(Row::Buttons(
                             button(
@@ -3876,7 +3891,28 @@ impl OptionsUi {
                             None,
                         ));
                     }
-                    rows.extend(self.perf_lab_notes.iter().cloned().map(Row::Note));
+                    rows.extend(self.perf_lab_notes.iter().cloned().map(Row::Paragraph));
+                }
+                rows
+            }
+            Page::PerfCalibration => {
+                let mut rows = vec![Row::Paragraph(lang::get("starling.calibrate.about"))];
+                if self.calibrate.is_empty() && self.calibrate_notes.is_empty() {
+                    // Before the game is up (the startup menu), there is nothing to run it in.
+                    rows.push(Row::Paragraph(lang::get("starling.calibrate.later")));
+                }
+                rows.extend(self.calibrate_notes.iter().cloned().map(Row::Paragraph));
+                for (i, label) in self.calibrate.iter().enumerate() {
+                    rows.push(Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            Text::literal(label.clone()),
+                            Act::Calibrate(i as u8),
+                        ),
+                        None,
+                    ));
                 }
                 rows
             }
@@ -5292,6 +5328,7 @@ impl OptionsUi {
                         Act::DiagnosticsRecord => events.push(Event::DiagnosticsRecord),
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
                         Act::PerfLab(i) => events.push(Event::PerfLab(*i)),
+                        Act::Calibrate(i) => events.push(Event::Calibrate(*i)),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
@@ -6552,6 +6589,7 @@ impl OptionsUi {
                         Act::DiagnosticsRecord => events.push(Event::DiagnosticsRecord),
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
                         Act::PerfLab(i) => events.push(Event::PerfLab(i)),
+                        Act::Calibrate(i) => events.push(Event::Calibrate(i)),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         // Starling's pages answer taps only.
                         Act::CustomButtons
@@ -9858,6 +9896,7 @@ mod tests {
                     }
                     Item::Vanilla(o) => format!("{o:?}"),
                     Item::Horizon(h) => format!("graphics:{h:?}"),
+                    Item::Display(option) => option.key().to_owned(),
                     Item::Extra(e) => format!("extra:{e:?}"),
                 };
                 graphics_rows.insert(id.clone());
@@ -10868,6 +10907,43 @@ mod tests {
         );
         assert_eq!(events, vec![Event::ButtonClick, Event::BrowseMods]);
         assert_eq!(ui.page(), Page::ModBrowser);
+    }
+
+    /// The game sets the calibration page's buttons once the page is open: a tap on Calibrate
+    /// now reaches the game, not the Done that stood there before them (the first phone test
+    /// went back to the graphics screen instead).
+    #[test]
+    fn a_calibration_button_set_after_the_page_opened_is_the_one_tapped() {
+        let atlas = atlas();
+        let size = (960.0, 540.0);
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::PerfCalibration);
+        // The layout as the page opened, before the game set its rows.
+        let _ = ui.built_layout(&s, size.0, size.1);
+        ui.set_calibrate(
+            vec!["Not calibrated yet.".into()],
+            vec!["Calibrate now".into()],
+        );
+        let layout = ui.built_layout(&s, size.0, size.1);
+        let (widgets, ..) = layout.parts();
+        let (x, y, w, h) = widgets
+            .iter()
+            .find(|w| matches!(&w.kind, WKind::Button { act, .. } if *act == Act::Calibrate(0)))
+            .map(|w| (w.x, w.y, w.w, w.h))
+            .expect("Calibrate now on the page");
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            x + w / 2.0,
+            y + h / 2.0,
+            size,
+            [854, 480],
+            false,
+            false,
+        );
+        assert!(events.contains(&Event::Calibrate(0)), "{events:?}");
+        assert_eq!(ui.page(), Page::PerfCalibration);
     }
 
     #[test]

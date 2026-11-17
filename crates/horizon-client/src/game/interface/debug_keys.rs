@@ -328,22 +328,31 @@ impl Game<'_> {
             return;
         }
         let now = Instant::now();
-        let layout = (size, batch.scale.to_bits(), self.gui.atlas.font.epoch());
+        let margins = self.hud_safe_insets(batch);
+        let area = super::hud_room::HudArea::begin(batch, margins);
+        let safe_size = std::array::from_fn(|i| {
+            size[i].saturating_sub(((margins[i] + margins[i + 2]) * batch.scale) as u32)
+        });
+        let layout = (
+            safe_size,
+            batch.scale.to_bits(),
+            self.gui.atlas.font.epoch(),
+        );
         if let Some(vertices) = self.debug_paint.borrow().fresh(now, layout) {
             batch.vertices.extend_from_slice(vertices);
+            area.finish(batch);
             return;
         }
         let first_vertex = batch.vertices.len();
-        let framebuffer = size.map(|v| v as i32);
         let (scale, [width, height]) = debug_overlay::scale(
-            framebuffer,
+            safe_size.map(|v| v as i32),
             batch.scale as i32,
             self.settings.file.int("debugGuiScale"),
             self.settings.force_unicode,
             [batch.width as i32, batch.height as i32],
         );
         let mut d = debug_overlay::Displayer::default();
-        self.debug_entry_lines(&mut d, framebuffer);
+        self.debug_entry_lines(&mut d, size.map(|v| v as i32));
         // The chart keys and the charts only while the overlay is open.
         let footer = if self.debug {
             self.debug_chart_lines().to_vec()
@@ -381,6 +390,7 @@ impl Game<'_> {
         self.debug_paint
             .borrow_mut()
             .store(now, layout, &batch.vertices[first_vertex..]);
+        area.finish(batch);
     }
     /// Whether the overlay is listing GPU pass times (its `system_specs` lines), the only reason
     /// it has to time passes.

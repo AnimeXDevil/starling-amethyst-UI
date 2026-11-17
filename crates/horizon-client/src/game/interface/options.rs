@@ -206,7 +206,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1280, 720], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
+        let b = self.interface_batch(size);
         (b.width, b.height)
     }
     /// Open the options screens (OptionsScreen) from the title or pause menu.
@@ -280,6 +280,7 @@ impl Game<'_> {
     pub(super) fn draw_options(&mut self, batch: &mut HudBatch) {
         self.watch_pack_folder();
         self.poll_diagnostics();
+        self.perf_calibrate_page();
         let context = self.controller_settings_context();
         self.show_skin_cloud();
         let mut ui = std::mem::take(&mut self.ui.options);
@@ -485,6 +486,7 @@ impl Game<'_> {
                 Event::DiagnosticsRecord => self.toggle_diagnostic_recording(),
                 Event::DiagnosticsGpu => self.toggle_diagnostic_gpu(),
                 Event::PerfLab(i) => self.perf_lab_next(i),
+                Event::Calibrate(i) => self.perf_calibrate_button(i),
                 Event::ButtonClick => self.audio.play_button_click(),
                 Event::DebugEntriesChanged => self.debug_entries.invalidate(),
                 Event::Changed => {

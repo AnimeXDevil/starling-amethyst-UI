@@ -8,8 +8,11 @@ pub use horizon_client_lib::carrier_store;
 pub use horizon_client_lib::*;
 #[cfg(target_os = "android")]
 pub mod android;
+// Horizon Android 0.7.8's launcher, before the game (ha_launcher/mod.rs).
 #[doc(hidden)]
 pub mod entry;
+#[cfg(target_os = "android")]
+pub mod ha_launcher;
 
 // The game's allocator lives in the library, not the executable: the prebuilt game (#589) is this crate as a
 // dylib, and the allocator must be the one its code and the mods' executable share. The Windows and macOS archives

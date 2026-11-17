@@ -4922,6 +4922,7 @@ impl Game<'_> {
     fn hud(&mut self, size: [u32; 2]) -> HudBatch {
         // Off a world (title, options, Win, a prompt before joining) the HUD shows nothing to
         // keep clear of; `hud_layers` fills it in once the world's HUD draws.
+        self.sync_interface_cursor(size);
         let gui = HudBatch::new(size, self.settings.gui_scale_inputs());
         self.ui.room = horizon_client::hud_kit::room::Room::new(gui.width, gui.height);
         // The pack prompt replaces the connecting screen (setScreen), but
@@ -4935,30 +4936,17 @@ impl Game<'_> {
         } else {
             self.hud_layers(size)
         };
-        self.draw_slot_touch(&mut batch);
-        // Vanilla's confirmation replaces the dialog as the screen.
-        if self.command_prompt.is_none() {
-            self.draw_dialog(&mut batch);
-        }
-        self.draw_pack_prompt(&mut batch);
-        self.draw_code_of_conduct(&mut batch);
-        self.draw_link_prompt(&mut batch);
-        self.draw_touch(&mut batch);
-        self.draw_chat_bar(&mut batch);
-        // Starling: the kinetic part looked at, its speed and stress (kinetics.rs).
-        self.draw_kinetic_info(&mut batch);
-        self.draw_command_prompt(&mut batch);
+        self.draw_interface_overlays(&mut batch);
         // The ToastManager draws over every screen, the title and the
         // options included: the narrator's toast follows the player there.
         self.draw_narrator_toast(&mut batch);
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         self.draw_debug_overlay(&mut batch, size);
-        self.frame_graph
-            .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
-        self.draw_stats_overlay(&mut batch);
+        self.draw_performance_overlays(&mut batch);
         self.draw_pad_over_hud(&mut batch);
         self.lift_over_keyboard(&mut batch);
+        self.preview_display_safe_zone(&mut batch);
         self.draw_phone_offers(&mut batch);
         // Over the keyboard's lift: the note stays at the top.
         self.draw_imports(&mut batch);
@@ -4972,6 +4960,7 @@ impl Game<'_> {
         batch.game_time = ((self.world.game_time.rem_euclid(24000)) as f32
             + self.clock.fraction() as f32)
             / 24000.0;
+        let menus = self.interface_area(&mut batch);
         let (w, h) = (batch.width, batch.height);
         // HDR calibration ends when its page does, whatever moved the screen
         // off Options (a death screen opened by a server, say).
@@ -4986,6 +4975,7 @@ impl Game<'_> {
             // The early return skips the match below: the hooks still see the
             // screen, after its own drawing.
             self.draw_screen_with_post_hook(&mut batch);
+            menus.finish(&mut batch);
             return batch;
         }
         if self.screen == Screen::Options {
@@ -5001,6 +4991,7 @@ impl Game<'_> {
             }
             self.draw_screen_with_post_hook(&mut batch);
             self.draw_split_hud(&mut batch, true);
+            menus.finish(&mut batch);
             return batch;
         }
         self.settle_title_toasts();
@@ -5033,6 +5024,7 @@ impl Game<'_> {
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
             self.draw_music_toast(&mut batch, false);
+            menus.finish(&mut batch);
             return batch;
         }
         if self.title.is_some() {
@@ -5060,6 +5052,7 @@ impl Game<'_> {
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
             self.draw_music_toast(&mut batch, false);
+            menus.finish(&mut batch);
             return batch;
         }
         let atlas_ptr: *const HudAtlas = &self.gui.atlas;
@@ -5069,13 +5062,15 @@ impl Game<'_> {
         if self.remote_overlay(&mut batch) {
             self.draw_pack_toasts(&mut batch, false);
             self.draw_music_toast(&mut batch, false);
+            menus.finish(&mut batch);
             return batch;
         }
+        menus.finish(&mut batch);
         // Hud.extractRenderState: F1 (keyToggleGui) hides camera overlays, the
         // crosshair, hotbar, effects, bars, sidebar, action bar, titles and chat;
         // the sleep overlay, debug screen and open screens still draw.
         let spectator = self.spectator();
-        let (wi, hi) = (w as i32, h as i32);
+        let (full_w, full_h) = (batch.width, batch.height);
         let mut gui_canceled = false;
         if !self.ui.hide_gui {
             self.native_render_gui_pre(&mut gui_canceled);
@@ -5091,52 +5086,31 @@ impl Game<'_> {
         );
         // The mods' layers (`register_gui_layers`) draw among vanilla's while the HUD shows.
         self.hud_layer_next = show_hud.then_some(0);
-        self.ui.room = self.hud_room(w, h, show_hud);
         let mut guide_from = 0;
-        if show_hud {
-            self.draw_spyglass(&mut batch);
-            guide_from = batch.vertices.len();
-            // Hud.extractCrosshair / extractItemHotbar / extractPlayerHealth /
-            // extractVehicleHealth and the experience bar, laid out by hud_layout.
-            // Combat feel Legacy hides the attack indicator unless the player keeps it.
-            let indicator = if self.pvp_hides_attack_indicator() {
-                0
-            } else {
-                self.settings.attack_indicator
-            };
+        let (indicator, strength) = if show_hud {
             let indicator = horizon_client::android_controls::attack_indicator(
-                indicator,
+                if self.pvp_hides_attack_indicator() {
+                    0
+                } else {
+                    self.settings.attack_indicator
+                },
                 !self.touch_hides_crosshair(),
             );
             let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
             let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
-            // The 3D crosshair (F3) takes the 2D one's place.
-            // Hud.extractCrosshair: a spectator only sees it over something to open.
-            if self.camera_type.is_first_person()
-                && (!spectator || self.spectator_crosshair())
-                && !self.debug_crosshair()
-                && !self.touch_hides_crosshair()
-                && !self.overlay_holds_view()
-            {
-                let attack = (indicator == 1).then_some(strength);
-                let full = attack.is_some_and(|a| {
-                    hud_layout::full_attack_indicator(a, delay, self.crosshair_living())
-                });
-                let draws = hud_layout::crosshair(wi, hi, attack, full);
-                // Under one creative window it hides; Bedrock Inventory has a gap at the middle.
-                if self.screen != Screen::Creative || CREATIVE_SHIFT.get() == 0.0 {
-                    self.gui_layer("minecraft:crosshair", &mut batch, |g, batch| {
-                        // The custom crosshair takes the sprite's place (the first draw); the
-                        // attack indicator stays.
-                        if g.custom_crosshair() {
-                            g.draw_custom_crosshair(batch, wi, hi);
-                            hud_layout::paint(batch, &g.gui.atlas, &draws[1..]);
-                        } else {
-                            hud_layout::paint(batch, &g.gui.atlas, &draws);
-                        }
-                    });
-                }
-            }
+            self.draw_spyglass(&mut batch);
+            guide_from = batch.vertices.len();
+            self.draw_hud_crosshair(&mut batch, spectator, indicator, strength, delay);
+            (indicator, strength)
+        } else {
+            (0, 0.0)
+        };
+        let margins = self.hud_safe_insets(&batch);
+        let area = hud_room::HudArea::begin(&mut batch, margins);
+        let (w, h) = (batch.width, batch.height);
+        let (wi, hi) = (w as i32, h as i32);
+        self.ui.room = self.hud_room(w, h, show_hud);
+        if show_hud {
             self.gui_layer("minecraft:hotbar", &mut batch, |g, batch| {
                 if spectator {
                     g.draw_spectator_hotbar(batch);
@@ -5310,7 +5284,18 @@ impl Game<'_> {
             }
         }
         // Hud.extractSleepOverlay: over all health/food bars, under titles and chat.
-        let draws = hud_overlays::sleep_overlay(wi, hi, self.sleep_timer as i32);
+        let mut draws =
+            hud_overlays::sleep_overlay(full_w as i32, full_h as i32, self.sleep_timer as i32);
+        if !draws.is_empty() && margins != [0.0; 4] {
+            draws.insert(
+                0,
+                hud_layout::GuiDraw::Push(vec![hud_layout::PoseOp::Translate(
+                    -margins[0],
+                    -margins[1],
+                )]),
+            );
+            draws.push(hud_layout::GuiDraw::Pop);
+        }
         self.gui_layer("minecraft:sleep_overlay", &mut batch, |g, batch| {
             hud_layout::paint(batch, &g.gui.atlas, &draws);
         });
@@ -5358,6 +5343,14 @@ impl Game<'_> {
         // The mod layers above the last vanilla layer drawn.
         self.draw_mod_gui_layers(None, &mut batch);
         self.hud_layer_next = None;
+        area.finish(&mut batch);
+        if margins != [0.0; 4] {
+            let mut room = horizon_client::hud_kit::room::Room::new(full_w, full_h);
+            for (keep, [x, y, w, h]) in self.ui.room.keeps() {
+                room.add(keep, [x + margins[0], y + margins[1], w, h]);
+            }
+            self.ui.room = room;
+        }
         // Screen.extractBlurredBackground blurs the world and HUD, while the
         // screen's background, widgets, toasts and debug overlay stay sharp.
         batch.blur_at = batch.vertices.len() as u32;
@@ -5368,6 +5361,7 @@ impl Game<'_> {
         } else {
             self.screen
         };
+        let menus = self.interface_area(&mut batch);
         let drawn = self.draw_screen_with_pre_hook(&mut batch);
         match screen {
             _ if !drawn => {}
@@ -5457,6 +5451,7 @@ impl Game<'_> {
             self.draw_book(&mut batch);
         }
         self.draw_studio_bars(&mut batch);
+        menus.finish(&mut batch);
         if show_hud {
             self.draw_pad_guide(&mut batch, guide_from);
         }
@@ -9319,11 +9314,9 @@ impl Game<'_> {
             match &event {
                 WindowEvent::CursorMoved { position, .. } => {
                     if let Some(r) = &self.renderer {
-                        let b = HudBatch::new(
-                            [r.config.width, r.config.height],
-                            self.settings.gui_scale_inputs(),
-                        );
-                        self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
+                        let b = self.interface_batch([r.config.width, r.config.height]);
+                        self.cursor =
+                            self.interface_point([position.x as f32, position.y as f32], b.scale);
                     }
                 }
                 WindowEvent::MouseInput {
@@ -9627,12 +9620,10 @@ impl Game<'_> {
                 }
                 WindowEvent::CursorMoved { position, .. } => {
                     if let Some(r) = &self.renderer {
-                        let b = HudBatch::new(
-                            [r.config.width, r.config.height],
-                            self.settings.gui_scale_inputs(),
-                        );
+                        let b = self.interface_batch([r.config.width, r.config.height]);
                         let previous = self.cursor;
-                        self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
+                        self.cursor =
+                            self.interface_point([position.x as f32, position.y as f32], b.scale);
                         if self.studio_mouse_dragged(b.width) {
                             return Ok(());
                         }
@@ -9746,20 +9737,9 @@ impl Game<'_> {
                     }
                     let stick_scroll = self.pad_stick_scroll();
                     let step_scroll = self.pad_step_scroll();
-                    if self.title_input_active()
-                        && self.screen != Screen::Win
-                        && let Some(title) = &mut self.title
-                    {
-                        let size = self
-                            .window
-                            .as_ref()
-                            .map(|w| w.inner_size())
-                            .unwrap_or_default();
-                        let batch = HudBatch::new(
-                            [size.width, size.height],
-                            self.settings.gui_scale_inputs(),
-                        );
-                        let gui = (batch.width, batch.height);
+                    if self.title_input_active() && self.screen != Screen::Win {
+                        let gui = self.gui_size();
+                        let title = self.title.as_mut().expect("title input is active");
                         if step_scroll {
                             title.step_scroll(d, self.cursor, gui);
                         } else if stick_scroll {
@@ -9913,7 +9893,7 @@ impl Game<'_> {
                         .as_ref()
                         .map(|r| [r.config.width, r.config.height])
                         .unwrap_or([1, 1]);
-                    let b = HudBatch::new(size, self.settings.gui_scale_inputs());
+                    let b = self.interface_batch(size);
                     let atlas = &self.gui.atlas;
                     let shift = self.has_shift_down();
                     let (action, sound) = self.title.as_mut().map_or((Action::None, false), |t| {
@@ -9943,7 +9923,7 @@ impl Game<'_> {
                         .as_ref()
                         .map(|r| [r.config.width, r.config.height])
                         .unwrap_or([1, 1]);
-                    let b = HudBatch::new(size, self.settings.gui_scale_inputs());
+                    let b = self.interface_batch(size);
                     if let Some(title) = self.title.as_mut() {
                         title.select_world_at(self.cursor.0, self.cursor.1, (b.width, b.height));
                     }

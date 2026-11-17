@@ -96,6 +96,31 @@ pub(crate) fn with_activity<R>(
     result.ok()
 }
 
+pub(crate) fn apply_display_settings(settings: &horizon_client::settings::Settings) {
+    use horizon_client::android_display::DisplayOption as D;
+    let (width, height, _) = D::ASPECTS[D::Aspect.value(settings) as usize];
+    let display = [
+        D::Cutout.value(settings),
+        D::Orientation.value(settings),
+        D::Rotation.value(settings),
+        width,
+        height,
+    ];
+    static LAST: std::sync::Mutex<Option<[i32; 5]>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == Some(display) {
+        return;
+    }
+    let ok = with_activity(|env, activity| {
+        let args = display.map(jni::objects::JValue::Int);
+        env.call_method(activity, "setDisplayPreferences", "(IIIII)V", &args)
+            .map(drop)
+    });
+    if ok.is_some() {
+        *last = Some(display);
+    }
+}
+
 /// The platform hooks (horizon_client::platform): StarlingActivity's public methods.
 fn open_folder(dir: &Path) -> bool {
     with_activity(|env, activity| {
@@ -327,10 +352,63 @@ pub fn hide_keyboard() {
     });
 }
 
-/// Start the game again in a new process (the game folder is chosen at start).
+/// Start the game again in a new process (the game folder is chosen at start). A restart the game
+/// asks for comes back to the game, not to the launcher (ha_launcher).
 pub fn restart_app() {
-    with_activity(|env, activity| env.call_method(activity, "restart", "()V", &[]).map(drop));
+    restart_app_saying(&horizon_client::lang::get_or(
+        "starling.restart.again",
+        "Starting Starling again…",
+    ));
 }
+
+/// `restart_app`, with what the restart screen says meanwhile: why the game starts again.
+pub fn restart_app_saying(message: &str) {
+    if IN_GAME.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::ha_launcher::restart_into_game();
+    }
+    call_restart(message);
+}
+
+/// `StarlingActivity.restart(String)`: the restart screen shows `message`.
+fn call_restart(message: &str) {
+    keep_restart_look();
+    with_activity(|env, activity| {
+        let text = env.new_string(message)?;
+        env.call_method(
+            activity,
+            "restart",
+            "(Ljava/lang/String;)V",
+            &[jni::objects::JValue::Object(&text)],
+        )
+        .map(drop)
+    });
+}
+
+/// The launcher's colours for the restart screen, which draws its intro as it ends
+/// (LauncherActivity's `RestartView`): the active theme's background, plate, plate border,
+/// accent, text, muted text and bar track, ARGB, in `restart-look` in the private files.
+fn keep_restart_look() {
+    let theme = horizon_client::android_control_theme::active_theme();
+    // The theme keeps ABGR (`color::hex`); Java's colours are ARGB.
+    let argb = |c: u32| (c & 0xff00_ff00) | (c & 0xff) << 16 | (c >> 16 & 0xff);
+    let look = [
+        theme.bg_solid,
+        theme.surface,
+        theme.border_strong,
+        theme.accent,
+        theme.text_primary,
+        theme.text_muted,
+        theme.surface_bright,
+    ]
+    .map(|c| format!("{:08x}", argb(c)))
+    .join(" ");
+    if let Err(e) = std::fs::write(logging::private_home().join("restart-look"), look) {
+        log::warn!("Starling: the restart screen's colours were not kept: {e}");
+    }
+}
+
+/// Whether this process runs the game, not Horizon Android's launcher (ha_launcher).
+static IN_GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// This APK's version (versionName), and whether it is a release, which only can install the
 /// next release over itself (game/update_offer.rs).
@@ -387,8 +465,8 @@ const PLAYER_FILES: &[&str] = &[
     "options.txt",
 ];
 
-/// Folders whose images are the game's own (world icons, skins, pack art), kept out of the
-/// gallery; screenshots are not.
+/// Folders whose images are the game's own (world icons, skins, pack art), made ahead with a
+/// `.nomedia` so the gallery never lists what lands in them; screenshots are not.
 const NO_MEDIA: &[&str] = &[
     "saves",
     "backups",
@@ -396,8 +474,43 @@ const NO_MEDIA: &[&str] = &[
     "datapacks",
     "shaderpacks",
     "horizon-mods",
+    "horizon-native-mods",
     "assets",
+    "downloads",
+    "skins",
 ];
+
+/// Keeps a game folder's images out of the phone's gallery (and the photo pickers that read
+/// it): a `.nomedia` in each of its folders but `screenshots`, the ones in `NO_MEDIA` made
+/// first, and the same in each of the launcher's profiles (`profiles/profile-N`, a game folder
+/// of its own). Pack icons, mod art and the catalog's pictures showed among the player's photos.
+fn hide_from_gallery(home: &Path) {
+    for name in NO_MEDIA {
+        let _ = std::fs::create_dir_all(home.join(name));
+    }
+    for entry in std::fs::read_dir(home).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        match entry.file_name().to_str() {
+            Some("screenshots") => {}
+            Some("profiles") => {
+                for profile in std::fs::read_dir(&path).into_iter().flatten().flatten() {
+                    if profile.path().is_dir() {
+                        hide_from_gallery(&profile.path());
+                    }
+                }
+            }
+            _ => {
+                let marker = path.join(".nomedia");
+                if !marker.exists() {
+                    let _ = std::fs::write(marker, b"");
+                }
+            }
+        }
+    }
+}
 
 /// The game folder: shared storage's once allowed (and what the player made in the app's own
 /// files moved there the first time), else the app's own files. Notes for the log, which
@@ -444,12 +557,7 @@ fn game_folder(private: &Path, notes: &mut Vec<String>) -> PathBuf {
             }
         }
     }
-    for name in NO_MEDIA {
-        let dir = shared.join(name);
-        if std::fs::create_dir_all(&dir).is_ok() && !dir.join(".nomedia").exists() {
-            let _ = std::fs::write(dir.join(".nomedia"), b"");
-        }
-    }
+    hide_from_gallery(shared);
     shared.clone()
 }
 
@@ -1263,7 +1371,24 @@ pub fn main(
         .unwrap_or_else(|| PathBuf::from("/data/local/tmp/horizon"));
     let _ = std::fs::create_dir_all(&private);
     let mut notes = Vec::new();
-    let home = game_folder(&private, &mut notes);
+    let folder = game_folder(&private, &mut notes);
+    // Horizon Android's launcher, or the game in the instance it chose: one of them a process.
+    let chosen = crate::ha_launcher::start(&private, &folder);
+    let home = match &chosen {
+        crate::ha_launcher::Start::Game(instance) => instance.clone(),
+        crate::ha_launcher::Start::Launcher => folder.clone(),
+    };
+    let in_game = matches!(chosen, crate::ha_launcher::Start::Game(_));
+    IN_GAME.store(in_game, std::sync::atomic::Ordering::Relaxed);
+    // A profile made since `game_folder` looked (the launcher makes its folder): its own folders
+    // stay out of the gallery from this start.
+    if home != folder
+        && SHARED_FOLDER
+            .get()
+            .is_some_and(|shared| home.starts_with(shared))
+    {
+        hide_from_gallery(&home);
+    }
     let (args, env) = command_line(&private);
     // SAFETY: no other thread of ours runs yet; the game reads these from its threads afterwards.
     unsafe {
@@ -1310,6 +1435,22 @@ pub fn main(
     horizon_protocol::set_name_servers(dns_servers);
     let _ = ARGS.set(args.clone());
     let _ = APP.set(app);
+    if !in_game {
+        // The launcher's log is its own, so the game's last one stays for the diagnostics.
+        logging::init(&private.join("launcher"), "Launcher");
+        log::info!(
+            "Starling's launcher: game folder {}, private files {}",
+            folder.display(),
+            private.display()
+        );
+        for note in notes {
+            log::info!("{note}");
+        }
+        winit::platform::android::set_input_hook(input::hook);
+        crate::ha_launcher::run(android_app(), folder);
+        finish_and_exit()
+    }
+    crate::ha_launcher::game_started(&folder, &home);
     if let Err(error) =
         crate::diagnostics::initialize(&private, serde_json::json!({"abi":std::env::consts::ARCH}))
     {
@@ -1347,7 +1488,15 @@ pub fn main(
 pub fn finish_and_exit() -> ! {
     crate::performance::stop();
     crate::diagnostics::finish();
-    with_activity(|env, activity| env.call_method(activity, "finish", "()V", &[]).map(drop));
+    // The Launcher button: the app starts again into the launcher once this process is gone.
+    if crate::ha_launcher::launcher_next() {
+        call_restart(&horizon_client::lang::get_or(
+            "starling.restart.launcher",
+            "Opening the launcher…",
+        ));
+    } else {
+        with_activity(|env, activity| env.call_method(activity, "finish", "()V", &[]).map(drop));
+    }
     std::thread::sleep(std::time::Duration::from_secs(3));
     // Else, or once the activity is gone: Android may keep the process and start a new activity
     // in it, but winit's event loop cannot be made twice in one process, so end it and the next

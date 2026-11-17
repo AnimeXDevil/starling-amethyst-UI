@@ -5,6 +5,7 @@
 //! cost. Which settings it shows, in what pages, with what description and cost,
 //! and what they do live here.
 use crate::{
+    android_display::DisplayOption,
     gfx::EffectiveOutput,
     graphics::{
         EntityCullingMode, FarDetail, FrameGeneration, GpuCullingMode, GraphicsApi, HdrMode,
@@ -26,6 +27,7 @@ const TITLE: &str = "Graphics";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     General,
+    Display,
     Quality,
     Performance,
     /// Shader packs, either kind (`shader_pack_list`), and what they cost.
@@ -35,8 +37,10 @@ pub enum Page {
     Hdr,
 }
 impl Page {
-    pub const ALL: [Page; 6] = [
+    pub const ALL: [Page; 6 + cfg!(target_os = "android") as usize] = [
         Page::General,
+        #[cfg(target_os = "android")]
+        Page::Display,
         Page::Quality,
         Page::Performance,
         Page::Shaders,
@@ -46,6 +50,7 @@ impl Page {
     pub fn name(self) -> &'static str {
         match self {
             Page::General => "General",
+            Page::Display => "Display",
             Page::Quality => "Quality",
             Page::Performance => "Performance",
             Page::Shaders => "Shaders",
@@ -57,6 +62,7 @@ impl Page {
     pub fn about(self) -> &'static str {
         match self {
             Page::General => "How far you see, the window and the HUD.",
+            Page::Display => "Screen orientation, aspect ratio, camera cutout and safe zones.",
             Page::Quality => "The sky and weather, lighting, textures and the image.",
             Page::Performance => "Chunk loading, culling and power use.",
             Page::Shaders => "Shader packs, Horizon's and shaders/ folder ones, and their options.",
@@ -123,12 +129,18 @@ pub enum H {
     GraphicsApi,
     TranslucentBatching,
     HdrSmoothGradients,
+    /// Opens Starling's performance calibration (`options_ui::Page::PerfCalibration`): the
+    /// fastest way of drawing the same picture on this phone. Android only.
+    PerfCalibrate,
+    /// What Calibrate... does, a line to read above it.
+    PerfCalibrateNote,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
     Vanilla(Opt),
     Horizon(H),
+    Display(DisplayOption),
     /// A Horizon extra that changes the picture (`extras::Item`, kept in `horizon-extras.txt`).
     Extra(crate::extras::Item),
 }
@@ -643,11 +655,39 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
             ],
         ),
     ];
+    if cfg!(target_os = "android") {
+        pages.insert(1, (Page::Display, vec![
+            ("Display", [
+                (DisplayOption::Cutout, "Choose whether the game window includes the area around the camera cutout."),
+                (DisplayOption::Orientation, "Choose which screen orientations the game may use."),
+                (DisplayOption::Rotation, "Follow the device, follow it upside down, or fix the screen in one position."),
+                (DisplayOption::Aspect, "Fit the game to an aspect ratio within the display."),
+            ].into_iter().map(display_setting).collect()),
+            ("HUD Safe Zone", [
+                (DisplayOption::SafeHorizontal, "Move the HUD inward from the left and right edges."),
+                (DisplayOption::SafeVertical, "Move the HUD inward from the top and bottom edges."),
+            ].into_iter().map(display_setting).collect()),
+            ("Button Safe Zone", [
+                (DisplayOption::ButtonsHorizontal, "Move H, the extra buttons and Back inward from the left and right edges."),
+                (DisplayOption::ButtonsVertical, "Move H, the extra buttons and Back inward from the top and bottom edges."),
+            ].into_iter().map(display_setting).collect()),
+            ("Interface Safe Zone", [
+                (DisplayOption::InterfaceHorizontal, "Move menus inward from the left and right edges."),
+                (DisplayOption::InterfaceVertical, "Move menus inward from the top and bottom edges. The applied margin leaves room for menu buttons at the current GUI scale."),
+            ].into_iter().map(display_setting).collect()),
+        ]));
+    }
     // The fork forces ticking serial, so Parallel Tick would be a no-op setting.
     for (_, groups) in &mut pages {
         for (_, rows) in groups {
             rows.retain(|r| !matches!(r.item, Item::Horizon(H::ParallelTick)));
         }
+    }
+    // Starling finds the fastest way of drawing on the phone it runs on (game/starling/perf_lab.rs).
+    if cfg!(target_os = "android")
+        && let Some((_, groups)) = pages.iter_mut().find(|(p, _)| *p == Page::Performance)
+    {
+        groups.insert(0, calibration_group());
     }
     // Only Windows and Linux have more than one graphics API, translucent batching (Metal
     // draws flat) and GPU culling (Metal draws no count the GPU wrote).
@@ -664,6 +704,32 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
         }
     }
     pages
+}
+
+fn display_setting((option, text): (DisplayOption, &'static str)) -> Setting {
+    Setting {
+        item: Item::Display(option),
+        cost: Cost::None,
+        text,
+    }
+}
+
+/// What the Calibration group says above Calibrate...
+const CALIBRATE_NOTE: &str = "Picks the fastest drawing for this phone.";
+
+/// The Performance page's Calibration group, on Android: what it does, then Calibrate...
+fn calibration_group() -> (&'static str, Vec<Setting>) {
+    (
+        "Calibration",
+        vec![
+            h(H::PerfCalibrateNote, Cost::None, CALIBRATE_NOTE),
+            h(
+                H::PerfCalibrate,
+                Cost::None,
+                "Tries the ways of drawing that look the same, in a test world, and keeps the fastest.",
+            ),
+        ],
+    )
 }
 
 /// BlueMap download radii, in chunks.
@@ -965,6 +1031,8 @@ impl H {
                 Setup::Automatic => "Calibrate Anyway...",
                 Setup::Changed => "Use Automatic Setup",
             })),
+            H::PerfCalibrate => Text::literal(lang::get("Calibrate...")),
+            H::PerfCalibrateNote => Text::literal(lang::get(CALIBRATE_NOTE)),
             H::HdrPaperWhite | H::HdrPeak | H::HdrUiBrightness => self.nits_label(s, out),
             H::HdrBlackLevel => labelled("Black Level", format!("{:.2}", g.black_level_nits())),
             H::HdrLighting => labelled("HDR Lighting", on_off(g.hdr_lighting)),
@@ -1206,7 +1274,12 @@ impl Item {
     fn steps(self, s: &Settings, out: &EffectiveOutput) -> bool {
         self.switch(s, out).is_none()
             && self.slider(s).is_none()
-            && !matches!(self, Item::Horizon(H::HdrCalibrate | H::ShaderPacks))
+            && !matches!(
+                self,
+                Item::Horizon(
+                    H::HdrCalibrate | H::ShaderPacks | H::PerfCalibrate | H::PerfCalibrateNote
+                )
+            )
     }
     /// On/off settings and their value.
     pub fn switch(self, s: &Settings, out: &EffectiveOutput) -> Option<bool> {
@@ -1254,6 +1327,10 @@ impl Item {
         match self {
             Item::Vanilla(o) => o.slider_position(s),
             Item::Horizon(h) => h.slider(s),
+            Item::Display(option) if option.margin_preview().is_some() => {
+                Some(option.value(s) as f32 / option.max() as f32)
+            }
+            Item::Display(_) => None,
             Item::Extra(_) => None,
         }
     }
@@ -1268,6 +1345,14 @@ impl Item {
             }
             Item::Vanilla(o) => o.label(s),
             Item::Horizon(h) => h.label(s, out),
+            Item::Display(option) => {
+                let value = option.value(s);
+                if option.margin_preview().is_some() {
+                    labelled_percent(option.name(), value as u32)
+                } else {
+                    labelled(option.name(), lang::get(option.choice_name(value)))
+                }
+            }
             Item::Extra(e) => Text::option_name_value(
                 Text::literal(e.caption_text()),
                 Text::literal(e.value(&s.extras)),
@@ -1282,6 +1367,10 @@ impl Item {
             // Options.applyGraphicsPreset, as Video Settings' slider does it.
             Item::Vanilla(o) => crate::options_ui::set_slider(o, s, v),
             Item::Horizon(h) => h.set_slider(s, v),
+            Item::Display(option) if option.margin_preview().is_some() => {
+                option.set(s, (v * option.max() as f32).round() as i32);
+            }
+            Item::Display(_) => {}
             Item::Extra(_) => {}
         }
         self.touched(s);
@@ -1293,6 +1382,10 @@ impl Item {
         match self {
             Item::Vanilla(o) => o.cycle(s, back, framebuffer),
             Item::Horizon(h) => h.cycle(s, back, out),
+            Item::Display(option) => {
+                let step = if back { -1 } else { 1 };
+                option.set(s, (option.value(s) + step).rem_euclid(option.max() + 1));
+            }
             Item::Extra(e) => e.cycle(&mut s.extras, back),
         }
         self.touched(s);
@@ -1302,6 +1395,7 @@ impl Item {
         let presetless = matches!(
             self,
             Item::Extra(_)
+                | Item::Display(_)
                 | Item::Horizon(
                     H::Preset
                         | H::BlueMapAutoDetect
@@ -1343,6 +1437,8 @@ impl Item {
         match self {
             Item::Vanilla(o) => o.slider_steps(),
             Item::Horizon(h) => h.slider_steps(),
+            Item::Display(option) if option.margin_preview().is_some() => Some(option.max() as u32),
+            Item::Display(_) => None,
             Item::Extra(_) => None,
         }
     }
@@ -1378,6 +1474,8 @@ fn row(setting: Setting, s: &Settings, out: &EffectiveOutput) -> Row<Item> {
     let item = setting.item;
     let (name, value) = parts(item, s, out);
     let value = match (item.switch(s, out), item.slider(s)) {
+        // A line to read: the focus skips it and nothing presses it.
+        _ if item == Item::Horizon(H::PerfCalibrateNote) => Value::Note,
         (Some(on), _) => Value::Switch(on),
         (None, Some(position)) => Value::Slider {
             position,
@@ -1447,7 +1545,10 @@ fn read(s: &Settings) -> impl std::fmt::Debug + '_ {
         &s.language,
         s.force_unicode,
     );
-    (&s.horizon, &s.extras, distances, frames, picture, window)
+    let display = DisplayOption::ALL.map(|option| option.value(s));
+    (
+        &s.horizon, &s.extras, distances, frames, picture, window, display,
+    )
 }
 
 /// Horizon's graphics screen on the settings shell (`settings_shell`): its pages and rows from
@@ -1508,6 +1609,7 @@ impl Screen for GraphicsScreen {
                 vec![Output::Event(Event::Changed)]
             }
             Item::Horizon(H::HdrCalibrate) => vec![Output::Push(OptionsPage::HdrCalibration)],
+            Item::Horizon(H::PerfCalibrate) => vec![Output::Push(OptionsPage::PerfCalibration)],
             // The list of either kind, as the Shaders page opens it from anywhere.
             Item::Horizon(H::ShaderPacks) => {
                 s.shader_options = None;
@@ -1579,6 +1681,9 @@ impl Screen for GraphicsScreen {
             if let Some(value) = b.file.get(key) {
                 s.file.set(key, value.clone());
             }
+        }
+        for option in DisplayOption::ALL {
+            option.set(s, option.value(b));
         }
         s.file.fullscreen_resolution = b.file.fullscreen_resolution.clone();
         Vec::new()

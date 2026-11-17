@@ -20,6 +20,26 @@ pub(super) enum FrameDraw {
     Complete,
 }
 impl OptionsUi {
+    #[cfg(target_os = "android")]
+    pub fn display_open(&self) -> bool {
+        Self::graphics_page(self.page()).is_some()
+            && self.graphics.selected_page() == Some(crate::graphics_ui::Page::Display)
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn safe_zone_preview(
+        &mut self,
+        s: &Settings,
+        size: (f32, f32),
+        cursor: (f32, f32),
+    ) -> Option<crate::android_display::SafeZone> {
+        Self::graphics_page(self.page())?;
+        match self.graphics.preview_row(s, size, cursor)? {
+            crate::graphics_ui::Item::Display(option) => option.margin_preview(),
+            _ => None,
+        }
+    }
+
     /// Discard a cancelled frame, including the hosted shell's prepared view.
     pub fn discard_draw(&mut self) {
         if let Some(FrameDraw::Shell(page)) = self.frame_draw.take() {
