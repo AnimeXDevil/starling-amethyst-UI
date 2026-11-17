@@ -96,6 +96,31 @@ pub(crate) fn with_activity<R>(
     result.ok()
 }
 
+pub(crate) fn apply_display_settings(settings: &horizon_client::settings::Settings) {
+    use horizon_client::android_display::DisplayOption as D;
+    let (width, height, _) = D::ASPECTS[D::Aspect.value(settings) as usize];
+    let display = [
+        D::Cutout.value(settings),
+        D::Orientation.value(settings),
+        D::Rotation.value(settings),
+        width,
+        height,
+    ];
+    static LAST: std::sync::Mutex<Option<[i32; 5]>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == Some(display) {
+        return;
+    }
+    let ok = with_activity(|env, activity| {
+        let args = display.map(jni::objects::JValue::Int);
+        env.call_method(activity, "setDisplayPreferences", "(IIIII)V", &args)
+            .map(drop)
+    });
+    if ok.is_some() {
+        *last = Some(display);
+    }
+}
+
 /// The platform hooks (horizon_client::platform): StarlingActivity's public methods.
 fn open_folder(dir: &Path) -> bool {
     with_activity(|env, activity| {

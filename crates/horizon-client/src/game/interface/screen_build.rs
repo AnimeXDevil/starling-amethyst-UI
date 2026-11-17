@@ -463,6 +463,14 @@ impl Game<'_> {
         );
         let inputs = self.settings.gui_scale_inputs();
         let gui = GuiSize::new(framebuffer, inputs.requested, inputs.unicode);
+        #[cfg(target_os = "android")]
+        let gui = {
+            let batch = self.interface_batch(framebuffer);
+            GuiSize {
+                size: [batch.width as u32, batch.height as u32],
+                ..gui
+            }
+        };
         (framebuffer, gui)
     }
 
@@ -498,10 +506,7 @@ impl Game<'_> {
         // the exclusion never disagree by a frame.
         let container = (shown && matches!(self.screen, Screen::Inventory | Screen::Creative))
             .then(|| {
-                let batch = horizon_client::hud::HudBatch::new(
-                    framebuffer,
-                    self.settings.gui_scale_inputs(),
-                );
+                let batch = self.interface_batch(framebuffer);
                 self.container_layout_inputs(&batch)
             });
         let container = container.and_then(|inputs| {
@@ -527,15 +532,8 @@ impl Game<'_> {
                                     && old.slot_inputs == inputs.slot_inputs
                             })
                 });
-            (!unchanged).then(|| {
-                self.build_container_layout(
-                    &horizon_client::hud::HudBatch::new(
-                        framebuffer,
-                        self.settings.gui_scale_inputs(),
-                    ),
-                    inputs,
-                )
-            })
+            (!unchanged)
+                .then(|| self.build_container_layout(&self.interface_batch(framebuffer), inputs))
         });
         // The pause menu's inputs can change while it is open: a server's
         // links or a custom-additions dialog arriving. Compare them here and
@@ -616,12 +614,7 @@ impl Game<'_> {
 
     /// Re-makes the shown chat or command box at `(w, h)` when it was made at
     /// another size; at its own size it compares and changes nothing.
-    ///
-    /// The chat is drawn between a camera cutout's strips (`draw_clear_of_cutout`), so it is
-    /// made at that width here too: at the full one, the build and the draw would re-make it in
-    /// turn at each frame, and a screen just made has no suggestions.
-    fn resize_text_screens(&mut self, w: f32, h: f32, scale: f32) {
-        let chat_width = self.width_between_cutouts(w, scale);
+    fn resize_text_screens(&mut self, w: f32, h: f32) {
         let m = horizon_client::screen_draw::Measure(&self.gui.atlas.font);
         let c = horizon_client::chat::Commands {
             dispatcher: super::chat::chat_tree(&self.remote),
@@ -630,7 +623,7 @@ impl Game<'_> {
         match self.screen {
             Screen::Chat => {
                 if let Some(screen) = self.ui.chat_screen.as_mut() {
-                    screen.resize(&m, &c, chat_width as i32, h as i32);
+                    screen.resize(&m, &c, w as i32, h as i32);
                 }
             }
             Screen::CommandBlock => {
@@ -659,7 +652,7 @@ impl Game<'_> {
             Screen::CommandBlock => Some(self.command_block_screen.as_ref()?.cart()),
             _ => return None,
         };
-        self.resize_text_screens(w, h, gui.scale as f32);
+        self.resize_text_screens(w, h);
         let built = self.screen_state.build.current.as_ref().filter(|build| {
             build.screen == self.screen
                 && build.identity == identity

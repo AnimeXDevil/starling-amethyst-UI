@@ -287,6 +287,7 @@ pub fn start(private: &Path, home: &Path) -> Start {
     let open = std::fs::remove_file(private.join(OPEN)).is_ok();
     let play = std::fs::remove_file(private.join(PLAY)).is_ok();
     let config = catalog::Config::load(home);
+    display::migrate_preferences(&config, home);
     if !open && (play || config.open_directly) {
         let instance = config.profile_home(home);
         let _ = std::fs::create_dir_all(&instance);
@@ -337,7 +338,7 @@ pub fn game_started(folder: &Path, home: &Path) {
             &horizon_client::logging::private_home(),
             serde_json::json!({
                 "renderer": config.renderer.label(),
-                "resolution_percent": config.render_scale.percent(),
+                "resolution_percent": config.game_render_scale(folder).percent(),
                 "instance": config.profile,
                 "performance_recording": config.record_performance,
                 "gpu_profiling": config.device.gpu_profile,
@@ -347,19 +348,8 @@ pub fn game_started(folder: &Path, home: &Path) {
         }
     }
     let _ = home;
-    // The theme and its motion came with Config::load; the controls' scale and the screen's
-    // orientation hold in the game as in the launcher.
+    // The theme and its motion came with Config::load.
     client::ui_theme::set_ui_scale_percent(config.ui_scale_percent);
-    let orientation = config.orientation.android_value();
-    crate::android::with_activity(|env, activity| {
-        env.call_method(
-            activity,
-            "setRequestedOrientation",
-            "(I)V",
-            &[jni::objects::JValue::Int(orientation)],
-        )
-        .map(drop)
-    });
 }
 
 /// `StarlingActivity.nativeDocumentResult`: the file the launcher's picker chose (android_lib.rs).

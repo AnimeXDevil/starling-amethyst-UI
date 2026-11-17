@@ -782,7 +782,7 @@ impl Game<'_> {
             self.adv_ui.scrolling = false;
             return;
         }
-        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
+        let b = self.interface_batch(size);
         let (w, h) = (b.width, b.height);
         if ui::hovered(
             self.cursor,

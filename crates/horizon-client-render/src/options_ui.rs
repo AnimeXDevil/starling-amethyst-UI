@@ -9896,6 +9896,7 @@ mod tests {
                     }
                     Item::Vanilla(o) => format!("{o:?}"),
                     Item::Horizon(h) => format!("graphics:{h:?}"),
+                    Item::Display(option) => option.key().to_owned(),
                     Item::Extra(e) => format!("extra:{e:?}"),
                 };
                 graphics_rows.insert(id.clone());

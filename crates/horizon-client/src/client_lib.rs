@@ -48,7 +48,7 @@ pub mod attribute_updates;
 pub mod auto_jump;
 pub mod banner;
 pub mod bedrock_touch;
-pub use horizon_client_render::{android_controls, keypad};
+pub use horizon_client_render::{android_controls, android_display, keypad};
 pub mod android_control_assets;
 pub mod android_control_keyboard;
 pub mod android_control_text;

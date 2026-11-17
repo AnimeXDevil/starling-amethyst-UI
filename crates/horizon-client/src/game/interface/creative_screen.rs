@@ -83,7 +83,7 @@ impl Game<'_> {
         if CREATIVE_SHIFT.get() == 0.0 {
             return;
         }
-        let width = HudBatch::new(self.touch_size(), self.settings.gui_scale_inputs()).width;
+        let width = self.interface_batch(self.touch_size()).width;
         self.bedrock_show(slot < Creative::DISPLAY, width);
     }
     /// Where the creative screen's window, or both of Bedrock Inventory's, start and end across.
@@ -522,7 +522,7 @@ impl Game<'_> {
         else {
             return false;
         };
-        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
+        let batch = self.interface_batch(size);
         if !self.creative_catalog_at(&batch, self.cursor) {
             return false;
         }
@@ -613,7 +613,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
+        let batch = self.interface_batch(size);
         self.bedrock_side(self.cursor.0, batch.width);
         self.bedrock_held = true;
         let (ox, oy) = Self::creative_origin(&batch);

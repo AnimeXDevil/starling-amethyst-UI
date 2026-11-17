@@ -1987,6 +1987,12 @@ impl<S: Screen> Shell<S> {
     }
     /// The page the plate shows: the open one or, while searching, the one picked, else the
     /// topmost line's.
+    /// The page the plate is headed with.
+    #[cfg(test)]
+    pub(crate) fn current_page(&mut self, s: &Settings, size: (f32, f32)) -> Option<S::Page> {
+        let view = self.view(s, size);
+        self.current(&view)
+    }
     fn current(&self, view: &View<S::Page, S::Row>) -> Option<S::Page> {
         if self.query().is_empty() {
             // A page that went (a screen whose pages are the player's) leaves the first.
@@ -2039,6 +2045,27 @@ impl<S: Screen> Shell<S> {
             let [rx, ry, rw, rh] = cols.row(ry);
             ui::hovered((x, y), rx, ry, rw, rh)
         })
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn preview_row(
+        &mut self,
+        s: &Settings,
+        size: (f32, f32),
+        at: (f32, f32),
+    ) -> Option<S::Row> {
+        let view = self.view(s, size);
+        let focused = match (self.keyed, self.focus) {
+            (true, Some(Target::Row(row))) => Some(row),
+            _ => None,
+        };
+        self.dragging
+            .or_else(|| self.row_at(&view, at).map(|(row, _)| row.id).or(focused))
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn selected_page(&self) -> Option<S::Page> {
+        self.page
     }
     /// Press `row`, or (`stepped`) Left or Right on it: `track` is where on its slider's track
     /// (`None` from the keyboard, or off it).
@@ -2835,11 +2862,6 @@ impl<S: Screen> Shell<S> {
         lines
             .filter_map(|l| Some((l.page, view.rows[l.setting?].id)))
             .collect()
-    }
-    /// The page the plate is headed with.
-    pub(crate) fn current_page(&mut self, s: &Settings, size: (f32, f32)) -> Option<S::Page> {
-        let view = self.view(s, size);
-        self.current(&view)
     }
     /// Whether `row` is all in the list's view now.
     pub(crate) fn in_view(&mut self, s: &Settings, size: (f32, f32), row: S::Row) -> bool {

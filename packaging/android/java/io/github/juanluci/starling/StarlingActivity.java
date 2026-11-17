@@ -34,7 +34,6 @@ import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.RelativeSizeSpan;
 import android.text.style.StyleSpan;
-import android.view.DisplayCutout;
 import android.view.InputDevice;
 import android.view.View;
 import android.view.WindowInsets;
@@ -74,6 +73,7 @@ import javax.crypto.spec.GCMParameterSpec;
  * mouse's capture and the controllers' makers and motors.
  */
 public class StarlingActivity extends NativeActivity {
+    private DisplayPreferences displayPreferences;
     private static final int PICK_FILE = 1;
     /** Horizon Android's folder picked: its worlds and packs come over (HorizonImport). */
     private static final int PICK_HORIZON = 2;
@@ -205,6 +205,7 @@ public class StarlingActivity extends NativeActivity {
         // Before super.onCreate starts the game's thread, which reads it first thing.
         onStorage(sharedFolder(this));
         super.onCreate(savedInstanceState);
+        displayPreferences = new DisplayPreferences(this);
         // Made here, on the UI thread: the game reads and writes it from its own.
         clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         // As games do: watching, a controller or a benchmark can go minutes without a touch.
@@ -240,7 +241,7 @@ public class StarlingActivity extends NativeActivity {
                     new View.OnApplyWindowInsetsListener() {
                         @Override
                         public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
-                            sendSafeInsets(insets);
+                            view.post(() -> displayPreferences.layout());
                             if (Build.VERSION.SDK_INT >= 30) {
                                 onImeHeight(insets.getInsets(WindowInsets.Type.ime()).bottom);
                                 // The keyboard brings the navigation bar back, and it stayed
@@ -266,21 +267,35 @@ public class StarlingActivity extends NativeActivity {
      * Tells the game where the camera cutout reaches into the window (in landscape, along the
      * short edge it sits on), so the touch controls and the chat keep clear of it (#166).
      */
-    private static void sendSafeInsets(WindowInsets insets) {
-        if (Build.VERSION.SDK_INT < 28) {
-            return;
-        }
-        DisplayCutout cutout = insets.getDisplayCutout();
+    void reportCutout(int left, int top, int right, int bottom) {
         try {
-            if (cutout == null) {
-                onSafeInsets(0, 0, 0, 0);
-            } else {
-                onSafeInsets(cutout.getSafeInsetLeft(), cutout.getSafeInsetTop(),
-                        cutout.getSafeInsetRight(), cutout.getSafeInsetBottom());
-            }
+            onSafeInsets(left, top, right, bottom);
         } catch (UnsatisfiedLinkError e) {
             // A build of the game from before the insets: it draws as it always did.
         }
+    }
+
+    public void setDisplayPreferences(int cutout, int orientations, int rotation, int width, int height) {
+        runOnUiThread(() -> displayPreferences.set(cutout, orientations, rotation, width, height));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        displayPreferences.listen(true);
+        displayPreferences.layout();
+    }
+
+    @Override
+    protected void onPause() {
+        displayPreferences.listen(false);
+        super.onPause();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        getWindow().getDecorView().post(() -> displayPreferences.layout());
     }
 
     @Override

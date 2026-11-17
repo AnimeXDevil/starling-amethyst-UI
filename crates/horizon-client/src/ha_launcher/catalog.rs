@@ -70,7 +70,8 @@ pub struct Config {
     #[serde(skip)]
     pub microsoft_client_id: String,
     pub renderer: RendererMode,
-    pub render_scale: crate::ha_launcher::display::RenderScale,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render_scale: Option<crate::ha_launcher::display::RenderScale>,
     pub orientation: Orientation,
     #[serde(flatten)]
     pub screen: crate::ha_launcher::display::ScreenPreferences,
@@ -158,6 +159,41 @@ impl Orientation {
     }
 }
 impl Config {
+    pub fn game_settings(&self, home: &Path) -> crate::ha_launcher::client::settings::Settings {
+        crate::ha_launcher::client::settings::Settings::load(
+            &self.game_home(home).join("options.txt"),
+        )
+    }
+
+    pub fn update_game_settings(
+        &self,
+        home: &Path,
+        edit: impl FnOnce(&mut crate::ha_launcher::client::settings::Settings),
+    ) {
+        let game = self.game_home(home);
+        let _ = std::fs::create_dir_all(&game);
+        let mut settings = self.game_settings(home);
+        edit(&mut settings);
+        settings.save(&game.join("options.txt"));
+    }
+
+    pub fn game_render_scale(&self, home: &Path) -> crate::ha_launcher::display::RenderScale {
+        use crate::ha_launcher::client::graphics::Graphics;
+        crate::ha_launcher::display::RenderScale::new(
+            Graphics::load(&self.game_home(home)).resolution_scale,
+        )
+    }
+
+    pub fn set_game_render_scale(
+        &self,
+        home: &Path,
+        scale: crate::ha_launcher::display::RenderScale,
+    ) {
+        self.update_game_settings(home, |settings| {
+            settings.horizon.resolution_scale = scale.percent();
+        });
+    }
+
     pub fn load(home: &Path) -> Self {
         let value: serde_json::Value = std::fs::read(home.join("android-launcher.json"))
             .ok()
@@ -308,7 +344,6 @@ impl Config {
         }
         settings.horizon.cave_culling = true;
         // Entity culling stays the player's choice in the game's Video Settings (three modes).
-        settings.horizon.resolution_scale = self.render_scale.percent().clamp(25, 100);
         // Starling's game reads the rest from its graphics settings (horizon-graphics.txt): the
         // workers' ceiling as their number, and the leaf culling as its Hidden mode, leaving a
         // mode the player chose in Video Settings as it is.
@@ -334,7 +369,7 @@ impl Config {
         let touch_path = game.join("horizon-touch.json");
         let mut touch_cfg = crate::ha_launcher::client::touch::Settings::load_from(&touch_path);
         touch_cfg.disable_game_animations = self.disable_game_animations;
-        touch_cfg.resolution_scale_percent = self.render_scale.percent().clamp(25, 100);
+        touch_cfg.resolution_scale_percent = settings.horizon.resolution_scale.clamp(25, 100);
         let _ = touch_cfg.save_to(&touch_path);
     }
 }
@@ -2063,8 +2098,7 @@ impl Catalog {
                 } else if self.editing == Some("render_scale") {
                     match crate::ha_launcher::display::RenderScale::parse(&self.render_scale_text) {
                         Ok(scale) => {
-                            self.config.render_scale = scale;
-                            crate::ha_launcher::display::set_scale(scale);
+                            self.config.set_game_render_scale(home, scale);
                         }
                         Err(error) => {
                             self.status = error.into();

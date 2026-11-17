@@ -111,6 +111,8 @@ impl Game<'_> {
             return;
         }
         self.save_when_focus_leaves(&event);
+        #[cfg(target_os = "android")]
+        self.sync_interface_cursor(self.touch_size());
         if self.touch_event(event_loop, id, &event) {
             return;
         }

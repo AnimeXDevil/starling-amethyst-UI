@@ -132,6 +132,8 @@ impl Game<'_> {
     }
 
     pub(super) fn apply_settings(&mut self) {
+        #[cfg(target_os = "android")]
+        crate::android::apply_display_settings(&self.settings);
         self.bind_mod_mappings();
         // A paused menu's kept blurred frame shows the world as the old settings drew it.
         if let Some(renderer) = self.renderer.as_mut() {
