@@ -115,7 +115,16 @@ impl Game<'_> {
                         "Horizon: {folder} plays with mods {set:?}, not the {:?} running: starting again",
                         world_content::running()
                     );
-                    world_content::request_restart(folder, &set)?;
+                    world_content::request_restart(
+                        folder,
+                        &set,
+                        world_content::Created {
+                            name: name.unwrap_or(folder).to_owned(),
+                            seed,
+                            creative,
+                            options: Default::default(),
+                        },
+                    )?;
                     world_content::restart();
                     return Ok(());
                 }

@@ -346,9 +346,37 @@ pub(super) fn start_set(
     }
 }
 
-/// Writes the next start's request: world `folder` with `content`.
-pub(super) fn request_restart(folder: &str, content: &BTreeSet<String>) -> std::io::Result<()> {
-    write_next(serde_json::json!({ "world": folder, "content": content }))
+/// Writes the next start's request: world `folder` with `content`. A world with no level data
+/// yet (named by the control's `open` or `--world`, not made by Create New World) is created
+/// then as `new` says: its game mode, seed and name came back as the defaults (survival) after
+/// the restart.
+pub(super) fn request_restart(
+    folder: &str,
+    content: &BTreeSet<String>,
+    new: Created,
+) -> std::io::Result<()> {
+    let exists = world_dir(folder).join("level.dat").is_file();
+    write_next(restart_body(folder, content, exists, new))
+}
+
+fn restart_body(
+    folder: &str,
+    content: &BTreeSet<String>,
+    exists: bool,
+    new: Created,
+) -> serde_json::Value {
+    if exists {
+        return serde_json::json!({ "world": folder, "content": content });
+    }
+    // Made with the set the restart loads: the start after it creates the world at once.
+    let created = Created {
+        options: horizon_client::title::WorldOptions {
+            mods: Some(content.clone()),
+            ..new.options
+        },
+        ..new
+    };
+    serde_json::json!({ "world": folder, "content": content, "create": created })
 }
 
 /// Writes the next start's request: a new world `folder` made with `created`, with `content`.
@@ -481,6 +509,27 @@ mod tests {
     #[test]
     fn the_calibration_world_never_starts_the_game_again() {
         assert_eq!(entry(horizon_client::benchmark::WORLD), Entry::Open);
+    }
+
+    /// A new world opened by name (`open NAME creative`) that has to start the game again for
+    /// its mods is created after it in creative, with its seed, not in survival.
+    #[test]
+    fn a_new_world_keeps_its_game_mode_across_the_restart_for_its_mods() {
+        let content = set(&["create"]);
+        let new = Created {
+            name: "Test".into(),
+            seed: Some(7),
+            creative: true,
+            options: Default::default(),
+        };
+        let body = restart_body("w", &content, false, new.clone());
+        let created: Created = serde_json::from_value(body["create"].clone()).unwrap();
+        assert!(created.creative);
+        assert_eq!(created.seed, Some(7));
+        assert_eq!(created.name, "Test");
+        assert_eq!(created.options.mods, Some(content.clone()));
+        // A world that exists keeps its own level data: nothing is created.
+        assert!(restart_body("w", &content, true, new)["create"].is_null());
     }
 
     #[test]
