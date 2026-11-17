@@ -1,9 +1,12 @@
 use super::*;
 use crate::ha_launcher::catalog::SettingsCategory;
 use crate::ha_launcher::client::{
+    android_display::DisplayOption,
     osk::Output,
     ui_theme::{Icon, color},
 };
+#[path = "display_settings.rs"]
+mod display_settings;
 use crate::ha_launcher::game::Renderer;
 use std::sync::atomic::Ordering;
 use winit::{
@@ -297,10 +300,10 @@ pub(super) enum Action {
     ChooseRenderScale(crate::ha_launcher::display::RenderScale),
     UiScale,
     ChooseUiScale(u32),
-    Orientation,
+    GameDisplay(DisplayOption),
     InputHost,
     ChooseInputHost(crate::ha_launcher::catalog::InputHost),
-    ChooseOrientation(crate::ha_launcher::catalog::Orientation),
+    ChooseDisplay(DisplayOption, i32),
     ChooseRenderer(crate::ha_launcher::catalog::RendererMode),
     ChooseProfile(u32),
     /// Starling: a profile's Delete, then its confirmation (the profile's folder goes).
@@ -308,9 +311,7 @@ pub(super) enum Action {
     ConfirmDeleteProfile(u32),
     Dismiss,
     Immersive,
-    Cutout,
-    Aspect,
-    ChooseAspect(crate::ha_launcher::display::Aspect),
+    DisplayMarginDelta(DisplayOption, i32),
     DisplayHz,
     ChooseDisplayHz(u16),
     CacheBudget,
@@ -3573,7 +3574,7 @@ impl Launcher {
         let gpu_txt = format!(
             "{}  •  {}% Scale  •  {}",
             c.renderer.label(),
-            c.render_scale.percent(),
+            c.game_render_scale(&self.home).percent(),
             c.device.display_label()
         );
         let prof_txt = format!(
@@ -3897,24 +3898,16 @@ impl Launcher {
         match cat {
             SettingsCategory::Video => {
                 let c = &self.catalog.config;
-                let count = 17;
                 let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
-                let max_scroll =
-                    (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
-                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-                self.list_view = Some([list_top, list_bottom, max_scroll]);
-
                 let renderer_str = format!("{} v", c.renderer.label());
-                let res_pct = c.render_scale.percent().clamp(25, 100);
-                let res_frac = ((res_pct - 25) as f32 / 75.0).clamp(0.0, 1.0);
+                let res_pct = opts.horizon.resolution_scale;
+                let res_frac = (res_pct - 25) as f32 / 175.0;
                 let res_str = if self.catalog.editing == Some("render_scale") {
                     self.catalog.render_scale_text.clone()
                 } else {
                     format!("{res_pct}%")
                 };
                 let hz_str = format!("{} v", c.device.display_label());
-                let aspect_str = format!("{} v", c.screen.aspect.label());
-                let orient_str = format!("{} v", c.orientation.label());
                 let rd_str = format!("{} chunks", opts.render_distance);
                 let rd_frac = ((opts.render_distance - 2) as f32 / 30.0).clamp(0.0, 1.0);
                 let sd_str = format!("{} chunks", opts.simulation_distance);
@@ -3934,7 +3927,7 @@ impl Launcher {
                 };
                 let game_anim_off = c.disable_game_animations || touch_cfg.disable_game_animations;
 
-                let rows: [(&str, &str, SettingControl<'_>); 17] = [
+                let mut rows = vec![
                     (
                         "DISPLAY, RESOLUTION & RENDERER PIPELINE",
                         "Hardware GPU backend, 3D resolution scale, refresh rate & display geometry",
@@ -3952,7 +3945,7 @@ impl Launcher {
                             SettingControl::TextField {
                                 label: "SCALE %",
                                 value: &self.catalog.render_scale_text,
-                                hint: "25 - 100%",
+                                hint: "25 - 200%",
                                 active: true,
                                 action: Action::Field("render_scale"),
                             }
@@ -3971,24 +3964,9 @@ impl Launcher {
                         SettingControl::Button(&hz_str, Action::DisplayHz, false),
                     ),
                     (
-                        "Display aspect ratio",
-                        "Native fullscreen, 16:9 widescreen, 4:3 classic or square",
-                        SettingControl::Button(&aspect_str, Action::Aspect, false),
-                    ),
-                    (
-                        "Screen orientation",
-                        "Sensor landscape, locked landscape or portrait layout",
-                        SettingControl::Button(&orient_str, Action::Orientation, false),
-                    ),
-                    (
                         "Immersive fullscreen",
                         "Hide Android system navigation bars during launcher and gameplay",
                         SettingControl::Toggle(c.screen.immersive, Action::Immersive),
-                    ),
-                    (
-                        "Avoid camera cutout / notch",
-                        "Inset HUD away from punch-hole cameras and curved display edges",
-                        SettingControl::Toggle(c.screen.avoid_cutout, Action::Cutout),
                     ),
                     (
                         "IN-GAME GRAPHICS, DISTANCES & MOTION",
@@ -4051,6 +4029,12 @@ impl Launcher {
                         SettingControl::Toggle(game_anim_off, Action::ToggleGameAnimations),
                     ),
                 ];
+                let values = display_settings::values(&opts);
+                rows.splice(5..5, display_settings::rows(&opts, &values));
+                let max_scroll =
+                    (rows.len() as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+                self.list_view = Some([list_top, list_bottom, max_scroll]);
                 let _ = clouds_str;
 
                 ui.set_clip(Some([
@@ -5530,17 +5514,9 @@ impl Launcher {
             }
             // Video settings mutations
             Some(Action::RenderScaleDelta(delta)) => {
-                let next_pct = (self.catalog.config.render_scale.percent() as i32 + delta)
-                    .clamp(25, 100) as u32;
-                let scale = crate::ha_launcher::display::RenderScale::new(next_pct);
-                self.catalog.config.render_scale = scale;
-                let _ = self.catalog.config.save(&self.home);
-                crate::ha_launcher::display::set_scale(scale);
                 self.modify_game_settings(|s| {
-                    s.horizon.resolution_scale = next_pct;
-                });
-                self.modify_touch_settings(|t| {
-                    t.resolution_scale_percent = next_pct;
+                    s.horizon.resolution_scale =
+                        (s.horizon.resolution_scale as i32 + delta).clamp(25, 200) as u32
                 });
             }
             Some(Action::RenderDistDelta(delta)) => {
@@ -5925,17 +5901,14 @@ impl Launcher {
                 self.catalog.config.save(&self.home)?;
                 self.configure_screen();
             }
-            Some(Action::Cutout) => {
-                self.catalog.config.screen.avoid_cutout ^= true;
-                self.catalog.config.save(&self.home)?;
-                self.configure_screen();
-            }
-            Some(Action::Aspect) => self.open_chooser(chooser::Kind::Aspect),
-            Some(Action::ChooseAspect(aspect)) => {
-                self.catalog.config.screen.aspect = aspect;
-                self.catalog.config.save(&self.home)?;
+            Some(Action::GameDisplay(option)) => self.open_chooser(chooser::Kind::Display(option)),
+            Some(Action::ChooseDisplay(option, value)) => {
+                self.modify_game_settings(|s| option.set(s, value));
                 self.configure_screen();
                 self.chooser = None;
+            }
+            Some(Action::DisplayMarginDelta(option, delta)) => {
+                self.modify_game_settings(|s| option.set(s, option.value(s) + delta));
             }
             Some(Action::CacheBudget) => self.open_chooser(chooser::Kind::CacheBudget),
             Some(Action::ChooseCacheBudget(mib)) => {
@@ -6250,8 +6223,12 @@ impl Launcher {
                     return Ok(());
                 }
                 if name == "render_scale" {
-                    self.catalog.render_scale_text =
-                        self.catalog.config.render_scale.percent().to_string();
+                    self.catalog.render_scale_text = self
+                        .catalog
+                        .config
+                        .game_render_scale(&self.home)
+                        .percent()
+                        .to_string();
                     self.chooser = None;
                 }
                 self.catalog.editing = Some(name);
@@ -6287,24 +6264,15 @@ impl Launcher {
             Some(Action::Renderer) => self.open_chooser(chooser::Kind::Renderer),
             Some(Action::RenderScale) => self.open_chooser(chooser::Kind::RenderScale),
             Some(Action::ChooseRenderScale(scale)) => {
-                self.catalog.config.render_scale = scale;
-                self.catalog.config.save(&self.home)?;
+                self.catalog.config.set_game_render_scale(&self.home, scale);
                 self.chooser = None;
-                crate::ha_launcher::display::set_scale(scale);
             }
-            Some(Action::Orientation) => self.open_chooser(chooser::Kind::Orientation),
             Some(Action::InputHost) => self.open_chooser(chooser::Kind::InputHost),
             Some(Action::ChooseInputHost(mode)) => {
                 self.catalog.config.input_host = mode;
                 self.catalog.config.save(&self.home)?;
                 self.chooser = None;
                 crate::ha_launcher::configure_input_mode(mode);
-            }
-            Some(Action::ChooseOrientation(mode)) => {
-                self.catalog.config.orientation = mode;
-                self.catalog.config.save(&self.home)?;
-                self.chooser = None;
-                crate::ha_launcher::platform::set_orientation(mode);
             }
             Some(Action::ChooseRenderer(mode)) => {
                 self.catalog.config.renderer = mode;
@@ -6323,6 +6291,8 @@ impl Launcher {
                 self.catalog.config.profile = profile;
                 self.catalog.config.save(&self.home)?;
                 self.catalog.refresh(&self.home);
+                crate::ha_launcher::display::migrate_preferences(&self.catalog.config, &self.home);
+                self.configure_screen();
                 self.chooser = None;
             }
             Some(Action::DeleteProfile(profile)) => {
@@ -6345,6 +6315,7 @@ impl Launcher {
                         self.catalog.config.profile = 0;
                         self.catalog.config.save(&self.home)?;
                         self.catalog.refresh(&self.home);
+                        self.configure_screen();
                     }
                 }
                 self.open_chooser(chooser::Kind::Profile);
@@ -6907,12 +6878,7 @@ impl Launcher {
         &mut self,
         f: impl FnOnce(&mut crate::ha_launcher::client::settings::Settings),
     ) {
-        let game_home = self.catalog.config.game_home(&self.home);
-        let _ = std::fs::create_dir_all(&game_home);
-        let path = game_home.join("options.txt");
-        let mut s = crate::ha_launcher::client::settings::Settings::load(&path);
-        f(&mut s);
-        s.save(&path);
+        self.catalog.config.update_game_settings(&self.home, f);
     }
 
     fn modify_touch_settings(
@@ -6936,16 +6902,13 @@ impl Launcher {
         let t = frac.clamp(0.0, 1.0);
         match action {
             Action::RenderScaleDelta(_) => {
-                let next_pct = (25.0 + t * 75.0).round() as u32;
-                let scale = crate::ha_launcher::display::RenderScale::new(next_pct);
-                self.catalog.config.render_scale = scale;
-                let _ = self.catalog.config.save(&self.home);
-                crate::ha_launcher::display::set_scale(scale);
                 self.modify_game_settings(|s| {
-                    s.horizon.resolution_scale = next_pct;
+                    s.horizon.resolution_scale = 25 + (t * 35.0).round() as u32 * 5
                 });
-                self.modify_touch_settings(|ts| {
-                    ts.resolution_scale_percent = next_pct;
+            }
+            Action::DisplayMarginDelta(option, _) => {
+                self.modify_game_settings(|s| {
+                    option.set(s, (t * option.max() as f32).round() as i32)
                 });
             }
             Action::RenderDistDelta(_) => {

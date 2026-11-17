@@ -4,17 +4,17 @@ use super::{
     pages::{Action, button_rounded},
 };
 use crate::ha_launcher::catalog::RendererMode;
+use crate::ha_launcher::client::android_display::DisplayOption;
 use crate::ha_launcher::client::ui_theme::{Face, Ui, color::with_alpha};
 
 pub(super) enum Kind {
-    Aspect,
+    Display(DisplayOption),
     DisplayHz,
     CacheBudget,
     WorkerLimit,
     Renderer,
     RenderScale,
     Profile,
-    Orientation,
     InputHost,
     UiScale,
     ControlProfile,
@@ -45,26 +45,21 @@ impl Launcher {
         let c = &self.catalog.config;
         let mut deletes = Vec::new();
         let (title, help, choices) = match kind {
-            Kind::Aspect => (
-                "Aspect ratio",
-                "Fits the entire picture without stretching. Touch coordinates follow the picture. Portrait swaps width and height.",
-                [
-                    crate::ha_launcher::display::Aspect::Native,
-                    crate::ha_launcher::display::Aspect::Wide,
-                    crate::ha_launcher::display::Aspect::Classic,
-                    crate::ha_launcher::display::Aspect::Square,
-                ]
-                .into_iter()
-                .map(|a| {
-                    (
-                        a.label().into(),
-                        String::new(),
-                        Action::ChooseAspect(a),
-                        c.screen.aspect == a,
-                    )
-                })
-                .collect(),
-            ),
+            Kind::Display(option) => {
+                let current = option.value(&c.game_settings(&self.home));
+                (
+                    option.name(),
+                    "Saved for the selected game instance.",
+                    (0..=option.max())
+                        .map(|value| (
+                            option.choice_name(value).into(),
+                            String::new(),
+                            Action::ChooseDisplay(option, value),
+                            current == value,
+                        ))
+                        .collect(),
+                )
+            }
             Kind::CacheBudget => (
                 "Reusable RAM cache",
                 "Decoded sounds (80%) and empty mesh buffers (20%). Recreated at the same quality. Smaller budgets can increase CPU work. Not total RAM/VRAM. Applies on next Play.",
@@ -122,6 +117,7 @@ impl Launcher {
                     .collect(),
             ),
             Kind::RenderScale => {
+                let current = c.game_render_scale(&self.home).percent();
                 let mut choices: Vec<_> = crate::ha_launcher::display::RenderScale::PRESETS
                     .into_iter()
                     .map(|percent| {
@@ -129,17 +125,19 @@ impl Launcher {
                             format!("{percent}%"),
                             if percent == 100 {
                                 "Native resolution".into()
+                            } else if percent > 100 {
+                                "Higher 3D rendering resolution".into()
                             } else {
-                                "Lower resolution for the whole picture".into()
+                                "Lower 3D rendering resolution".into()
                             },
                             Action::ChooseRenderScale(crate::ha_launcher::display::RenderScale::new(percent)),
-                            c.render_scale.percent() == percent,
+                            current == percent,
                         )
                     })
                     .collect();
                 choices.push((
                     "Custom percentage...".into(),
-                    "Enter a value from 25 to 100".into(),
+                    "Enter a value from 25 to 200".into(),
                     Action::Field("render_scale"),
                     false,
                 ));
@@ -160,21 +158,6 @@ impl Launcher {
                             String::new(),
                             Action::ChooseInputHost(mode),
                             c.input_host == mode,
-                        )
-                    })
-                    .collect(),
-            ),
-            Kind::Orientation => (
-                "Screen orientation",
-                "Applies to the launcher and game. Does not change touch bindings.",
-                crate::ha_launcher::catalog::Orientation::ALL
-                    .into_iter()
-                    .map(|mode| {
-                        (
-                            mode.label().into(),
-                            String::new(),
-                            Action::ChooseOrientation(mode),
-                            c.orientation == mode,
                         )
                     })
                     .collect(),

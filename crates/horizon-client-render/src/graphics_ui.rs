@@ -1347,38 +1347,10 @@ impl Item {
             Item::Horizon(h) => h.label(s, out),
             Item::Display(option) => {
                 let value = option.value(s);
-                match option {
-                    DisplayOption::Cutout => {
-                        labelled("Camera Cutout", lang::get(option.choices()[value as usize]))
-                    }
-                    DisplayOption::Orientation => {
-                        labelled("Orientation", lang::get(option.choices()[value as usize]))
-                    }
-                    DisplayOption::Rotation => {
-                        labelled("Rotation", lang::get(option.choices()[value as usize]))
-                    }
-                    DisplayOption::Aspect => labelled(
-                        "Aspect Ratio",
-                        lang::get(DisplayOption::ASPECTS[value as usize].2),
-                    ),
-                    DisplayOption::SafeHorizontal => {
-                        labelled_percent("Horizontal Safe Margin", value as u32)
-                    }
-                    DisplayOption::SafeVertical => {
-                        labelled_percent("Vertical Safe Margin", value as u32)
-                    }
-                    DisplayOption::InterfaceHorizontal => {
-                        labelled_percent("Horizontal Menu Margin", value as u32)
-                    }
-                    DisplayOption::InterfaceVertical => {
-                        labelled_percent("Vertical Menu Margin", value as u32)
-                    }
-                    DisplayOption::ButtonsHorizontal => {
-                        labelled_percent("Horizontal Button Margin", value as u32)
-                    }
-                    DisplayOption::ButtonsVertical => {
-                        labelled_percent("Vertical Button Margin", value as u32)
-                    }
+                if option.margin_preview().is_some() {
+                    labelled_percent(option.name(), value as u32)
+                } else {
+                    labelled(option.name(), lang::get(option.choice_name(value)))
                 }
             }
             Item::Extra(e) => Text::option_name_value(

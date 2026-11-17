@@ -1,5 +1,55 @@
 //! Whole-frame resolution, independent of the world's graphics settings.
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+/// Older launchers stored these values outside the selected game's options.
+/// Import them only where the profile has no corresponding saved value.
+pub fn migrate_preferences(config: &super::catalog::Config, home: &Path) {
+    use super::{catalog::Orientation, client::android_display::DisplayOption as D};
+
+    let (orientation, rotation) = match config.orientation {
+        Orientation::Landscape => (0, 0),
+        Orientation::Portrait => (1, 0),
+        Orientation::ReverseLandscape => (0, 3),
+        Orientation::ReversePortrait => (1, 3),
+        Orientation::Auto => (2, 0),
+    };
+    let [w, h] = config.screen.aspect.ratio();
+    let aspect = D::ASPECTS
+        .iter()
+        .position(|&(width, height, _)| [width, height] == [w as i32, h as i32])
+        .unwrap_or(0) as i32;
+    let game = config.game_home(home);
+    let raw = std::fs::read_to_string(game.join("options.txt")).unwrap_or_default();
+    let has_option = |file: &str, key| {
+        file.lines()
+            .any(|line| line.split_once(':').is_some_and(|(name, _)| name == key))
+    };
+    let pending: Vec<_> = [
+        (D::Cutout, i32::from(config.screen.avoid_cutout)),
+        (D::Orientation, orientation),
+        (D::Rotation, rotation),
+        (D::Aspect, aspect),
+    ]
+    .into_iter()
+    .filter(|&(option, value)| value != 0 && !has_option(&raw, option.key()))
+    .collect();
+    let scale = config.render_scale.filter(|scale| {
+        scale.percent() != 100
+            && !std::fs::read_to_string(game.join("horizon-graphics.txt"))
+                .is_ok_and(|file| has_option(&file, "resolutionScale"))
+    });
+    if !pending.is_empty() || scale.is_some() {
+        config.update_game_settings(home, |settings| {
+            for (option, value) in pending {
+                option.set(settings, value);
+            }
+            if let Some(scale) = scale {
+                settings.horizon.resolution_scale = scale.percent();
+            }
+        });
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -12,10 +62,10 @@ impl Default for RenderScale {
 }
 
 impl RenderScale {
-    pub const PRESETS: [u32; 6] = [100, 85, 75, 67, 50, 25];
+    pub const PRESETS: [u32; 10] = [200, 175, 150, 125, 100, 85, 75, 67, 50, 25];
 
     pub fn new(percent: u32) -> Self {
-        Self(percent.clamp(25, 100))
+        Self(percent.clamp(25, 200))
     }
 
     pub fn parse(text: &str) -> Result<Self, &'static str> {
@@ -24,15 +74,15 @@ impl RenderScale {
             .trim_end_matches('%')
             .trim()
             .parse::<u32>()
-            .map_err(|_| "Enter a whole percentage from 25 to 100")?;
-        if !(25..=100).contains(&percent) {
-            return Err("Enter a percentage from 25 to 100");
+            .map_err(|_| "Enter a whole percentage from 25 to 200")?;
+        if !(25..=200).contains(&percent) {
+            return Err("Enter a percentage from 25 to 200");
         }
         Ok(Self(percent))
     }
 
     pub fn percent(self) -> u32 {
-        self.0.clamp(25, 100)
+        self.0.clamp(25, 200)
     }
 
     pub fn buffer_size(self, view: [u32; 2]) -> [u32; 2] {
@@ -40,7 +90,7 @@ impl RenderScale {
         // Keep standard menus usable even on a narrow keypad screen. Never
         // enlarge a surface that is already smaller than the GUI minimum.
         let minimum = (320.0 / w as f64).max(240.0 / h as f64).min(1.0);
-        let scale = (self.percent() as f64 / 100.0).max(minimum);
+        let scale = (self.percent() as f64 / 100.0).clamp(minimum, 1.0);
         [w, h].map(|v| (v as f64 * scale).round().max(1.0) as u32)
     }
 }
@@ -105,7 +155,8 @@ mod tests {
     fn edited_and_old_settings_have_bounded_values() {
         assert_eq!(RenderScale::parse(" 67% ").unwrap().percent(), 67);
         assert!(RenderScale::parse("0").is_err());
-        assert!(RenderScale::parse("101").is_err());
+        assert_eq!(RenderScale::parse("150").unwrap().percent(), 150);
+        assert!(RenderScale::parse("201").is_err());
         assert_eq!(
             serde_json::from_str::<RenderScale>("0").unwrap().percent(),
             25

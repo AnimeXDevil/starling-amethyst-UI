@@ -264,6 +264,7 @@ impl Launcher {
             self.catalog.config.screen.immersive,
             self.catalog.config.screen.avoid_cutout,
         );
+        crate::android::apply_display_settings(&self.catalog.config.game_settings(&self.home));
     }
     fn fail(&mut self, error: impl std::fmt::Display) {
         log::error!("{error}");
@@ -275,7 +276,6 @@ impl Launcher {
     }
 
     fn open(&mut self, events: &ActiveEventLoop) -> Result<()> {
-        crate::ha_launcher::platform::set_orientation(self.catalog.config.orientation);
         self.configure_screen();
         crate::ha_launcher::client::ui_theme::set_android_dpi(
             crate::ha_launcher::platform::display_density(),
@@ -283,7 +283,6 @@ impl Launcher {
         crate::ha_launcher::client::ui_theme::set_ui_scale_percent(
             self.catalog.config.ui_scale_percent,
         );
-        crate::ha_launcher::display::set_scale(self.catalog.config.render_scale);
         crate::ha_launcher::client::android_runtime::configure_gpu(false);
         if let (Some(renderer), Some(window)) = (&mut self.renderer, &self.window) {
             if let Some(size) = crate::ha_launcher::display::prepare(window)? {
@@ -420,7 +419,7 @@ impl Launcher {
         }
         crate::ha_launcher::diagnostics::heartbeat(
             "play_requested",
-            || serde_json::json!({"renderer":self.catalog.config.renderer.label(),"resolution_percent":self.catalog.config.render_scale.percent()}),
+            || serde_json::json!({"renderer":self.catalog.config.renderer.label(),"resolution_percent":self.catalog.config.game_render_scale(&self.home).percent()}),
         );
         crate::ha_launcher::client::android_runtime::configure_worker_limit(
             self.catalog.config.worker_limit,

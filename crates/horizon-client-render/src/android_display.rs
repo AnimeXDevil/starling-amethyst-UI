@@ -24,10 +24,10 @@ impl DisplayOption {
         Self::Aspect,
         Self::SafeHorizontal,
         Self::SafeVertical,
-        Self::InterfaceHorizontal,
-        Self::InterfaceVertical,
         Self::ButtonsHorizontal,
         Self::ButtonsVertical,
+        Self::InterfaceHorizontal,
+        Self::InterfaceVertical,
     ];
 
     pub const ASPECTS: [(i32, i32, &'static str); 11] = [
@@ -91,6 +91,29 @@ impl DisplayOption {
             Self::Orientation => &["Landscape", "Portrait", "Both"],
             Self::Rotation => &["Automatic", "Inverted automatic", "Fixed", "Fixed reversed"],
             _ => &[],
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Cutout => "Camera Cutout",
+            Self::Orientation => "Orientation",
+            Self::Rotation => "Rotation",
+            Self::Aspect => "Aspect Ratio",
+            Self::SafeHorizontal => "Horizontal Safe Margin",
+            Self::SafeVertical => "Vertical Safe Margin",
+            Self::ButtonsHorizontal => "Horizontal Button Margin",
+            Self::ButtonsVertical => "Vertical Button Margin",
+            Self::InterfaceHorizontal => "Horizontal Menu Margin",
+            Self::InterfaceVertical => "Vertical Menu Margin",
+        }
+    }
+
+    pub fn choice_name(self, value: i32) -> &'static str {
+        if self == Self::Aspect {
+            Self::ASPECTS[value as usize].2
+        } else {
+            self.choices()[value as usize]
         }
     }
 
