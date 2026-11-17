@@ -1272,12 +1272,12 @@ pub fn main(
     let mut notes = Vec::new();
     let folder = game_folder(&private, &mut notes);
     // Horizon Android's launcher, or the game in the instance it chose: one of them a process.
-    let start = crate::ha_launcher::start(&private, &folder);
-    let home = match &start {
+    let chosen = crate::ha_launcher::start(&private, &folder);
+    let home = match &chosen {
         crate::ha_launcher::Start::Game(instance) => instance.clone(),
         crate::ha_launcher::Start::Launcher => folder.clone(),
     };
-    let in_game = matches!(start, crate::ha_launcher::Start::Game(_));
+    let in_game = matches!(chosen, crate::ha_launcher::Start::Game(_));
     IN_GAME.store(in_game, std::sync::atomic::Ordering::Relaxed);
     let (args, env) = command_line(&private);
     // SAFETY: no other thread of ours runs yet; the game reads these from its threads afterwards.
