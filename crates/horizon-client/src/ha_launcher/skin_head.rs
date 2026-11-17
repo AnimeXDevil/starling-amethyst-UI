@@ -2,8 +2,10 @@
 //!
 //! The launcher draws the account head before the game has loaded a skin, so
 //! the name goes to Mojang's public profile APIs on a background thread and the
-//! decoded faces are kept for the session. Offline (cracked) names have no
-//! Mojang profile and fall back to the drawn Steve head.
+//! decoded faces are kept for the session. A name with no Mojang profile, or one
+//! wearing the default skin, takes its skin on Ely.by, where Starling's offline
+//! and Ely.by players keep theirs and the game shows it (Skin Customization's
+//! Ely.by Skins); with neither, the drawn Steve head.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -83,6 +85,45 @@ fn agent() -> ureq::Agent {
 
 fn fetch(name: &str) -> Option<HeadSkin> {
     let agent = agent();
+    let url = mojang_skin_url(&agent, name).or_else(|| ely_skin_url(&agent, name))?;
+    let mut png = Vec::new();
+    agent
+        .get(&url)
+        .call()
+        .ok()?
+        .into_reader()
+        .read_to_end(&mut png)
+        .ok()?;
+    let (w, h, rgba) = crate::ha_launcher::client::hud::decode_bytes(&png).ok()?;
+    from_rgba(w, h, &rgba)
+}
+
+/// `name`'s skin on Ely.by (`GET skinsystem.ely.by/textures/{name}`, 204 for a name without
+/// one), on https, from Ely.by's own hosts only.
+fn ely_skin_url(agent: &ureq::Agent, name: &str) -> Option<String> {
+    let answer: serde_json::Value = serde_json::from_str(
+        &agent
+            .get(&format!("https://skinsystem.ely.by/textures/{name}"))
+            .call()
+            .ok()?
+            .into_string()
+            .ok()?,
+    )
+    .ok()?;
+    ely_url(answer.get("SKIN")?.get("url")?.as_str()?)
+}
+
+/// An Ely.by skin URL on https, or None for another host.
+fn ely_url(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split('/').next()?;
+    matches!(host, "ely.by" | "skinsystem.ely.by").then(|| format!("https://{rest}"))
+}
+
+/// The skin URL of `name`'s Mojang profile; None without a profile or with the default skin.
+fn mojang_skin_url(agent: &ureq::Agent, name: &str) -> Option<String> {
     let profile: serde_json::Value = serde_json::from_str(
         &agent
             .get(&format!(
@@ -116,21 +157,9 @@ fn fetch(name: &str) -> Option<HeadSkin> {
     let payload: serde_json::Value =
         serde_json::from_slice(&crate::ha_launcher::client::skins::base64_decode(encoded)?).ok()?;
     let url = payload.get("textures")?.get("SKIN")?.get("url")?.as_str()?;
-    if !url.starts_with("https://textures.minecraft.net/")
-        && !url.starts_with("http://textures.minecraft.net/")
-    {
-        return None;
-    }
-    let mut png = Vec::new();
-    agent
-        .get(url)
-        .call()
-        .ok()?
-        .into_reader()
-        .read_to_end(&mut png)
-        .ok()?;
-    let (w, h, rgba) = crate::ha_launcher::client::hud::decode_bytes(&png).ok()?;
-    from_rgba(w, h, &rgba)
+    (url.starts_with("https://textures.minecraft.net/")
+        || url.starts_with("http://textures.minecraft.net/"))
+    .then(|| url.to_owned())
 }
 
 fn pixel(w: u32, h: u32, rgba: &[u8], x: u32, y: u32) -> Option<(u32, u8)> {
@@ -247,5 +276,26 @@ impl AvatarHead for crate::ha_launcher::client::ui_theme::Ui<'_> {
             }
         }
         self.border(x, y, size, size, radius, theme.border_strong);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ely_url;
+
+    #[test]
+    fn ely_skins_come_on_https_from_ely_hosts_only() {
+        assert_eq!(
+            ely_url("http://ely.by/storage/skins/a.png").as_deref(),
+            Some("https://ely.by/storage/skins/a.png")
+        );
+        assert_eq!(
+            ely_url("https://skinsystem.ely.by/x.png").as_deref(),
+            Some("https://skinsystem.ely.by/x.png")
+        );
+        assert_eq!(ely_url("https://example.com/ely.by/a.png"), None);
+        assert_eq!(ely_url("https://ely.by.example.com/a.png"), None);
+        assert_eq!(ely_url("https://token@ely.by/a.png"), None);
+        assert_eq!(ely_url("ftp://ely.by/a.png"), None);
     }
 }

@@ -197,6 +197,8 @@ pub enum InGameMenuAction {
     ForceKill,
     /// Open the game's log folder in the system file manager.
     OpenLogs,
+    /// Back to Horizon Android's launcher (`ha_launcher`), a world saved first.
+    OpenLauncher,
     /// The naming field of a preset dialog was tapped: show the system keyboard.
     EditPresetField(bool),
     /// Adjust real-time 3D world resolution scale percentage (25%..=100%) without recreating UI surface.
@@ -2677,14 +2679,19 @@ impl TouchUi {
                     return Some(InGameMenuAction::Close);
                 }
                 let sys_y = body_y + 292.0;
-                let half = (cw - 10.0) * 0.5;
-                if inside([cx, sys_y, half, 38.0]) {
-                    self.floating_menu = false;
-                    return Some(InGameMenuAction::ForceKill);
-                }
-                if inside([cx + half + 10.0, sys_y, half, 38.0]) {
-                    self.floating_menu = false;
-                    return Some(InGameMenuAction::OpenLogs);
+                let third = (cw - 20.0) / 3.0;
+                for (i, action) in [
+                    InGameMenuAction::ForceKill,
+                    InGameMenuAction::OpenLogs,
+                    InGameMenuAction::OpenLauncher,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    if inside([cx + i as f32 * (third + 10.0), sys_y, third, 38.0]) {
+                        self.floating_menu = false;
+                        return Some(action);
+                    }
                 }
             }
         }
@@ -3863,32 +3870,31 @@ impl TouchUi {
                 );
 
                 let sys_y = body_y + 292.0;
-                let half = (cw - 10.0) * 0.5;
+                let third = (cw - 20.0) / 3.0;
                 ui.rounded(
                     cx,
                     sys_y,
-                    half,
+                    third,
                     38.0,
                     10.0,
                     color::with_alpha(danger_c, 0.22),
                 );
-                ui.border(cx, sys_y, half, 38.0, 10.0, danger_c);
+                ui.border(cx, sys_y, third, 38.0, 10.0, danger_c);
                 ui.centered_fit(
                     Face::SemiBold,
                     10.8,
-                    [cx, sys_y, half, 38.0],
+                    [cx, sys_y, third, 38.0],
                     danger_c,
                     "Force Kill",
                 );
-                ui.rounded(cx + half + 10.0, sys_y, half, 38.0, 10.0, card_bg);
-                ui.border(cx + half + 10.0, sys_y, half, 38.0, 10.0, border_c);
-                ui.centered_fit(
-                    Face::SemiBold,
-                    10.8,
-                    [cx + half + 10.0, sys_y, half, 38.0],
-                    text_c,
-                    "Open Logs",
-                );
+                // Open Logs, then the launcher (Horizon Android's, where an instance can open
+                // directly): the way back to it from any screen, not only the title's.
+                for (i, label) in [(1.0, "Open Logs"), (2.0, "Launcher")] {
+                    let x = cx + i * (third + 10.0);
+                    ui.rounded(x, sys_y, third, 38.0, 10.0, card_bg);
+                    ui.border(x, sys_y, third, 38.0, 10.0, border_c);
+                    ui.centered_fit(Face::SemiBold, 10.8, [x, sys_y, third, 38.0], text_c, label);
+                }
             }
         }
 
