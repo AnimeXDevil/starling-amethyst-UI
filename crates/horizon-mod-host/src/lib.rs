@@ -7,7 +7,7 @@ mod native_libraries;
 pub use native_libraries::{GAME_BUILD_ID, RUSTC_VERSION, main};
 
 mod loading;
-pub use loading::main_with;
+pub use loading::{code_runtime, load_code, main_with};
 
 /// Establish main-thread stack capacity before compiler-child handling.
 pub use horizon_guest_stack::prepare_main as prepare_main_stack;

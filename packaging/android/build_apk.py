@@ -64,6 +64,14 @@ PAGE_FLAGS = "-C link-arg=-Wl,-z,max-page-size=16384"
 # A BuildId in the library, so the native tombstones in diagnostic ZIPs name it and its frames can be matched to
 # the unstripped copy kept beside the APK (`lib<LIBRARY>-symbols.so`, docs/android-diagnostics.md).
 BUILD_ID_FLAGS = "-C link-arg=-Wl,--build-id=sha1"
+# Rust's Android targets keep each `thread_local!` in a pthread key, and bionic gives a process 128 of them, the
+# system's and the GPU driver's included: the game outgrew them once Wasmtime ran in it, and aborted with "out of TLS
+# keys" on the first use of one more (saving a world). With `cfg(target_thread_local)` they are the targets' own
+# thread-local storage (LLVM's emulated TLS on Android), which has no such limit. No released std is built that way,
+# so the std is built with the library from the toolchain's rust-src (`-Zbuild-std`); RUSTC_BOOTSTRAP lets the
+# pinned stable Rust take both flags.
+TLS_FLAGS = "-Z has-thread-local=yes"
+BUILD_STD = "-Zbuild-std=std,panic_unwind"
 ICONS = {
     "mipmap-mdpi": "48x48",
     "mipmap-xxhdpi": "128x128",
@@ -110,6 +118,23 @@ def ndk_tool(ndk, name):
     return tool(ndk / "toolchains" / "llvm" / "prebuilt" / host / "bin", name)
 
 
+def emutls_runtime(ndk, abi):
+    """The NDK's compiler runtime for `abi`, whose `emutls.c` is LLVM's emulated TLS (`__emutls_get_address`),
+    which the thread locals of `TLS_FLAGS` call. Rust links with -nodefaultlibs and its own compiler_builtins, which
+    has none, so without this archive the library left the symbol to the phone's dynamic linker, which has none
+    either: "dlopen failed: cannot locate symbol "__emutls_get_address"" before the game's first line."""
+    arch = TARGETS[abi][2].split("-")[0]
+    host = {"win32": "windows-x86_64", "darwin": "darwin-x86_64"}.get(sys.platform, "linux-x86_64")
+    clang = ndk / "toolchains" / "llvm" / "prebuilt" / host / "lib" / "clang"
+    found = sorted(clang.glob(f"*/lib/linux/libclang_rt.builtins-{arch}-android.a"))
+    if not found:
+        sys.exit(f"build_apk: no libclang_rt.builtins-{arch}-android.a under {clang}")
+    path = found[-1].as_posix()
+    if " " in path:
+        sys.exit(f"build_apk: {path} has a space, which RUSTFLAGS would split: move the NDK")
+    return path
+
+
 def build_library(profile, ndk, sdk, abi=ABI):
     env = dict(os.environ, ANDROID_NDK_HOME=str(ndk), ANDROID_HOME=str(sdk))
     # Preserve source identity in local diagnostic reports, including source builds.
@@ -120,10 +145,20 @@ def build_library(profile, ndk, sdk, abi=ABI):
             ["git", "status", "--porcelain"], cwd=ROOT, text=True))).lower()
     except (OSError, subprocess.CalledProcessError):
         pass  # An exported source archive may not have Git metadata.
-    env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " " + PAGE_FLAGS + " " + BUILD_ID_FLAGS).strip()
+    tls = f"{TLS_FLAGS} -C link-arg={emutls_runtime(ndk, abi)}"
+    env["RUSTFLAGS"] = " ".join(
+        flags for flags in (env.get("RUSTFLAGS", ""), PAGE_FLAGS, BUILD_ID_FLAGS, tls) if flags
+    )
+    env["RUSTC_BOOTSTRAP"] = "1"
+    # The std's source (`TLS_FLAGS`): CI installs it with the toolchain (`--component rust-src`), and the mod
+    # service's build cache holds it, with its crates, for its sandbox, which has no network.
+    sysroot = subprocess.check_output(["rustc", "--print", "sysroot"], cwd=ROOT, text=True, env=env).strip()
+    if not (Path(sysroot) / "lib" / "rustlib" / "src" / "rust" / "library").is_dir():
+        sys.exit("build_apk: the Rust toolchain has no rust-src, which the std build needs: "
+                 "rustup component add rust-src")
     run(
         "cargo", "ndk", "-t", abi, "--platform", MIN_SDK,
-        "build", "--profile", profile, "-p", "horizon-android",
+        "build", BUILD_STD, "--profile", profile, "-p", "horizon-android",
         cwd=ROOT, env=env,
     )
 
@@ -158,11 +193,24 @@ def zip_folder(folder, archive):
             z.writestr(info, file.read_bytes())
 
 
-def assets(out):
+def wasm_std(out_file):
+    """horizon-wasm-std.wasm, the std every wasm mod links against when the game loads it, built as
+    Horizon ships it beside its executable (crates/cargo-horizon-mod `wasm-std`): by the Rust wasm
+    mods are built with (tools/ci/rust-version), with its std's source and the wasm target."""
+    toolchain = (ROOT / "tools/ci/rust-version").read_text(encoding="utf-8").strip()
+    if shutil.which("rustup"):
+        run("rustup", "toolchain", "install", toolchain, "--profile", "minimal")
+        run("rustup", "component", "add", "rust-src", "--toolchain", toolchain)
+        run("rustup", "target", "add", "wasm32-unknown-unknown", "--toolchain", toolchain)
+    run("cargo", "run", "--locked", "-p", "cargo-horizon-mod", "--", "wasm-std", out_file, cwd=ROOT)
+
+
+def assets(out, abi=None):
     """The APK's assets/: prepare-kit.zip (PREPARE_KIT, with the paths horizon-prepare reads),
     lowbudget.zip, the skin the setup draws the menus with (packaging/lowbudget/pack, made by its
-    make.py), and StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
-    `out` for the release page)."""
+    make.py), StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
+    `out` for the release page), and for a 64-bit `abi` horizon-wasm-std.wasm (`wasm_std`), which the
+    game puts in its own files to load wasm mods (32-bit Android loads none)."""
     run(sys.executable, ROOT / "tools/build_android_exporters.py")
     folder = out / "assets"
     shutil.rmtree(folder, ignore_errors=True)
@@ -184,6 +232,8 @@ def assets(out):
     zip_folder(HERE.parent / "lowbudget" / "pack", folder / "lowbudget.zip")
     zip_folder(HERE.parent / "shaderpacks" / "starling-visuals", folder / "StarlingVisuals.zip")
     shutil.copyfile(folder / "StarlingVisuals.zip", out / "StarlingVisuals.zip")
+    if abi in ("arm64-v8a", "x86_64"):
+        wasm_std(folder / "horizon-wasm-std.wasm")
     return folder
 
 
@@ -355,6 +405,10 @@ def main():
     built = ROOT / "target" / triple / profile_dir / f"lib{LIBRARY}.so"
     if not built.is_file():
         sys.exit(f"build_apk: {built} not built")
+    # The check the phone's dynamic linker makes when it opens the library (`emutls_runtime`), made here first.
+    undefined = subprocess.check_output([str(ndk_tool(ndk, "llvm-nm")), "-D", "--undefined-only", str(built)], text=True)
+    if "__emutls_get_address" in undefined.split():
+        sys.exit(f"build_apk: {built} leaves __emutls_get_address undefined, and no phone defines it")
 
     out = ROOT / "target" / "android"
     out.mkdir(parents=True, exist_ok=True)
@@ -371,7 +425,9 @@ def main():
         shutil.copyfile(built, out / f"lib{LIBRARY}-symbols.so")
 
     variant = "dev" if args.dev else "preview" if args.preview else None
-    link_resources(tool(build_tools, "aapt2"), android_jar, out, assets(out), variant, args.abi)
+    link_resources(
+        tool(build_tools, "aapt2"), android_jar, out, assets(out, args.abi), variant, args.abi
+    )
     dex = compile_java(build_tools, android_jar, out)
     libraries = build_launchers(ndk, out, args.abi)
     libraries[library.name] = library
