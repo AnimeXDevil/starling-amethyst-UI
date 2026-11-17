@@ -6365,7 +6365,15 @@ impl Renderer {
         let facts = MeshFacts::of(mesh);
         let fading = self.before_mesh(key, &facts);
         let section = self.upload_mesh(mesh);
+        let uploaded = section.is_some();
         self.after_mesh(key, &facts, section, fading);
+        // Ray tracing's triangle soup (#470, experimental), on a ray-query device with a
+        // ray-tracing pack: solid quads baked into world space for one BLAS per section.
+        if uploaded && self.rt_enabled() && !mesh.solid.is_empty() {
+            let origin = rt::section_origin(key);
+            self.rt
+                .note_upload(key, rt::expand_section_positions(&mesh.solid, origin));
+        }
     }
     /// Section `key`'s new mesh drawn from now on, its quads uploaded (`section`: none when it
     /// has none, or the arena had no room).
@@ -6400,13 +6408,6 @@ impl Renderer {
             let marked = section.listed(key, sections);
             self.sections
                 .insert_marked(key, section, mesh.bounds, marked);
-            // Ray tracing's triangle soup (#470, experimental), on a ray-query device with a
-            // ray-tracing pack: solid quads baked into world space for one BLAS per section.
-            if self.rt_enabled() && !mesh.solid.is_empty() {
-                let origin = rt::section_origin(key);
-                self.rt
-                    .note_upload(key, rt::expand_section_positions(&mesh.solid, origin));
-            }
         }
     }
     fn upload_mesh(&mut self, mesh: &SectionMesh) -> Option<SectionGpu> {

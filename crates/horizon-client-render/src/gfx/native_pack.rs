@@ -98,7 +98,7 @@ impl NativePack {
         // past its sampled-texture limit, say, as OpenGL's 16 was before #10095): the pack
         // is refused with that error instead of a validation panic in the renderer.
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let built = Self::build(device, queue, terrain, report, constants, lights);
+        let built = Self::build(device, queue, terrain, report, constants, lights, tlas);
         let refused = pollster::block_on(scope.pop());
         match (built, refused) {
             (Ok(built), None) => Ok(built),
@@ -114,6 +114,7 @@ impl NativePack {
         report: Report,
         constants: &[(String, f64)],
         lights: super::block_light::LightTable,
+        tlas: Option<&wgpu::Tlas>,
     ) -> Result<(Self, Vec<String>), String> {
         let (globals, format) = (terrain.globals, terrain.format);
         let textures = super::native_post::pack_textures(device, queue, &report);
