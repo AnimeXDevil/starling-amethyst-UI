@@ -1141,6 +1141,9 @@ pub(super) fn content_root(
             .map(|m| m.id.clone())
             .collect(),
     );
+    // And every content mod it loaded: one adding nothing is no world's content (world_content.rs
+    // `world_default`).
+    super::world_content::set_loaded(overlay.mods.iter().map(|m| m.id.clone()).collect());
     if let Some(note) = &sources.note {
         note(None);
     }

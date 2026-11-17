@@ -627,6 +627,15 @@ pub(super) fn start_game<'a>(
         result?;
         return Ok(None);
     }
+    // A content mod's client setup reads the items, which a start through the title loads on a
+    // worker (`rest_loader`): with any content mod loaded (one adding no blocks or items too, as a
+    // wasm mod declaring `registries` for its hooks), or for a world's mods (a start that enters
+    // it next), they finish loading first. Otherwise the setup could run before them and panic
+    // ("world resources joined before entry"), as starts with a wasm mod did on a phone, with a
+    // world to enter or without. A start without content mods doesn't wait.
+    if world_content::next_start().is_some() || world_content::any_loaded() {
+        game.wait_world_rest()?;
+    }
     // The atlases the initial load stitched, the models it baked, then FMLClientSetupEvent: once
     // per process, here in `run`, after the initial load applied.
     // A dedicated server has no client and returned above; a splitscreen guest's `run` is
