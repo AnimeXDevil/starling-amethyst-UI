@@ -784,6 +784,10 @@ impl Game<'_> {
         let WindowEvent::Touch(t) = event else {
             return false;
         };
+        // Calibrate... holds the camera: no finger moves it until it ends (Back stops it).
+        if self.perf_calibrating() {
+            return true;
+        }
         self.touch.seen = true;
         // The touch controls come back with a touch after a keyboard, a mouse or a controller.
         self.input_used(InputMode::Touch);
@@ -1496,6 +1500,10 @@ impl Game<'_> {
     /// The controls over the HUD while playing (or the layout editor), the close button over
     /// screens.
     pub(super) fn draw_touch(&self, batch: &mut HudBatch) {
+        // Calibrate... shows nothing over the test world but its line above the hotbar.
+        if self.perf_calibrating() {
+            return;
+        }
         #[cfg(target_os = "android")]
         if self.mobile_controls_enabled() {
             self.mobile_draw(batch);

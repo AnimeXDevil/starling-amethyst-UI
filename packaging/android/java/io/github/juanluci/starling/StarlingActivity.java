@@ -79,6 +79,8 @@ public class StarlingActivity extends NativeActivity {
     private static final int PICK_HORIZON = 2;
     /** Android's answer to the permissions the running build's mods need. */
     private static final int MOD_PERMISSIONS = 3;
+    /** The launcher's file picker (Horizon Android's): its answer goes to nativeDocumentResult. */
+    private static final int PICK_DOCUMENT = 4101;
 
     /** The build with native mods this game runs (loadGame), or null for the APK's own. */
     private File modBuild;
@@ -146,6 +148,9 @@ public class StarlingActivity extends NativeActivity {
 
     /** Android took back the pointer the game had captured (android_lib.rs). */
     private static native void onPointerCaptureLost();
+
+    /** The launcher's picker answered: its request, its result code and the document (android_lib.rs). */
+    private native void nativeDocumentResult(int request, int result, String uri);
 
     /** The game holds the pointer (capturePointer); on the UI thread only. */
     private boolean pointerWanted;
@@ -479,6 +484,9 @@ public class StarlingActivity extends NativeActivity {
         } else if (requestCode == PICK_HORIZON && resultCode == RESULT_OK && data != null
                 && data.getData() != null) {
             HorizonImport.start(this, data.getData());
+        } else if (requestCode == PICK_DOCUMENT) {
+            nativeDocumentResult(requestCode, resultCode,
+                    data == null || data.getData() == null ? null : data.getData().toString());
         }
     }
 
@@ -757,8 +765,19 @@ public class StarlingActivity extends NativeActivity {
      * in a process of its own, waits for this one to end.
      */
     public void restart() {
+        restart(null);
+    }
+
+    /**
+     * As {@link #restart()}, with what the restart screen says meanwhile (the reason, in the
+     * player's language: the world's mods, the launcher, the files moving); null for the default.
+     */
+    public void restart(String message) {
         Intent again = new Intent(this, LauncherActivity.class);
         again.putExtra(LauncherActivity.AFTER, android.os.Process.myPid());
+        if (message != null && !message.isEmpty()) {
+            again.putExtra(LauncherActivity.MESSAGE, message);
+        }
         again.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(again);
         runOnUiThread(new Runnable() {
@@ -767,6 +786,26 @@ public class StarlingActivity extends NativeActivity {
                 finish();
                 // Straight to the launcher's restart screen, no window animation between.
                 overridePendingTransition(0, 0);
+            }
+        });
+    }
+
+    /**
+     * The launcher's file picker (Horizon Android's): the document chosen goes to the launcher,
+     * which reads it through the content resolver and puts it where it belongs.
+     */
+    public void pickDocument() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                try {
+                    startActivityForResult(intent, PICK_DOCUMENT);
+                } catch (ActivityNotFoundException e) {
+                    nativeDocumentResult(PICK_DOCUMENT, RESULT_CANCELED, null);
+                }
             }
         });
     }

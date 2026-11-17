@@ -923,7 +923,7 @@ impl Game<'_> {
                 });
             }
             NativeGameAct::ShowCompile => self.native_builds.stage = Some(Stage::Compiling),
-            NativeGameAct::Restart => crate::android::restart_app(),
+            NativeGameAct::Restart => restart_with_built_mods(),
             NativeGameAct::PlayWithout => {
                 let _ = std::fs::remove_file(dir().join("current"));
                 let _ = std::fs::remove_file(dir().join("starts"));
@@ -1420,7 +1420,7 @@ impl Game<'_> {
                 let _ = std::fs::remove_file(dir().join("current"));
                 self.native_builds.stage = Some(Stage::List);
             }
-            Act::Restart => crate::android::restart_app(),
+            Act::Restart => restart_with_built_mods(),
             Act::Retry => self.open_native_builds(),
             Act::Close => self.native_builds.stage = None,
             Act::Switch => self.native_builds.digging = !self.native_builds.digging,
@@ -1459,4 +1459,12 @@ impl Game<'_> {
         // Play without, a compile begun: the Mods page says so.
         self.refresh_native_game();
     }
+}
+
+/// The restart into the game build with the native mods just compiled, saying so meanwhile.
+fn restart_with_built_mods() {
+    crate::android::restart_app_saying(&horizon_client::lang::get_or(
+        "starling.restart.native_mods",
+        "Starting the game with your native mods…",
+    ));
 }

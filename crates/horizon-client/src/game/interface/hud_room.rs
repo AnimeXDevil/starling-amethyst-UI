@@ -176,8 +176,25 @@ impl Game<'_> {
     }
 
     pub(super) fn draw_performance_overlays(&mut self, batch: &mut HudBatch) {
-        let margins = self.hud_safe_insets(batch);
-        let area = HudArea::begin(batch, margins);
+        let hud = self.hud_safe_insets(batch);
+        #[cfg(target_os = "android")]
+        if self.title.is_some() || self.screen != Screen::Playing {
+            // The compact counter sits below Back in the utility buttons' layout.
+            let area = HudArea::begin(batch, self.button_safe_insets(batch));
+            self.frame_graph.draw_compact(
+                self.settings.horizon.overlay,
+                batch,
+                &self.gui.atlas,
+                25.0,
+            );
+            area.finish(batch);
+
+            let area = HudArea::begin(batch, hud);
+            self.draw_stats_overlay(batch);
+            area.finish(batch);
+            return;
+        }
+        let area = HudArea::begin(batch, hud);
         self.frame_graph
             .draw(self.settings.horizon.overlay, batch, &self.gui.atlas);
         self.draw_stats_overlay(batch);

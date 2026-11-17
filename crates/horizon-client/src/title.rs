@@ -411,6 +411,9 @@ pub enum Action {
         dir: PathBuf,
         selected: Vec<String>,
     },
+    /// Starling on Android: back to the launcher (Horizon Android's, `ha_launcher`), where the
+    /// instance that opens directly is chosen.
+    Launcher,
 }
 pub struct Title {
     rule_registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
@@ -583,6 +586,11 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
         .flatten()
         .filter_map(|e| {
             let path = e.path();
+            // Starling: Calibrate...'s test world (the benchmark's, marked) is never the
+            // player's, even while it waits to be deleted.
+            if cfg!(target_os = "android") && path.join(crate::benchmark::MARKER).exists() {
+                return None;
+            }
             // findLevelCandidates: a folder with a level.dat or a level.dat_old.
             let file = |name: &str| std::fs::metadata(path.join(name)).ok().filter(|m| m.is_file());
             // getFileModificationTime: level.dat's, else level.dat_old's.
@@ -2473,6 +2481,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 self.mode = Mode::Account(account::Screen::default());
                 Action::None
             }
+            (Mode::Main, Some(81)) => Action::Launcher,
             (Mode::Account(screen), Some(id)) => {
                 if screen.click(id, h) {
                     self.mode = Mode::Main;
