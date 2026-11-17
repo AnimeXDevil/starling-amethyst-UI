@@ -4954,8 +4954,17 @@ impl Game<'_> {
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         self.draw_debug_overlay(&mut batch, size);
-        self.frame_graph
-            .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
+        // Starling: over a menu, the frames per second alone (perf_overlay.rs `draw_compact`).
+        if cfg!(target_os = "android") && (self.title.is_some() || self.screen != Screen::Playing) {
+            self.frame_graph.draw_compact(
+                self.settings.horizon.overlay,
+                &mut batch,
+                &self.gui.atlas,
+            );
+        } else {
+            self.frame_graph
+                .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
+        }
         self.draw_stats_overlay(&mut batch);
         self.draw_pad_over_hud(&mut batch);
         self.lift_over_keyboard(&mut batch);
