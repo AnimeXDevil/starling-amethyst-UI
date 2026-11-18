@@ -4,7 +4,8 @@
 //! [`crate::auth`] for online-mode servers, renewed in the background before it runs out. The
 //! game's official files are fetched from Mojang's servers here too. Without a
 //! keystore (a desktop build, `STARLING_ACCOUNTS=1`) the secrets stay in memory for the run.
-use starling_account::files::{Pins, Progress, Sources, Wanted};
+pub use starling_account::files::Progress;
+use starling_account::files::{Pins, Sources, Wanted};
 pub use starling_account::skins::ELY_SKINS;
 pub use starling_account::{Account, Provider, SignInStage};
 use starling_account::{Endpoints, MemoryStore, SecretStore, SignIn, SignInState};

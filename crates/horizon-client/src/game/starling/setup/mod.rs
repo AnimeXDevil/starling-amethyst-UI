@@ -45,7 +45,7 @@ enum Step {
     },
     /// The official files on their way: files and bytes so far, and in all.
     CheckingFiles,
-    Download(starling_account::files::Progress),
+    Download(accounts::Progress),
     /// Java on its way: bytes so far, and in all.
     Java(u64, u64, Option<std::time::Instant>),
     Unpacking,
