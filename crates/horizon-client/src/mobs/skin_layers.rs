@@ -54,7 +54,9 @@ fn explode(part: &mut Part, skin: &[u8], size: usize, changed: &mut bool) {
                         .iter()
                         .find(|inner| inner.normal == outer.normal)
                     {
-                        Some(inner) => extrude_polygon(outer, inner, skin, size, changed),
+                        Some(inner) => {
+                            extrude_polygon(outer, inner, &child.polygons, skin, size, changed)
+                        }
                         None => vec![outer.clone()],
                     }
                 })
@@ -68,6 +70,7 @@ fn explode(part: &mut Part, skin: &[u8], size: usize, changed: &mut bool) {
 fn extrude_polygon(
     polygon: &Polygon,
     inner: &Polygon,
+    outer_faces: &[Polygon],
     skin: &[u8],
     size: usize,
     changed: &mut bool,
@@ -101,22 +104,23 @@ fn extrude_polygon(
     let span_u = (u1 - u0).max(f32::EPSILON);
     let span_v = (v1 - v0).max(f32::EPSILON);
     let at = |u: f32, v: f32| a + (b - a) * ((u - u0) / span_u) + (c - a) * ((v - v0) / span_v);
-    // Pair corresponding corners in model space, independent of the inner
-    // face's UVs. Both faces shrink toward the same body edge at a corner.
-    let nearest = |p: glam::Vec3| {
-        inner
-            .vertices
-            .iter()
-            .map(position)
-            .min_by(|a, b| p.distance_squared(*a).total_cmp(&p.distance_squared(*b)))
-            .expect("a quad has four vertices")
-    };
-    let (ia, ib, ic) = (nearest(a), nearest(b), nearest(c));
-    if ia == ib || ia == ic || (a - ia).dot(n) <= f32::EPSILON {
+    // Project along the face normal. Shrinking the tangents toward the inner
+    // corners would turn every pixel into a wedge.
+    let depth = (a - position(&inner.vertices[0])).dot(n);
+    if depth <= f32::EPSILON {
         return vec![polygon.clone()];
     }
-    let inner_at =
-        |u: f32, v: f32| ia + (ib - ia) * ((u - u0) / span_u) + (ic - ia) * ((v - v0) / span_v);
+    let inward = -n * depth;
+    let facings = [-du, du, -dv, dv];
+    let adjacent = facings.map(|facing| {
+        outer_faces.iter().find(|face| {
+            glam::Vec3::from_array(face.normal).dot(facing) > 0.999
+                && face
+                    .vertices
+                    .iter()
+                    .any(|v| (position(v) - a).dot(n).abs() < 1e-4)
+        })
+    });
     let base_u = (u0 * size as f32).round() as i32;
     let base_v = (v0 * size as f32).round() as i32;
     let opaque = |i: i32, j: i32| {
@@ -138,34 +142,59 @@ fn extrude_polygon(
             let (ub, vb) = (ua + step, va + step);
             let (p00, p10) = (at(ua, va), at(ub, va));
             let (p11, p01) = (at(ub, vb), at(ua, vb));
-            let (i00, i10) = (inner_at(ua, va), inner_at(ub, va));
-            let (i11, i01) = (inner_at(ub, vb), inner_at(ua, vb));
             let uv = ((ua + ub) * 0.5, (va + vb) * 0.5);
             out.push(quad([p00, p10, p11, p01], uv, polygon.normal));
             // Shared sides between painted texels are inside the shell.
             let sides = [
-                ((i - 1, j), -du, [p00, p01, i01, i00]),
-                ((i + 1, j), du, [p10, p11, i11, i10]),
-                ((i, j - 1), -dv, [p00, p10, i10, i00]),
-                ((i, j + 1), dv, [p01, p11, i11, i01]),
+                ((i - 1, j), [p00, p01]),
+                ((i + 1, j), [p10, p11]),
+                ((i, j - 1), [p00, p10]),
+                ((i, j + 1), [p01, p11]),
             ];
-            for ((ni, nj), facing, positions) in sides {
+            for (side, ((ni, nj), [s0, s1])) in sides.into_iter().enumerate() {
                 if opaque(ni, nj) {
                     continue;
                 }
-                let [a, b, c, _] = positions;
-                let normal = (b - a).cross(c - a).normalize_or_zero();
-                let normal = if normal.dot(facing) < 0.0 {
-                    -normal
-                } else {
-                    normal
-                };
-                out.push(quad(positions, uv, normal.to_array()));
+                // At a box edge an opaque perpendicular texel already
+                // covers this wall. Omit it to avoid coplanar faces.
+                let boundary = ni < 0 || nj < 0 || ni >= texels_u || nj >= texels_v;
+                if boundary
+                    && adjacent[side]
+                        .is_some_and(|face| solid_at(face, (s0 + s1 + inward) * 0.5, skin, size))
+                {
+                    continue;
+                }
+                out.push(quad(
+                    [s0, s1, s1 + inward, s0 + inward],
+                    uv,
+                    facings[side].to_array(),
+                ));
             }
         }
     }
     *changed = true;
     out
+}
+
+fn solid_at(face: &Polygon, p: glam::Vec3, skin: &[u8], size: usize) -> bool {
+    let [a, b, _, d] = face.vertices;
+    let ab = position(&b) - position(&a);
+    let ad = position(&d) - position(&a);
+    let offset = p - position(&a);
+    let s = offset.dot(ab) / ab.length_squared();
+    let t = offset.dot(ad) / ad.length_squared();
+    if !(0.0..1.0).contains(&s)
+        || !(0.0..1.0).contains(&t)
+        || (offset - ab * s - ad * t).length_squared() > 1e-8
+    {
+        return false;
+    }
+    let texel = |axis: usize| {
+        ((a[axis] + (b[axis] - a[axis]) * s + (d[axis] - a[axis]) * t) * size as f32).floor()
+            as usize
+    };
+    let (x, y) = (texel(3), texel(4));
+    x < size && y < size && skin[(y * size + x) * 4 + 3] == 255
 }
 
 fn quad(mut positions: [glam::Vec3; 4], uv: (f32, f32), normal: [f32; 3]) -> Polygon {
@@ -263,19 +292,52 @@ mod tests {
             assert_eq!(polygon.vertices.iter().filter(|v| v[2] == 0.25).count(), 2);
             assert_eq!(polygon.vertices.iter().filter(|v| v[2] == 0.5).count(), 2);
         }
-        // The top edge follows the two surfaces all the way to the body.
-        assert!(
-            polygons[3]
-                .vertices
+        // Every wall is square: the corners on both surfaces have identical
+        // tangential coordinates, even though the body underneath is narrower.
+        for polygon in &polygons[1..] {
+            for outer in polygon.vertices.iter().filter(|v| v[2] == 0.5) {
+                assert!(
+                    polygon
+                        .vertices
+                        .iter()
+                        .any(|inner| { inner[2] == 0.25 && inner[..2] == outer[..2] })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opaque_neighbor_owns_the_shared_edge() {
+        let mut model = head();
+        let side = Polygon {
+            normal: [-1.0, 0.0, 0.0],
+            vertices: [
+                [-1.0, -1.0, 0.5, 0.5, 0.0],
+                [-1.0, -1.0, -1.5, 1.0, 0.0],
+                [-1.0, 1.0, -1.5, 1.0, 0.5],
+                [-1.0, 1.0, 0.5, 0.5, 0.5],
+            ],
+            cull_back: false,
+        };
+        let mut inner = side.clone();
+        for v in &mut inner.vertices {
+            v[0] = -0.75;
+        }
+        model.polygons.push(inner);
+        model.children[0].polygons.push(side);
+        let polygons_on_side = |alpha| {
+            let out = extrude(&model, &skin([255, 0, alpha, 0]), 4).unwrap();
+            out.children[0]
+                .polygons
                 .iter()
-                .any(|v| v[1] == -0.75 && v[2] == 0.25)
-        );
-        assert!(
-            polygons[3]
-                .vertices
-                .iter()
-                .any(|v| v[1] == -1.0 && v[2] == 0.5)
-        );
+                .filter(|p| p.vertices.iter().all(|v| v[0] == -1.0))
+                .count()
+        };
+        // An open edge needs the front texel's wall. When the perpendicular
+        // texel is opaque, its cap covers the same area.
+        assert_eq!(polygons_on_side(0), 1);
+        assert_eq!(polygons_on_side(255), 1);
+        assert_eq!(polygons_on_side(128), 2);
     }
 
     #[test]
