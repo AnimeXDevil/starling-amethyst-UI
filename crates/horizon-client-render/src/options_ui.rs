@@ -2148,7 +2148,7 @@ pub(crate) enum Act {
     SelectCape(crate::own_skin::CapeChoice),
     ImportCape,
     FetchCapes,
-    ActivateCape(String),
+    ActivateCape(Option<String>),
     SkinModel,
     PickSkin,
     OpenSkinFolder,
@@ -2259,6 +2259,14 @@ pub enum CatalogShelf {
     ShaderPacks,
 }
 
+#[derive(Clone, Debug)]
+pub struct AccountCape {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub active: bool,
+}
+
 /// What Skin Customization asks of the game (`OptionsUi::take_skin_actions`), apart from
 /// [`Event`]: the menus before the game, which don't show the page, need not know them.
 #[derive(Clone, Debug, PartialEq)]
@@ -2269,6 +2277,7 @@ pub enum SkinAction {
     Choice(crate::own_skin::SkinChoice),
     Cape(crate::own_skin::CapeChoice),
     PickCape,
+    LoadAccountCapes,
     AccountCape(Option<String>),
     /// The skins folder (on a phone without the Starling folder, its offer).
     OpenFolder,
@@ -2571,7 +2580,9 @@ pub struct OptionsUi {
     pub wardrobe_capes: Vec<(String, String)>,
     pub wardrobe_cape: crate::own_skin::CapeChoice,
     pub wardrobe_skin_titles: std::collections::HashMap<String, String>,
-    pub wardrobe_account_capes: Option<Vec<(String, String, bool)>>,
+    pub wardrobe_account_capes: Option<Vec<AccountCape>>,
+    pending_account_cape: Option<Option<String>>,
+    pending_skin_upload: bool,
     pub wardrobe_account_busy: bool,
     /// Whether the Mods, Resource Packs and Shader Packs pages have their Catalog button: the
     /// game's options on a phone (`offer_catalog`). The menus before the game can't show it.
@@ -2720,6 +2731,8 @@ impl Default for OptionsUi {
             wardrobe_cape: Default::default(),
             wardrobe_skin_titles: Default::default(),
             wardrobe_account_capes: None,
+            pending_account_cape: None,
+            pending_skin_upload: false,
             wardrobe_account_busy: false,
             profile_name: None,
             profile_key: None,
@@ -3445,6 +3458,7 @@ impl OptionsUi {
     /// A line in red on the Skin Customization page (a skin the game could not put on).
     pub fn skin_warning(&mut self, text: String) {
         self.skin.warning = Some(text);
+        self.relayout();
     }
     /// What Skin Customization asked of the game since the last call.
     pub fn take_skin_actions(&mut self) -> Vec<SkinAction> {
@@ -3452,6 +3466,7 @@ impl OptionsUi {
     }
     fn select_skin(&mut self, file: Option<String>) {
         if self.skin.choice.file != file {
+            self.pending_skin_upload = false;
             self.skin.choice.file = file;
             self.skin.warning = None;
             self.skin
@@ -3502,7 +3517,61 @@ impl OptionsUi {
         }
     }
 
+    pub fn discard_wardrobe_changes(&mut self) {
+        self.pending_account_cape = None;
+        self.pending_skin_upload = false;
+    }
+
+    /// The outer option distinguishes no edit from a request to unequip the cape.
+    pub fn pending_account_cape(&self) -> Option<Option<&AccountCape>> {
+        match self.pending_account_cape.as_ref()? {
+            Some(id) => self
+                .wardrobe_account_capes
+                .as_ref()?
+                .iter()
+                .find(|cape| cape.id == *id)
+                .map(Some),
+            None => Some(None),
+        }
+    }
+
+    fn stage_account_cape(&mut self, id: Option<String>) {
+        if let Some(capes) = &self.wardrobe_account_capes {
+            let active = capes.iter().find(|cape| cape.active).map(|cape| &cape.id);
+            self.pending_account_cape = (id.as_ref() != active).then_some(id);
+            self.skin.warning = None;
+            self.relayout();
+        }
+    }
+
+    fn queue_skin_upload(&mut self) {
+        self.skin.warning = None;
+        if self.wardrobe_enabled {
+            self.pending_skin_upload = true;
+            self.relayout();
+        } else {
+            self.skin
+                .actions
+                .push(SkinAction::Upload(self.skin.choice.clone()));
+        }
+    }
+
+    fn done(&mut self, s: &mut Settings) -> Vec<Event> {
+        if self.page() == Page::Skin {
+            if let Some(id) = self.pending_account_cape.take() {
+                self.skin.actions.push(SkinAction::AccountCape(id));
+            }
+            if self.pending_skin_upload {
+                self.skin
+                    .actions
+                    .push(SkinAction::Upload(self.skin.choice.clone()));
+            }
+        }
+        self.back(s)
+    }
+
     fn select_cape(&mut self, choice: crate::own_skin::CapeChoice) {
+        self.pending_account_cape = None;
         self.skin.warning = None;
         self.skin.actions.push(SkinAction::Cape(choice));
     }
@@ -3561,25 +3630,52 @@ impl OptionsUi {
                     if capes.is_empty() {
                         rows.push(Row::Note(lang::get("starling.wardrobe.no_owned_capes")));
                     }
-                    for (id, name, active) in capes {
+                    let active = capes.iter().any(|cape| cape.active);
+                    if active || self.pending_account_cape.is_some() {
+                        let remove = tr("starling.wardrobe.remove_account_cape");
+                        let remove = if self.pending_account_cape == Some(None) {
+                            remove.with_color(0x55_FF_55)
+                        } else {
+                            remove
+                        };
+                        rows.push(Row::Buttons(
+                            button(0.0, 0.0, 310.0, remove, Act::ActivateCape(None)),
+                            None,
+                        ));
+                    }
+                    for cape in capes {
+                        let pending = self.pending_account_cape.as_ref().and_then(Option::as_ref)
+                            == Some(&cape.id);
+                        let label = Text::translate(
+                            if cape.active {
+                                "starling.wardrobe.active_cape"
+                            } else {
+                                "starling.wardrobe.activate_cape"
+                            },
+                            &[Text::literal(clipped(&cape.name, 24))],
+                        );
                         let widget = button(
                             0.0,
                             0.0,
                             310.0,
-                            Text::translate(
-                                if *active {
-                                    "starling.wardrobe.active_cape"
-                                } else {
-                                    "starling.wardrobe.activate_cape"
-                                },
-                                &[Text::literal(clipped(name, 24))],
-                            ),
-                            Act::ActivateCape(id.clone()),
+                            if pending {
+                                label.with_color(0x55_FF_55)
+                            } else {
+                                label
+                            },
+                            Act::ActivateCape(Some(cape.id.clone())),
                         );
                         rows.push(Row::Buttons(
-                            if *active { inactive(widget) } else { widget },
+                            if cape.active && self.pending_account_cape.is_none() {
+                                inactive(widget)
+                            } else {
+                                widget
+                            },
                             None,
                         ));
+                    }
+                    if self.pending_account_cape.is_some() {
+                        rows.push(Row::Note(lang::get("starling.wardrobe.sync_on_done")));
                     }
                 } else {
                     rows.push(Row::Buttons(
@@ -3641,6 +3737,9 @@ impl OptionsUi {
                 };
                 let note = match upload {
                     Upload::Failed(why) => Row::Warning(lang::get_or(why, why)),
+                    _ if self.pending_skin_upload => {
+                        Row::Note(lang::get("starling.wardrobe.sync_on_done"))
+                    }
                     Upload::Sent => Row::Note(lang::get("starling.skin.uploaded")),
                     _ if !chosen => Row::Note(lang::get("starling.skin.upload_choose")),
                     _ => Row::Note(lang::get("starling.skin.upload_hint")),
@@ -5438,7 +5537,7 @@ impl OptionsUi {
                             }
                             self.push(*p)
                         }
-                        Act::Done => events.extend(self.back(s)),
+                        Act::Done => events.extend(self.done(s)),
                         Act::Cycle(opt) => {
                             events.extend(self.cycle_option(s, *opt, self.shift, framebuffer));
                         }
@@ -5644,12 +5743,10 @@ impl OptionsUi {
                         Act::AutoRotateWardrobe => self.toggle_wardrobe_auto_rotate(),
                         Act::SelectCape(cape) => self.select_cape(cape.clone()),
                         Act::ImportCape => self.skin.actions.push(SkinAction::PickCape),
-                        Act::FetchCapes => self.skin.actions.push(SkinAction::AccountCape(None)),
-                        Act::ActivateCape(id) => self
-                            .skin
-                            .actions
-                            .push(SkinAction::AccountCape(Some(id.clone()))),
+                        Act::FetchCapes => self.skin.actions.push(SkinAction::LoadAccountCapes),
+                        Act::ActivateCape(id) => self.stage_account_cape(id.clone()),
                         Act::SkinModel => {
+                            self.pending_skin_upload = false;
                             let page = &mut self.skin;
                             page.choice.slim = !page.choice.slim;
                             page.actions.push(SkinAction::Choice(page.choice.clone()));
@@ -5661,11 +5758,7 @@ impl OptionsUi {
                             page.actions.push(SkinAction::ElyBy(page.elyby));
                         }
                         Act::OpenSkinFolder => self.skin.actions.push(SkinAction::OpenFolder),
-                        Act::UploadSkin => {
-                            let page = &mut self.skin;
-                            page.warning = None;
-                            page.actions.push(SkinAction::Upload(page.choice.clone()));
-                        }
+                        Act::UploadSkin => self.queue_skin_upload(),
                         Act::ElySkinSite => self.skin.actions.push(SkinAction::ElySite),
                         Act::ToggleRecording => events.push(Event::ToggleRecording),
                         Act::DiagnosticsExport => events.push(Event::DiagnosticsExport),
@@ -6112,6 +6205,9 @@ impl OptionsUi {
             return events;
         }
         let page = self.stack.pop().unwrap_or(Page::Main);
+        if page == Page::Skin {
+            self.discard_wardrobe_changes();
+        }
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
         self.dragging = None;
@@ -6826,7 +6922,7 @@ impl OptionsUi {
                             self.focus = None;
                             self.focus_from_keyboard = false;
                             self.can_change_value = false;
-                            events.extend(self.back(s));
+                            events.extend(self.done(s));
                         }
                         Act::Cycle(opt) => {
                             events.extend(self.cycle_option(s, opt, shift, self.framebuffer));
@@ -6951,10 +7047,8 @@ impl OptionsUi {
                         Act::AutoRotateWardrobe => self.toggle_wardrobe_auto_rotate(),
                         Act::SelectCape(cape) => self.select_cape(cape),
                         Act::ImportCape => self.skin.actions.push(SkinAction::PickCape),
-                        Act::FetchCapes => self.skin.actions.push(SkinAction::AccountCape(None)),
-                        Act::ActivateCape(id) => {
-                            self.skin.actions.push(SkinAction::AccountCape(Some(id)))
-                        }
+                        Act::FetchCapes => self.skin.actions.push(SkinAction::LoadAccountCapes),
+                        Act::ActivateCape(id) => self.stage_account_cape(id),
                         // Starling's pages answer taps only.
                         Act::CustomButtons
                         | Act::CustomAdd
@@ -6975,8 +7069,8 @@ impl OptionsUi {
                         | Act::PickSkin
                         | Act::OpenSkinFolder
                         | Act::ElyBySkins
-                        | Act::UploadSkin
                         | Act::ElySkinSite => {}
+                        Act::UploadSkin => self.queue_skin_upload(),
                         Act::None => {}
                     }
                     return events;
@@ -10614,6 +10708,47 @@ mod tests {
         assert!(ui.skin.auto_rotate_since.is_some());
         ui.toggle_wardrobe_auto_rotate();
         assert!(ui.skin.auto_rotate_since.is_none());
+    }
+
+    #[test]
+    fn wardrobe_confirms_only_the_last_cloud_choices() {
+        let mut s = Settings::default();
+        let cape = |id: &str, active| AccountCape {
+            id: id.into(),
+            name: id.into(),
+            url: format!("https://textures.minecraft.net/texture/{id}"),
+            active,
+        };
+        let mut ui = OptionsUi {
+            wardrobe_enabled: true,
+            wardrobe_account_capes: Some(vec![cape("old", true), cape("new", false)]),
+            stack: vec![Page::Skin],
+            ..Default::default()
+        };
+        ui.skin.choice.file = Some("skin.png".into());
+        ui.stage_account_cape(Some("new".into()));
+        assert_eq!(ui.pending_account_cape().flatten().unwrap().id, "new");
+        ui.stage_account_cape(Some("old".into()));
+        assert!(ui.pending_account_cape().is_none());
+        ui.stage_account_cape(Some("new".into()));
+        ui.stage_account_cape(None);
+        assert!(matches!(ui.pending_account_cape(), Some(None)));
+        ui.queue_skin_upload();
+        assert!(ui.take_skin_actions().is_empty());
+        ui.done(&mut s);
+        assert_eq!(
+            ui.take_skin_actions(),
+            vec![
+                SkinAction::AccountCape(None),
+                SkinAction::Upload(ui.skin.choice.clone())
+            ]
+        );
+        ui.stack.push(Page::Skin);
+        ui.stage_account_cape(Some("new".into()));
+        ui.queue_skin_upload();
+        ui.back(&mut s);
+        assert!(ui.take_skin_actions().is_empty());
+        assert!(ui.pending_account_cape().is_none() && !ui.pending_skin_upload);
     }
 
     #[test]

@@ -123,31 +123,27 @@ fn extrude_polygon(
             let (p00, p10) = (at(ua, va), at(ub, va));
             let (p11, p01) = (at(ub, vb), at(ua, vb));
             let lift = n * depth;
+            // All five exposed faces have the color of the same texel.
+            let uv = ((ua + ub) * 0.5, (va + vb) * 0.5);
             out.push(quad(
                 [p00 + lift, p10 + lift, p11 + lift, p01 + lift],
-                [(ua, va), (ub, va), (ub, vb), (ua, vb)],
+                uv,
                 polygon.normal,
             ));
             // Sides only where the neighbour is not painted: the ones between
             // two texels would be hidden inside the layer and cost fill rate.
-            let (uc, vc) = ((ua + ub) * 0.5, (va + vb) * 0.5);
             let sides = [
                 ((i - 1, j), -du, [p00, p01]),
                 ((i + 1, j), du, [p10, p11]),
-                ((i, j - 1), -dv, [p01, p11]),
-                ((i, j + 1), dv, [p00, p10]),
+                ((i, j - 1), -dv, [p00, p10]),
+                ((i, j + 1), dv, [p01, p11]),
             ];
             for ((ni, nj), normal, [s0, s1]) in sides {
                 if opaque(ni, nj) {
                     continue;
                 }
                 let normal = normal.normalize_or_zero().to_array();
-                let uv = (uc, vc);
-                out.push(quad(
-                    [s0, s1, s1 + lift, s0 + lift],
-                    [uv, uv, uv, uv],
-                    normal,
-                ));
+                out.push(quad([s0, s1, s1 + lift, s0 + lift], uv, normal));
             }
         }
     }
@@ -160,17 +156,15 @@ fn extrude_polygon(
     out
 }
 
-fn quad(positions: [glam::Vec3; 4], uvs: [(f32, f32); 4], normal: [f32; 3]) -> Polygon {
+fn quad(mut positions: [glam::Vec3; 4], uv: (f32, f32), normal: [f32; 3]) -> Polygon {
+    let winding = (positions[1] - positions[0]).cross(positions[2] - positions[0]);
+    if winding.dot(glam::Vec3::from_array(normal)) < 0.0 {
+        positions.swap(1, 3);
+    }
     Polygon {
         normal,
         vertices: std::array::from_fn(|k| {
-            [
-                positions[k].x,
-                positions[k].y,
-                positions[k].z,
-                uvs[k].0,
-                uvs[k].1,
-            ]
+            [positions[k].x, positions[k].y, positions[k].z, uv.0, uv.1]
         }),
         cull_back: false,
     }
@@ -218,12 +212,27 @@ mod tests {
             polygons: vec![face()],
             children: Vec::new(),
         };
-        let out = extrude(&model, &skin([255, 0, 0, 0]), 64, 1.0).expect("a hat");
+        let out = extrude(&model, &skin([255, 0, 0, 0]), 4, 1.0).expect("a hat");
         // One face plus four skirts.
         assert_eq!(out.polygons.len(), 5);
         let top = out.polygons[0].vertices;
         for v in top {
-            assert!(v[2] > 1.4, "the slab is pushed out: {v:?}");
+            assert_eq!(v[2], 1.5);
+            assert_eq!(v[3..], [0.125, 0.125]);
+        }
+        for polygon in &out.polygons {
+            let [a, b, c, _] = polygon.vertices.map(|v| glam::Vec3::new(v[0], v[1], v[2]));
+            assert!(
+                (b - a)
+                    .cross(c - a)
+                    .dot(glam::Vec3::from_array(polygon.normal))
+                    > 0.0
+            );
+            match polygon.normal[1] {
+                -1.0 => assert!(polygon.vertices.iter().all(|v| v[1] == -1.0)),
+                1.0 => assert!(polygon.vertices.iter().all(|v| v[1] == 0.0)),
+                _ => {}
+            }
         }
     }
 

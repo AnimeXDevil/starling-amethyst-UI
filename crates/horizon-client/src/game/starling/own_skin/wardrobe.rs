@@ -8,14 +8,14 @@ use crate::ha_launcher::{
         library::{Kind, Library},
     },
 };
-use horizon_client::{hud::HudBatch, own_skin::CapeChoice};
+use horizon_client::{hud::HudBatch, options_ui::AccountCape, own_skin::CapeChoice};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
 const LOCAL_CAPE: &str = "capes/starling-local";
 const ACCOUNT_CAPE: &str = "capes/starling-account";
 struct AccountCapes {
-    rows: Vec<(String, String, bool)>,
+    rows: Vec<AccountCape>,
     equipped_image: Option<Vec<u8>>,
     activated: bool,
 }
@@ -32,6 +32,8 @@ pub(super) struct Wardrobe {
     account_image: Option<Vec<u8>>,
     account_uploaded: bool,
     account_cape_url: Option<String>,
+    account_error: Option<String>,
+    pub(super) pending_upload: Option<horizon_client::own_skin::SkinChoice>,
 }
 
 impl Game<'_> {
@@ -71,6 +73,18 @@ impl Game<'_> {
             }
         }
         self.dress_wardrobe_preview(&mut mob);
+        if mob.extra.hidden_model_parts & 1 == 0 {
+            match self.ui.options.pending_account_cape() {
+                Some(Some(cape)) => {
+                    let url = cape.url.clone();
+                    if let Some(texture) = self.cape_texture(url) {
+                        mob.cape = Some(texture);
+                    }
+                }
+                Some(None) => mob.cape = None,
+                None => {}
+            }
+        }
         let data = if self.res.rest_ready() {
             self.res.mob_data()
         } else if let Some(data) = &self.own_skin.title_data {
@@ -103,6 +117,9 @@ impl Game<'_> {
             }
         }
         self.own_skin.wardrobe.open = open;
+        if open && let Some(err) = self.own_skin.wardrobe.account_error.take() {
+            self.ui.options.skin_warning(err);
+        }
         if self.own_skin.wardrobe.account_worker.is_some() {
             self.ensure_wardrobe_profile();
         }
@@ -126,12 +143,23 @@ impl Game<'_> {
                 .take()
                 .and_then(|(owner, _)| owner);
             self.ui.options.wardrobe_account_busy = false;
-            self.ui.options.refresh_skin_page();
+            self.ui.options.layout_changed();
             if owner.is_none() || owner != crate::accounts::player_key() {
                 return;
             }
             match result {
                 Ok(capes) => {
+                    if capes.activated
+                        && let Some(owner) = owner.as_deref()
+                    {
+                        let url = capes
+                            .rows
+                            .iter()
+                            .find(|cape| cape.active)
+                            .map(|cape| cape.url.clone());
+                        crate::accounts::reflect_cape(owner, url.clone());
+                        self.own_skin.wardrobe.account_cape_url = url;
+                    }
                     self.ui.options.wardrobe_account_capes = Some(capes.rows);
                     self.own_skin.wardrobe.account_image = capes.equipped_image;
                     self.own_skin.wardrobe.account_uploaded = false;
@@ -139,13 +167,22 @@ impl Game<'_> {
                         self.choose_own_cape(CapeChoice::Account);
                     }
                 }
-                Err(err) if open => self.ui.options.skin_warning(err),
-                Err(err) => log::warn!("Wardrobe: {err}"),
+                Err(err) => {
+                    log::warn!("Wardrobe: {err}");
+                    self.own_skin.wardrobe.account_error = Some(err);
+                }
+            }
+            if let Some(choice) = self.own_skin.wardrobe.pending_upload.take() {
+                self.upload_own_skin(choice);
             }
         }
     }
 
-    pub(in crate::game) fn account_capes(&mut self, id: Option<String>) {
+    pub(super) fn wardrobe_cape_busy(&self) -> bool {
+        self.own_skin.wardrobe.account_worker.is_some()
+    }
+
+    pub(in crate::game) fn account_capes(&mut self, change: Option<Option<String>>) {
         self.ensure_wardrobe_profile();
         if self.own_skin.wardrobe.account_worker.is_some() {
             return;
@@ -154,17 +191,18 @@ impl Game<'_> {
         if key.is_none() {
             return;
         }
-        match (&id, &self.ui.options.wardrobe_account_capes) {
-            (None, Some(_)) => return,
-            (Some(id), Some(rows))
-                if rows.iter().any(|(cape, _, active)| cape == id && !active) => {}
-            (Some(_), _) => return,
+        match (&change, &self.ui.options.wardrobe_account_capes) {
             (None, None) => {}
+            (Some(Some(id)), Some(rows))
+                if rows.iter().any(|cape| cape.id == *id && !cape.active) => {}
+            (Some(None), Some(rows)) if rows.iter().any(|cape| cape.active) => {}
+            _ => return,
         }
         let root = Self::wardrobe_root();
         let (send, receive) = mpsc::channel();
         self.own_skin.wardrobe.account_worker = Some((key.clone(), receive));
         self.ui.options.wardrobe_account_busy = true;
+        self.ui.options.layout_changed();
         std::thread::spawn(move || {
             let result = (|| {
                 let (account, secrets) = session::selected_session("")?
@@ -172,19 +210,35 @@ impl Game<'_> {
                 if account.provider != Provider::Microsoft || Some(account.key()) != key {
                     return Err("The playing Microsoft account changed.".into());
                 }
-                if let Some(id) = &id {
-                    cloud::activate_cape(&account, &secrets, Some(id))?;
+                if let Some(id) = &change {
+                    cloud::activate_cape(&account, &secrets, id.as_deref())?;
                 }
                 let (capes, image) = cloud::fetch_account_capes(&secrets, &root)?;
+                if change.is_some() {
+                    let url = capes
+                        .iter()
+                        .find(|cape| cape.active)
+                        .map(|cape| cape.url.clone());
+                    starling_account::skins::remember_cape(
+                        &crate::accounts::dir(),
+                        &account.key(),
+                        url,
+                    )?;
+                }
                 let equipped_image = image.as_deref().map(Self::decode_cape).transpose()?;
                 let rows = capes
                     .into_iter()
-                    .map(|cape| (cape.id, cape.title, cape.active))
+                    .map(|cape| AccountCape {
+                        id: cape.id,
+                        name: cape.title,
+                        url: cape.url,
+                        active: cape.active,
+                    })
                     .collect();
                 Ok(AccountCapes {
                     rows,
                     equipped_image,
-                    activated: id.is_some(),
+                    activated: change.is_some(),
                 })
             })();
             let _ = send.send(result);
@@ -264,7 +318,10 @@ impl Game<'_> {
             Some(starling_account::Player::Account(account)) => account.cape,
             _ => None,
         };
+        self.own_skin.wardrobe.account_error = None;
+        self.own_skin.wardrobe.pending_upload = None;
         self.ui.options.wardrobe_account_capes = None;
+        self.ui.options.discard_wardrobe_changes();
         self.ui.options.wardrobe_account_busy = self.own_skin.wardrobe.account_worker.is_some();
         let choice = CapeChoice::load(&Self::player_dir(), key.as_deref()).unwrap_or_default();
         let image = Self::cape_image(&choice).ok().flatten();
@@ -355,8 +412,12 @@ impl Game<'_> {
     }
 
     fn account_cape_preview(&mut self) -> Option<String> {
-        use horizon_client::skins::{Download, Kind, Textures};
         let url = self.own_skin.wardrobe.account_cape_url.clone()?;
+        self.cape_texture(url)
+    }
+
+    fn cape_texture(&mut self, url: String) -> Option<String> {
+        use horizon_client::skins::{Download, Kind, Textures};
         let downloaded = self.skin_downloads.borrow_mut().state(Kind::Cape, &url);
         if downloaded != Download::Ready {
             return None;

@@ -705,9 +705,13 @@ impl Game<'_> {
                     #[cfg(target_os = "android")]
                     self.pick_wardrobe_png(crate::ha_launcher::skins::library::Kind::Cape);
                 }
+                SkinAction::LoadAccountCapes => {
+                    #[cfg(target_os = "android")]
+                    self.account_capes(None);
+                }
                 SkinAction::AccountCape(id) => {
                     #[cfg(target_os = "android")]
-                    self.account_capes(id);
+                    self.account_capes(Some(id));
                     #[cfg(not(target_os = "android"))]
                     let _ = id;
                 }

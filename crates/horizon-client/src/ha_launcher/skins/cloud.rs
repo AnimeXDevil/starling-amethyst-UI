@@ -106,7 +106,14 @@ pub(crate) fn fetch_account_capes(
     if secrets.provider() != Provider::Microsoft {
         return Err("Sign in to Microsoft to manage account capes.".into());
     }
-    let capes = microsoft_snapshot(PROFILE, secrets)?.capes;
+    let mut capes = microsoft_snapshot(PROFILE, secrets)?.capes;
+    capes.retain_mut(|cape| match texture_url(&cape.url) {
+        Ok(url) => {
+            cape.url = url;
+            true
+        }
+        Err(_) => false,
+    });
     let cape = capes
         .iter()
         .find(|cape| cape.active)
@@ -310,7 +317,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let profile = format!("http://{}/profile", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
-            for index in 0..5 {
+            for index in 0..6 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
@@ -355,6 +362,11 @@ mod tests {
                         );
                         (204, String::new())
                     }
+                    5 => {
+                        assert!(first.starts_with("DELETE /profile/capes/active "));
+                        assert!(bytes.is_empty());
+                        (204, String::new())
+                    }
                     _ => {
                         assert!(first.starts_with("GET /profile "));
                         let state = if index == 4 { "ACTIVE" } else { "INACTIVE" };
@@ -382,6 +394,7 @@ mod tests {
         );
         // The server only offers a profile GET for the already equipped cape.
         activate_cape_at(&profile, &account, &secrets, Some("owned")).unwrap();
+        activate_cape_at(&profile, &account, &secrets, None).unwrap();
         server.join().unwrap();
     }
     #[test]

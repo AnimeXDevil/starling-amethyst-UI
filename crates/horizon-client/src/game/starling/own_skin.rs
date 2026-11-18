@@ -461,6 +461,11 @@ impl Game<'_> {
     /// Skin Customization's upload: the chosen skin, written anew, to the playing Microsoft
     /// account's profile (`accounts::upload_skin`), for every server to show.
     pub(in crate::game) fn upload_own_skin(&mut self, choice: SkinChoice) {
+        #[cfg(target_os = "android")]
+        if self.wardrobe_cape_busy() {
+            self.own_skin.wardrobe.pending_upload = Some(choice);
+            return;
+        }
         let Some(key) = horizon_client::accounts::player_key() else {
             return;
         };

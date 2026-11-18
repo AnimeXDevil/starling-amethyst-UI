@@ -356,6 +356,8 @@
   "starling.wardrobe.hide_cape": "Скрыть плащ",
   "starling.wardrobe.import_cape": "Импортировать плащ…",
   "starling.wardrobe.local_cape": "Импортированные плащи видны только вам.",
+  "starling.wardrobe.remove_account_cape": "Снять плащ в профиле Microsoft",
+  "starling.wardrobe.sync_on_done": "Изменения в аккаунте применятся после нажатия «Готово».",
   "starling.wardrobe.loading_capes": "Загрузка плащей аккаунта…",
   "starling.wardrobe.no_owned_capes": "У этого аккаунта нет плащей.",
   "starling.wardrobe.active_cape": "%s (надет)",

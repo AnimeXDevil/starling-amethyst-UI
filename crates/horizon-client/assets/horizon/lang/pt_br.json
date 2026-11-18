@@ -355,6 +355,8 @@
   "starling.wardrobe.hide_cape": "Ocultar capa",
   "starling.wardrobe.import_cape": "Importar capa...",
   "starling.wardrobe.local_cape": "Capas importadas só aparecem para você.",
+  "starling.wardrobe.remove_account_cape": "Remover capa do perfil Microsoft",
+  "starling.wardrobe.sync_on_done": "As alterações na conta serão aplicadas ao tocar em Concluído.",
   "starling.wardrobe.loading_capes": "Carregando capas da conta...",
   "starling.wardrobe.no_owned_capes": "Esta conta não tem capas.",
   "starling.wardrobe.active_cape": "%s (equipada)",
