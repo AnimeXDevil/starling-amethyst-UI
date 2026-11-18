@@ -1,4 +1,4 @@
-//! One-time preferences after the Android game files have loaded successfully.
+//! One-time preferences after the Android installer has prepared the game files.
 use super::{Action, Loading, Setup};
 use crate::ha_launcher::{
     backend,
@@ -36,7 +36,7 @@ impl Setup {
         };
         Self {
             onboarding: pending.then_some(Onboarding {
-                visible: false,
+                visible: resources.join("horizon-resources.json").is_file(),
                 directly: config.open_directly,
                 error: None,
                 cursor: PhysicalPosition::new(-1.0, -1.0),
@@ -128,7 +128,12 @@ impl Loading {
             return;
         }
         self.setup.onboarding = None;
-        if !directly {
+        if directly {
+            self.setup.starting = false;
+            if let Err(error) = self.retry() {
+                self.failure = Some(error.to_string());
+            }
+        } else {
             crate::ha_launcher::back_to_launcher();
             horizon_client::preparer::drop_downloads(&self.vanilla_root);
         }

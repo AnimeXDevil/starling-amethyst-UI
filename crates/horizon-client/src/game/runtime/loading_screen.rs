@@ -492,6 +492,11 @@ impl Loading {
             event_loop.exit();
             return;
         }
+        if self.setup.onboarding_visible() {
+            // The setup choice only needs redraws for input and window events.
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
         if self.failure.is_some() {
             // Prepared resources handed in (Android's "Open with" or the picker): load again.
             if self.imports.poll(&self.vanilla_root)
@@ -585,7 +590,7 @@ impl Loading {
             return;
         };
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
-        if onboarding {
+        if onboarding || (console && self.setup.onboarding_pending()) {
             self.draw_setup(&mut batch, "");
         } else if self.failure.is_some() && self.menu.options_open {
             // The setup's settings: the menu's own screens, in the skin it put on.
@@ -725,6 +730,11 @@ impl Loading {
     }
     /// Load the resources again (they were imported after a failure): a fresh loader, as at start.
     pub(super) fn retry(&mut self) -> Result<()> {
+        #[cfg(target_os = "android")]
+        if self.vanilla_root.join("horizon-resources.json").is_file() && self.show_onboarding() {
+            self.failure = None;
+            return Ok(());
+        }
         let options = self.options.as_ref().ok_or("loading already finished")?;
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
@@ -923,6 +933,9 @@ impl Loading {
     /// What the app does next (`App::about_to_wait`): nothing yet, or the game, made from the
     /// loaded resources and the world's renderer.
     fn poll_handoff(&mut self) -> Option<Result<Option<split::Split<'static>>>> {
+        if self.setup.onboarding_visible() {
+            return None;
+        }
         // Offscreen there is no boot renderer: the world's is built at the handoff, on the main
         // thread, from the loading renderer's device.
         let threaded = self.boot_renderer.is_some() || self.world_renderer.is_some();
@@ -932,15 +945,6 @@ impl Loading {
         // A window in the background has no surface for the game's renderer: the loaded
         // resources wait for it to come back.
         if self.menu.reload_packs || self.suspended || !self.ready_for_handoff() {
-            return None;
-        }
-        #[cfg(target_os = "android")]
-        if self.failure.is_none()
-            && self.gui.is_some()
-            && matches!(self.loaded, Some(Ok(_)))
-            && (!threaded || matches!(self.world_renderer, Some(WorldRenderer::Built(_))))
-            && self.show_onboarding()
-        {
             return None;
         }
         let renderer = match self.world_renderer.take() {

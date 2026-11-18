@@ -257,11 +257,26 @@ pub(super) fn run_loading(
     pack_error: Option<String>,
     started: Instant,
 ) -> Result<()> {
+    #[cfg(target_os = "android")]
+    let setup = if options.offscreen || options.world.is_some() {
+        setup::Setup::default()
+    } else {
+        setup::Setup::for_launch(&vanilla_root)
+    };
+    #[cfg(not(target_os = "android"))]
+    let setup = setup::Setup::default();
     let progress = Progress::new();
-    let (receiver, loader) =
-        startup_menu::spawn_loader(&options, &settings, &vanilla_root, started, &progress)?;
+    let waiting_for_choice = setup.onboarding_visible();
+    let (receiver, loader) = if waiting_for_choice {
+        // Setup finished on a previous run. Game starts its loader when chosen.
+        (std::sync::mpsc::channel().1, None)
+    } else {
+        let (receiver, loader) =
+            startup_menu::spawn_loader(&options, &settings, &vanilla_root, started, &progress)?;
+        (receiver, Some(loader))
+    };
     let menu = startup_menu::StartupMenu::new(&options, pack_error.as_deref())?;
-    let sound_registry = options.dedicated.is_none().then(|| {
+    let sound_registry = (!waiting_for_choice && options.dedicated.is_none()).then(|| {
         let root = vanilla_root.clone();
         std::thread::spawn(move || {
             // Starling: a phone's setup before 0.1.6 left the sounds out.
@@ -271,14 +286,6 @@ pub(super) fn run_loading(
             )
         })
     });
-    #[cfg(target_os = "android")]
-    let setup = if options.offscreen || options.world.is_some() {
-        setup::Setup::default()
-    } else {
-        setup::Setup::for_launch(&vanilla_root)
-    };
-    #[cfg(not(target_os = "android"))]
-    let setup = setup::Setup::default();
     let loading = Loading {
         window: None,
         renderer: None,
@@ -298,7 +305,7 @@ pub(super) fn run_loading(
         receiver,
         loaded: None,
         delivered: false,
-        handle: Some(loader),
+        handle: loader,
         shown: false,
         ui_at: None,
         title_drawn: false,

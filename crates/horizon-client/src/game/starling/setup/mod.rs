@@ -166,6 +166,13 @@ fn setup_density(width: u32, height: u32) -> f32 {
 }
 
 impl Setup {
+    pub(in crate::game) fn onboarding_pending(&self) -> bool {
+        #[cfg(target_os = "android")]
+        return self.onboarding.is_some();
+        #[cfg(not(target_os = "android"))]
+        false
+    }
+
     pub(in crate::game) fn onboarding_visible(&self) -> bool {
         #[cfg(target_os = "android")]
         return self.onboarding.as_ref().is_some_and(|setup| setup.visible);
@@ -652,15 +659,19 @@ impl Loading {
     }
 
     pub(super) fn draw_setup(&self, batch: &mut HudBatch, failure: &str) {
-        let Some(gui) = &self.gui else {
-            // The skin is still loading: the boot screen holds the window meanwhile.
-            let logs = horizon_client::logging::recent_lines();
-            horizon_client::ui_theme::draw_boot(&self.boot, batch, &logs);
-            return;
+        let atlas = match &self.gui {
+            Some(gui) => &gui.atlas,
+            None if self.setup.onboarding_pending() => &self.boot,
+            None => {
+                // The boot screen holds the window while the setup skin loads.
+                let logs = horizon_client::logging::recent_lines();
+                horizon_client::ui_theme::draw_boot(&self.boot, batch, &logs);
+                return;
+            }
         };
         let step = step(&self.setup, failure);
         let (title, body, note) = texts(&step);
-        let mut ui = Ui::new(&gui.atlas, batch, (-1.0, -1.0));
+        let mut ui = Ui::new(atlas, batch, (-1.0, -1.0));
         let (w, h) = (ui.w, ui.h);
         if let Some(form) = &self.setup.form {
             ui.fill(0., 0., w, h, color::bg());
@@ -881,7 +892,7 @@ impl Loading {
             .set(pond.map(|_| [0.0, below, w, h - below]));
         // The inbox's banner over it all, since the setup polls the inbox too: what its file
         // picker, or Horizon Android's folder, added.
-        self.imports.draw(&gui.atlas, batch);
+        self.imports.draw(atlas, batch);
     }
 
     pub(super) fn setup_key_event(&mut self, event: &winit::event::KeyEvent) -> bool {
