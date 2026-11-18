@@ -27,6 +27,11 @@ pub const SIZE: usize = 64;
 /// just above it stay, so a tinted glass-like layer keeps its translucency.
 const ALPHA_CUTOFF: u8 = 8;
 
+/// Thickness in model pixels, including a small overlap with the body so
+/// coplanar faces cannot leave cracks where the layers meet.
+const MIN_THICKNESS: f32 = 0.5;
+const BODY_OVERLAP: f32 = 1.0 / 1024.0;
+
 /// Fill the player's outer parts down to the corresponding faces of the body.
 pub fn extrude(model: &Part, skin: &[u8], size: usize) -> Option<Part> {
     if skin.len() < size * size * 4 {
@@ -110,7 +115,17 @@ fn extrude_polygon(
     if depth <= f32::EPSILON {
         return vec![polygon.clone()];
     }
-    let inward = -n * depth;
+    let inward = -n * (depth + BODY_OVERLAP).max(MIN_THICKNESS);
+    let axes = [du, dv];
+    let inner_bounds = axes.map(|axis| {
+        inner
+            .vertices
+            .iter()
+            .map(|v| position(v).dot(axis))
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), value| {
+                (min.min(value), max.max(value))
+            })
+    });
     let facings = [-du, du, -dv, dv];
     let adjacent = facings.map(|facing| {
         outer_faces.iter().find(|face| {
@@ -168,6 +183,19 @@ fn extrude_polygon(
                     [s0, s1, s1 + inward, s0 + inward],
                     uv,
                     facings[side].to_array(),
+                ));
+            }
+            // Only texels that overhang the body have a visible reverse
+            // face. Filling it closes the piece when viewed from the inside.
+            if axes
+                .iter()
+                .zip(inner_bounds)
+                .any(|(axis, (min, max))| p00.dot(*axis) < min || p11.dot(*axis) > max)
+            {
+                out.push(quad(
+                    [p00 + inward, p10 + inward, p11 + inward, p01 + inward],
+                    uv,
+                    (-n).to_array(),
                 ));
             }
         }
@@ -271,17 +299,25 @@ mod tests {
     }
 
     #[test]
-    fn painted_texel_fills_only_the_gap_to_the_body() {
+    fn painted_texel_forms_a_square_solid_joined_to_the_body() {
         let model = head();
         let out = extrude(&model, &skin([255, 0, 0, 0]), 4).expect("a hat");
         assert_eq!(out.polygons[0].vertices, model.polygons[0].vertices);
         let polygons = &out.children[0].polygons;
-        assert_eq!(polygons.len(), 5);
+        assert_eq!(polygons.len(), 6);
+        let underside = &polygons[5];
+        assert_eq!(underside.normal, [0.0, 0.0, -1.0]);
+        assert!(
+            underside
+                .vertices
+                .iter()
+                .all(|v| v[2] == 0.0 && v[3..] == [0.125, 0.125])
+        );
         for v in polygons[0].vertices {
             assert_eq!(v[2], 0.5);
             assert_eq!(v[3..], [0.125, 0.125]);
         }
-        for polygon in &polygons[1..] {
+        for polygon in &polygons[1..5] {
             let [a, b, c, _] = polygon.vertices.map(|v| position(&v));
             assert!(
                 (b - a)
@@ -289,21 +325,36 @@ mod tests {
                     .dot(glam::Vec3::from_array(polygon.normal))
                     > 0.0
             );
-            assert_eq!(polygon.vertices.iter().filter(|v| v[2] == 0.25).count(), 2);
+            assert_eq!(polygon.vertices.iter().filter(|v| v[2] == 0.0).count(), 2);
             assert_eq!(polygon.vertices.iter().filter(|v| v[2] == 0.5).count(), 2);
         }
         // Every wall is square: the corners on both surfaces have identical
         // tangential coordinates, even though the body underneath is narrower.
-        for polygon in &polygons[1..] {
+        for polygon in &polygons[1..5] {
             for outer in polygon.vertices.iter().filter(|v| v[2] == 0.5) {
                 assert!(
                     polygon
                         .vertices
                         .iter()
-                        .any(|inner| { inner[2] == 0.25 && inner[..2] == outer[..2] })
+                        .any(|inner| { inner[2] == 0.0 && inner[..2] == outer[..2] })
                 );
             }
         }
+    }
+
+    #[test]
+    fn texel_inside_the_body_footprint_has_no_hidden_cap() {
+        let mut model = head();
+        // The outer face covers four texels per edge. Cell (1, 1) falls
+        // wholly inside the smaller body face.
+        for v in &mut model.children[0].polygons[0].vertices {
+            v[3] *= 2.0;
+            v[4] *= 2.0;
+        }
+        let mut skin = skin([0; 4]);
+        skin[(4 + 1) * 4 + 3] = 255;
+        let out = extrude(&model, &skin, 4).unwrap();
+        assert_eq!(out.children[0].polygons.len(), 5);
     }
 
     #[test]
