@@ -699,7 +699,28 @@ impl OptionsUi {
                     list: false,
                     row: 0,
                 });
-                if let Some((left, preview, _)) = wardrobe {
+                if wardrobe.is_some() && self.wardrobe_saving() {
+                    top = 33.0;
+                    let center = (top + bottom) * 0.5;
+                    for (key, y) in [
+                        ("starling.wardrobe.syncing", center - 23.0),
+                        (self.wardrobe_sync_stage(), center - 8.0),
+                    ] {
+                        out.push(Widget {
+                            x: list_left,
+                            y,
+                            w: list_w,
+                            h: 9.0,
+                            kind: WKind::Text {
+                                text: tr(key),
+                                color: u32::MAX,
+                                centered: true,
+                            },
+                            list: false,
+                            row: 0,
+                        });
+                    }
+                } else if let Some((left, preview, _)) = wardrobe {
                     top = 58.0;
                     for (i, key) in ["starling.wardrobe.skins_tab", "starling.wardrobe.capes_tab"]
                         .into_iter()
@@ -922,14 +943,8 @@ impl OptionsUi {
                     }
                     _ => None,
                 };
-                if page == Page::Skin && self.wardrobe_saving {
-                    out.push(inactive(button(
-                        cx - 100.0,
-                        h - 27.0,
-                        200.0,
-                        tr("starling.wardrobe.syncing"),
-                        Act::Done,
-                    )));
+                if page == Page::Skin && self.wardrobe_saving() {
+                    out.push(inactive(done(h - 27.0)));
                 } else if let Some((label, act)) = folder {
                     // Android's way to find mods, resource packs and shader packs.
                     let shelf = catalog_shelf(page).filter(|_| self.catalog_buttons);

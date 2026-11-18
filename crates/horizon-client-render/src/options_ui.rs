@@ -2586,7 +2586,7 @@ pub struct OptionsUi {
     pub wardrobe_account_capes: Option<Vec<AccountCape>>,
     pending_account_cape: Option<Option<String>>,
     pending_skin_upload: bool,
-    pub wardrobe_saving: bool,
+    wardrobe_sync_started: Option<Instant>,
     pub wardrobe_account_busy: bool,
     /// Whether the Mods, Resource Packs and Shader Packs pages have their Catalog button: the
     /// game's options on a phone (`offer_catalog`). The menus before the game can't show it.
@@ -2737,7 +2737,7 @@ impl Default for OptionsUi {
             wardrobe_account_capes: None,
             pending_account_cape: None,
             pending_skin_upload: false,
-            wardrobe_saving: false,
+            wardrobe_sync_started: None,
             wardrobe_account_busy: false,
             profile_name: None,
             profile_key: None,
@@ -3523,7 +3523,7 @@ impl OptionsUi {
     }
 
     pub fn discard_wardrobe_changes(&mut self) {
-        self.wardrobe_saving = false;
+        self.wardrobe_sync_started = None;
         self.pending_account_cape = None;
         self.pending_skin_upload = false;
     }
@@ -3562,15 +3562,27 @@ impl OptionsUi {
         }
     }
 
+    pub fn wardrobe_saving(&self) -> bool {
+        self.wardrobe_sync_started.is_some()
+    }
+
+    fn wardrobe_sync_stage(&self) -> &'static str {
+        if self.pending_account_cape.is_some() {
+            "starling.wardrobe.syncing_cape"
+        } else {
+            "starling.wardrobe.syncing_skin"
+        }
+    }
+
     fn done(&mut self, s: &mut Settings) -> Vec<Event> {
         if self.page() == Page::Skin && self.wardrobe_enabled {
-            if self.wardrobe_saving {
+            if self.wardrobe_saving() {
                 return Vec::new();
             }
             let cape = self.pending_account_cape.clone();
             let skin = self.pending_skin_upload.then(|| self.skin.choice.clone());
             if cape.is_some() || skin.is_some() {
-                self.wardrobe_saving = true;
+                self.wardrobe_sync_started = Some(Instant::now());
                 self.skin.warning = None;
                 self.skin
                     .actions
@@ -3591,7 +3603,7 @@ impl OptionsUi {
         settings: &mut Settings,
         result: Result<(), String>,
     ) -> Vec<Event> {
-        if !std::mem::take(&mut self.wardrobe_saving) || self.page() != Page::Skin {
+        if self.wardrobe_sync_started.take().is_none() || self.page() != Page::Skin {
             return Vec::new();
         }
         match result {
@@ -4464,7 +4476,7 @@ impl OptionsUi {
                 rows
             }
             Page::Skin => {
-                if self.wardrobe_saving {
+                if self.wardrobe_saving() {
                     return Vec::new();
                 }
                 // SkinCustomizationScreen: the seven layers, then Main Hand; in the game's own
@@ -5202,6 +5214,9 @@ impl OptionsUi {
         drag: bool,
         right: bool,
     ) -> Vec<Event> {
+        if self.wardrobe_saving() {
+            return Vec::new();
+        }
         let events = self.click_unrevised(s, atlas, x, y, size, framebuffer, drag, right);
         // A click that changed nothing the layout reads (an empty spot, a
         // focus move) keeps the built layout.
@@ -6230,7 +6245,7 @@ impl OptionsUi {
         }
     }
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
-        if self.page() == Page::Skin && self.wardrobe_saving {
+        if self.page() == Page::Skin && self.wardrobe_saving() {
             return Vec::new();
         }
         self.finish_wardrobe_drag();
@@ -6567,6 +6582,9 @@ impl OptionsUi {
         text: Option<&str>,
         shift: bool,
     ) -> Vec<Event> {
+        if self.wardrobe_saving() {
+            return Vec::new();
+        }
         let events = self.key_modifiers_unrevised(s, atlas, key, text, shift);
         if !events.is_empty() {
             self.relayout();
@@ -10761,6 +10779,8 @@ mod tests {
         };
         let mut ui = OptionsUi {
             wardrobe_enabled: true,
+            skin_page: true,
+            skin_cloud: crate::own_skin::Cloud::Microsoft(crate::own_skin::Upload::None),
             wardrobe_account_capes: Some(vec![cape("old", true), cape("new", false)]),
             stack: vec![Page::Skin],
             ..Default::default()
@@ -10782,7 +10802,24 @@ mod tests {
         };
         assert_eq!(ui.take_skin_actions(), vec![request.clone()]);
         assert_eq!(ui.page(), Page::Skin);
-        assert!(ui.wardrobe_saving);
+        assert!(ui.wardrobe_saving());
+        let (widgets, ..) = ui.layout(&s, 490.0, 260.0);
+        let contains = |key| {
+            widgets.iter().any(|widget| {
+                matches!(&widget.kind,
+                    WKind::Text { text, .. } if text == &tr(key)
+                )
+            })
+        };
+        assert!(contains("starling.wardrobe.syncing"));
+        assert!(contains("starling.wardrobe.syncing_cape"));
+        assert!(!widgets.iter().any(|widget| matches!(
+            &widget.kind,
+            WKind::Button {
+                act: Act::ActivateCape(_),
+                ..
+            }
+        )));
         ui.done(&mut s);
         ui.back(&mut s);
         assert_eq!(ui.page(), Page::Skin);

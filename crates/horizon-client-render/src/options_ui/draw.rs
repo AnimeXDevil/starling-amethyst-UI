@@ -526,6 +526,25 @@ impl OptionsUi {
             let sx = self.scrollbar_x(w);
             ui::scrollbar(batch, atlas, sx, top, bottom, content, self.scroll);
         }
+        if let Some(started) = self.wardrobe_sync_started
+            && let Some((left, preview, list)) = self.wardrobe_columns(w)
+        {
+            let width = list.min(120.0);
+            let x = left + preview + 12.0 + (list - width) * 0.5;
+            let y = (top + bottom) * 0.5 + 9.0;
+            let segment = width * 0.24;
+            let phase = started.elapsed().as_secs_f32().rem_euclid(1.6) / 0.8;
+            let position = 1.0 - (phase - 1.0).abs();
+            batch.fill(atlas, x, y, width, 3.0, 0xFF55_5555);
+            batch.fill(
+                atlas,
+                x + position * (width - segment),
+                y,
+                segment,
+                3.0,
+                u32::MAX,
+            );
+        }
         if let Some([left, top, right, bottom]) = self.wardrobe_preview_rect(w, h) {
             batch.fill(atlas, left, top, right - left, bottom - top, 0xFF55_5555);
             batch.fill(

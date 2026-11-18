@@ -358,6 +358,8 @@
   "starling.wardrobe.local_cape": "Импортированные плащи видны только вам.",
   "starling.wardrobe.remove_account_cape": "Снять плащ в профиле Microsoft",
   "starling.wardrobe.syncing": "Синхронизация с Microsoft…",
+  "starling.wardrobe.syncing_cape": "Обновление плаща…",
+  "starling.wardrobe.syncing_skin": "Загрузка скина…",
   "starling.wardrobe.capes_changed": "Microsoft не подтвердил смену плаща. Нажмите «Готово», чтобы повторить.",
   "starling.wardrobe.sync_on_done": "Изменения в аккаунте применятся после нажатия «Готово».",
   "starling.wardrobe.loading_capes": "Загрузка плащей аккаунта…",

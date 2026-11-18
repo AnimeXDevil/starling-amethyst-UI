@@ -193,7 +193,7 @@ impl Game<'_> {
                 }
                 Err(err) => {
                     log::warn!("Wardrobe: {err}");
-                    if self.ui.options.wardrobe_saving {
+                    if self.ui.options.wardrobe_saving() {
                         self.own_skin.wardrobe.pending_upload = None;
                         self.finish_wardrobe_save(Err(err));
                     } else {
