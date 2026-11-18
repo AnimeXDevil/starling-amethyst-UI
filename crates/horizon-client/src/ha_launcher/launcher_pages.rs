@@ -1254,6 +1254,7 @@ impl Launcher {
             || self.catalog.fm_modal.is_some()
             || self.chooser.is_some()
             || self.login.visible
+            || self.setup_destination_open
             || self.exit_confirmation;
         self.anim.step(
             self.catalog.page,
@@ -2015,6 +2016,73 @@ impl Launcher {
         }
         if self.diagnostics_modal_open {
             self.draw_diagnostics_summary_modal(&mut ui, w, h);
+        }
+        if self.setup_destination_open {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.list_view = None;
+            ui.fill(
+                0.0,
+                0.0,
+                w,
+                h,
+                crate::ha_launcher::client::hud::rgba(0, 0, 0, 180),
+            );
+            let width = (w - 32.0).min(440.0);
+            let x = (w - width) * 0.5;
+            let y = (h - 176.0) * 0.5;
+            ui.rounded(x, y, width, 176.0, 20.0, my3_surface());
+            ui.border(x, y, width, 176.0, 20.0, my3_border());
+            ui.text(
+                Face::SemiBold,
+                20.0,
+                x + 22.0,
+                y + 21.0,
+                my3_text(),
+                "Set up Starling",
+            );
+            ui.text(
+                Face::Regular,
+                14.0,
+                x + 22.0,
+                y + 56.0,
+                my3_muted(),
+                "What should open after setup?",
+            );
+            ui.text(
+                Face::Regular,
+                13.0,
+                x + 22.0,
+                y + 81.0,
+                my3_muted(),
+                "Change this later in Settings > Launcher.",
+            );
+            let bw = (width - 64.0) / 3.0;
+            for (index, (label, action, primary)) in [
+                ("Cancel", Action::Dismiss, false),
+                (
+                    "Launcher",
+                    Action::ChooseSetupDestination(false),
+                    !self.catalog.config.open_directly,
+                ),
+                (
+                    "Game",
+                    Action::ChooseSetupDestination(true),
+                    self.catalog.config.open_directly,
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [x + 22.0 + index as f32 * (bw + 10.0), y + 112.0, bw, 42.0],
+                    label,
+                    action,
+                    primary,
+                );
+            }
         }
         if self.exit_confirmation {
             self.targets.clear();
@@ -6137,7 +6205,7 @@ impl Launcher {
             }
             Some(Action::Play) => self.action(events)?,
             Some(Action::ChooseSetupDestination(directly)) => {
-                self.chooser = None;
+                self.setup_destination_open = false;
                 self.catalog.config.open_directly = directly;
                 self.catalog.config.onboarding =
                     crate::ha_launcher::catalog::OnboardingState::Chosen;
@@ -6296,6 +6364,7 @@ impl Launcher {
                 self.open_chooser(chooser::Kind::Profile);
             }
             Some(Action::Dismiss) => {
+                self.setup_destination_open = false;
                 self.exit_confirmation = false;
                 self.chooser = None;
             }

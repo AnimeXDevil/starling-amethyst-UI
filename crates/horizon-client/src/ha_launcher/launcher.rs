@@ -58,6 +58,7 @@ pub(super) struct Launcher {
     drag: Option<gesture::Drag>,
     chooser: Option<chooser::Chooser>,
     exit_confirmation: bool,
+    setup_destination_open: bool,
     login: login::Login,
     wardrobe: wardrobe::Wardrobe,
     pub(super) launching: bool,
@@ -207,6 +208,7 @@ impl Launcher {
             drag: None,
             chooser: None,
             exit_confirmation: false,
+            setup_destination_open: false,
             login: login::Login::new(),
             launching: false,
             launch_pending_tick: false,
@@ -356,6 +358,8 @@ impl Launcher {
         }
         if self.diagnostics_modal_open {
             self.diagnostics_modal_open = false;
+        } else if self.setup_destination_open {
+            self.setup_destination_open = false;
         } else if self.exit_confirmation {
             self.exit_confirmation = false;
         } else if self.catalog.fm_modal.take().is_some() {
@@ -400,6 +404,7 @@ impl Launcher {
 
     fn action(&mut self, _events: &ActiveEventLoop) -> Result<()> {
         if self.exit_confirmation
+            || self.setup_destination_open
             || self.chooser.is_some()
             || self.worker.is_some()
             || self.launching
@@ -414,7 +419,8 @@ impl Launcher {
                     | crate::ha_launcher::catalog::OnboardingState::Pending
             )
         {
-            self.open_chooser(super::chooser::Kind::SetupDestination);
+            self.focus = None;
+            self.setup_destination_open = true;
             return Ok(());
         }
         crate::ha_launcher::diagnostics::heartbeat(

@@ -18,7 +18,6 @@ pub(super) enum Kind {
     InputHost,
     UiScale,
     ControlProfile,
-    SetupDestination,
 }
 pub(super) struct Chooser {
     title: &'static str,
@@ -46,14 +45,6 @@ impl Launcher {
         let c = &self.catalog.config;
         let mut deletes = Vec::new();
         let (title, help, choices) = match kind {
-            Kind::SetupDestination => (
-                "Set up Starling",
-                "Choose what opens once setup is complete. You can change it later in Settings > Launcher.",
-                vec![
-                    ("Launcher".into(), "Open the launcher".into(), Action::ChooseSetupDestination(false), !c.open_directly),
-                    ("Game".into(), "Go straight to the game".into(), Action::ChooseSetupDestination(true), c.open_directly),
-                ],
-            ),
             Kind::Display(option) => {
                 let current = option.value(&c.game_settings(&self.home));
                 (
