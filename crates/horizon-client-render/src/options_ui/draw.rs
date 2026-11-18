@@ -394,7 +394,35 @@ impl OptionsUi {
                             pointer_over,
                             is_focused,
                             matches!(act, Act::Done).then_some(crate::widgets::Action::Done),
+                            if matches!(act, Act::SelectSkin(Some(_))) {
+                                16.0
+                            } else {
+                                0.0
+                            },
                         ),
+                    }
+                    if let Act::SelectSkin(Some(file)) = act {
+                        let mut thumbs = self.skin.thumbnails.borrow_mut();
+                        let face = thumbs.entry(file.clone()).or_insert_with(|| {
+                            let dir = crate::logging::player_dir().join(crate::own_skin::DIR);
+                            crate::own_skin::thumbnail(&dir, file)
+                        });
+                        if let Some(face) = face {
+                            for layer in face {
+                                for (i, &color) in layer.iter().enumerate() {
+                                    if color >> 24 != 0 {
+                                        batch.fill(
+                                            atlas,
+                                            wd.x + 4.0 + (i % 8) as f32 * 1.5,
+                                            wd.y + 4.0 + (i / 8) as f32 * 1.5,
+                                            1.5,
+                                            1.5,
+                                            color,
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
                     crate::widgets::last_narratable(|n| {
                         narrate_widget(n, s, wd, hover, list_key, framebuffer);
@@ -497,6 +525,17 @@ impl OptionsUi {
             ui::separators(batch, atlas, top, bottom, in_world);
             let sx = self.scrollbar_x(w);
             ui::scrollbar(batch, atlas, sx, top, bottom, content, self.scroll);
+        }
+        if let Some([left, top, right, bottom]) = self.wardrobe_preview_rect(w, h) {
+            batch.fill(atlas, left, top, right - left, bottom - top, 0xFF55_5555);
+            batch.fill(
+                atlas,
+                left + 1.0,
+                top + 1.0,
+                right - left - 2.0,
+                bottom - top - 2.0,
+                0xFF16_1616,
+            );
         }
         if self.page() == Page::Language {
             let mut search = self.language_search.clone();

@@ -6208,6 +6208,13 @@ impl Game<'_> {
             }
         }
     }
+    #[cfg(target_os = "android")]
+    pub(in crate::game) fn reload_own_profile_textures(&mut self) {
+        if let Some(remote) = &mut self.remote {
+            remote.own_profile = OwnProfile::Idle;
+        }
+    }
+
     fn poll_own_profile(&mut self) {
         let auth = self.auth();
         let Some(r) = self.remote.as_mut() else {
@@ -6450,6 +6457,12 @@ impl Game<'_> {
                 .filter(|_| self.settings.file.bool("modelPart_cape"))
                 .filter(|c| self.again_skin(c))
                 .cloned();
+            #[cfg(target_os = "android")]
+            let cape = if self.settings.file.bool("modelPart_cape") {
+                self.wardrobe_cape(cape)
+            } else {
+                None
+            };
             let kind = self.player_model.as_ref().map(|m| m.kind.clone());
             let skin_3d = kind
                 .as_ref()

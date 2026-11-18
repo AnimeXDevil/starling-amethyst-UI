@@ -227,6 +227,7 @@ impl Game<'_> {
         let ui = &mut self.ui.options;
         // The game puts the skin on (game/own_skin.rs).
         ui.skin_page = true;
+        ui.wardrobe_enabled = cfg!(target_os = "android");
         ui.profile_name = horizon_client::accounts::player_name();
         ui.profile_key = horizon_client::accounts::player_key();
         ui.skin_cloud = horizon_client::accounts::skin_cloud();
@@ -300,6 +301,8 @@ impl Game<'_> {
         self.ui
             .options
             .draw_contents(&self.settings, batch, &self.gui.atlas, cursor);
+        #[cfg(target_os = "android")]
+        self.draw_wardrobe_preview(batch);
         self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
         self.ui
             .options
@@ -692,6 +695,22 @@ impl Game<'_> {
             match action {
                 SkinAction::Name(name) => self.keep_player_name(&name),
                 SkinAction::Choice(choice) => self.choose_own_skin(choice),
+                SkinAction::Cape(choice) => {
+                    #[cfg(target_os = "android")]
+                    self.choose_own_cape(choice);
+                    #[cfg(not(target_os = "android"))]
+                    let _ = choice;
+                }
+                SkinAction::PickCape => {
+                    #[cfg(target_os = "android")]
+                    self.pick_wardrobe_png(crate::ha_launcher::skins::library::Kind::Cape);
+                }
+                SkinAction::AccountCape(id) => {
+                    #[cfg(target_os = "android")]
+                    self.account_capes(id);
+                    #[cfg(not(target_os = "android"))]
+                    let _ = id;
+                }
                 SkinAction::OpenFolder => self.open_game_folder(&Self::skins_dir()),
                 SkinAction::PickFile => self.pick_skin_file(),
                 SkinAction::ElyBy(on) => self.keep_elyby(on),

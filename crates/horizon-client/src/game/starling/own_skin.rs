@@ -24,6 +24,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "android")]
+#[path = "own_skin/wardrobe.rs"]
+mod wardrobe;
+
 /// The own skin's name in the atlas: one skin slot, written again when the skin changes.
 const LOCATION: &str = "horizon/own_skin";
 
@@ -35,6 +39,8 @@ const TITLE_TURN_PER_PIXEL: f32 = 2.0;
 /// The chosen skin and its image, read on first use.
 #[derive(Default)]
 pub(in crate::game) struct OwnSkin {
+    #[cfg(target_os = "android")]
+    wardrobe: wardrobe::Wardrobe,
     loaded: bool,
     choice: SkinChoice,
     /// The chosen skin's 64x64 RGBA; None for the default one.
@@ -138,15 +144,16 @@ impl Game<'_> {
     /// Wear `choice`: its image read now; why not, for a file that is no skin (the default skin
     /// shows then).
     fn put_on_skin(&mut self, choice: SkinChoice) -> Result<(), String> {
+        let image = choice
+            .file
+            .as_deref()
+            .map(|file| own_skin::load(&Self::skins_dir(), file))
+            .transpose()?;
         let skin = &mut self.own_skin;
         skin.loaded = true;
-        skin.image = None;
+        skin.image = image;
         skin.uploaded = false;
         skin.choice = choice;
-        let Some(file) = skin.choice.file.clone() else {
-            return Ok(());
-        };
-        skin.image = Some(own_skin::load(&Self::skins_dir(), &file)?);
         Ok(())
     }
 
@@ -358,21 +365,26 @@ impl Game<'_> {
 
     /// Skin Customization's skin or model: kept and put on.
     pub(in crate::game) fn choose_own_skin(&mut self, choice: SkinChoice) {
+        if let Err(error) = self.put_on_skin(choice.clone()) {
+            log::warn!("Horizon: own skin: {error}");
+            self.ui.options.refresh_skin_page();
+            self.ui.options.skin_warning(error);
+            return;
+        }
         if let Err(e) = self.keep_skin_choice(&choice) {
             log::warn!("Horizon: could not keep the skin: {e}");
             self.ui
                 .options
                 .skin_warning(format!("Could not keep the skin: {e}"));
         }
-        if let Err(e) = self.put_on_skin(choice) {
-            log::warn!("Horizon: own skin: {e}");
-            self.ui.options.skin_warning(e);
-        }
     }
 
     /// Skin Customization's Choose a File...: the system's picker, whose file comes through the
     /// import inbox (`own_skin_imported`).
     pub(in crate::game) fn pick_skin_file(&mut self) {
+        #[cfg(target_os = "android")]
+        self.pick_wardrobe_png(crate::ha_launcher::skins::library::Kind::Skin);
+        #[cfg(not(target_os = "android"))]
         if !horizon_client::platform::pick_file() {
             self.ui
                 .options
@@ -406,9 +418,17 @@ impl Game<'_> {
     /// The playing profile's own choice (`SkinChoice::for_profile`), put on, the profile noted.
     fn put_on_profile_skin(&mut self) -> Result<(), String> {
         let key = horizon_client::accounts::player_key();
-        let choice = SkinChoice::for_profile(&Self::player_dir(), key.as_deref());
+        let choice = if cfg!(target_os = "android") {
+            SkinChoice::for_game(&Self::player_dir(), key.as_deref())
+        } else {
+            SkinChoice::for_profile(&Self::player_dir(), key.as_deref())
+        };
         self.own_skin.profile = key;
-        self.put_on_skin(choice)
+        if let Err(error) = self.put_on_skin(choice) {
+            self.put_on_skin(SkinChoice::default())?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Another profile plays than the one whose choice is on: its own goes on at the next look.
@@ -421,7 +441,11 @@ impl Game<'_> {
     /// Keep `choice` as the playing profile's own (beside the name, without profiles).
     fn keep_skin_choice(&mut self, choice: &SkinChoice) -> std::io::Result<()> {
         let key = horizon_client::accounts::player_key();
-        let kept = choice.save_for_profile(&Self::player_dir(), key.as_deref());
+        let kept = if cfg!(target_os = "android") {
+            choice.save_for_game(&Self::player_dir(), key.as_deref())
+        } else {
+            choice.save_for_profile(&Self::player_dir(), key.as_deref())
+        };
         self.own_skin.profile = key;
         kept
     }
@@ -429,6 +453,8 @@ impl Game<'_> {
     /// Skin Customization's account rows follow the playing profile and its upload.
     pub(in crate::game) fn show_skin_cloud(&mut self) {
         self.ui.options.skin_cloud = horizon_client::accounts::skin_cloud();
+        #[cfg(target_os = "android")]
+        self.show_wardrobe();
     }
 
     /// Skin Customization's upload: the chosen skin, written anew, to the playing Microsoft

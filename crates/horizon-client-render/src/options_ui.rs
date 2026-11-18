@@ -2142,7 +2142,13 @@ pub(crate) enum Act {
     CopyAgentDetails,
     /// Skin Customization: the next skin of `skins/`, the other model, the system's file picker
     /// (phones), the folder, Ely.by's skins.
-    NextSkin,
+    SelectSkin(Option<String>),
+    WardrobeTab(bool),
+    AutoRotateWardrobe,
+    SelectCape(crate::own_skin::CapeChoice),
+    ImportCape,
+    FetchCapes,
+    ActivateCape(String),
     SkinModel,
     PickSkin,
     OpenSkinFolder,
@@ -2261,6 +2267,9 @@ pub enum SkinAction {
     Name(String),
     /// The skin or model changed: keep it and put it on.
     Choice(crate::own_skin::SkinChoice),
+    Cape(crate::own_skin::CapeChoice),
+    PickCape,
+    AccountCape(Option<String>),
     /// The skins folder (on a phone without the Starling folder, its offer).
     OpenFolder,
     /// Ask the system for a skin file; it arrives through the import inbox.
@@ -2551,6 +2560,7 @@ pub struct OptionsUi {
     /// Whether Options opens Skin Customization: the game's options do; the menus before the
     /// game, which can't put a skin on, keep vanilla's greyed button.
     pub skin_page: bool,
+    pub wardrobe_enabled: bool,
     /// A profile selected by the host: names are managed in Accounts, not the legacy alias box.
     pub profile_name: Option<String>,
     /// That profile's key (`accounts::player_key`), under which its own skin is kept
@@ -2558,6 +2568,11 @@ pub struct OptionsUi {
     pub profile_key: Option<String>,
     /// Where that profile's skin can go besides this game, set by the game every frame.
     pub skin_cloud: crate::own_skin::Cloud,
+    pub wardrobe_capes: Vec<(String, String)>,
+    pub wardrobe_cape: crate::own_skin::CapeChoice,
+    pub wardrobe_skin_titles: std::collections::HashMap<String, String>,
+    pub wardrobe_account_capes: Option<Vec<(String, String, bool)>>,
+    pub wardrobe_account_busy: bool,
     /// Whether the Mods, Resource Packs and Shader Packs pages have their Catalog button: the
     /// game's options on a phone (`offer_catalog`). The menus before the game can't show it.
     catalog_buttons: bool,
@@ -2583,6 +2598,12 @@ struct SkinPage {
     account: Option<String>,
     /// The PNGs of `skins/` (`own_skin::list`).
     files: Vec<String>,
+    capes: bool,
+    angle: f32,
+    drag_x: Option<f32>,
+    auto_rotate_since: Option<Instant>,
+    thumbnails:
+        std::cell::RefCell<std::collections::HashMap<String, Option<crate::own_skin::Thumbnail>>>,
     choice: crate::own_skin::SkinChoice,
     /// Ely.by Skins (`elyby::enabled`).
     elyby: bool,
@@ -2601,6 +2622,11 @@ impl Default for SkinPage {
             saved: String::new(),
             account: None,
             files: Vec::new(),
+            capes: false,
+            angle: 0.0,
+            drag_x: None,
+            auto_rotate_since: None,
+            thumbnails: Default::default(),
             choice: Default::default(),
             elyby: true,
             warning: None,
@@ -2689,6 +2715,12 @@ impl Default for OptionsUi {
             split_guest: false,
             row_bands: Vec::new(),
             skin_page: false,
+            wardrobe_enabled: false,
+            wardrobe_capes: Vec::new(),
+            wardrobe_cape: Default::default(),
+            wardrobe_skin_titles: Default::default(),
+            wardrobe_account_capes: None,
+            wardrobe_account_busy: false,
             profile_name: None,
             profile_key: None,
             skin_cloud: Default::default(),
@@ -3378,7 +3410,7 @@ impl OptionsUi {
     /// Read the Skin Customization page's name, skins and choice again (it opened, or a skin
     /// came through the import inbox).
     pub fn refresh_skin_page(&mut self) {
-        let dir = std::env::current_dir().unwrap_or_default();
+        let dir = crate::logging::player_dir();
         let page = &mut self.skin;
         page.saved = self
             .profile_name
@@ -3389,12 +3421,26 @@ impl OptionsUi {
         }
         page.account = crate::auth::current().map(|a| a.name.clone());
         page.files = crate::own_skin::list(&dir.join(crate::own_skin::DIR));
-        page.choice = crate::own_skin::SkinChoice::for_profile(&dir, self.profile_key.as_deref());
+        if !self.wardrobe_skin_titles.is_empty() {
+            page.files.sort_by_cached_key(|file| {
+                self.wardrobe_skin_titles
+                    .get(file)
+                    .map_or(file.as_str(), String::as_str)
+                    .to_lowercase()
+            });
+        }
+        page.thumbnails.get_mut().clear();
+        page.choice = if self.wardrobe_enabled {
+            crate::own_skin::SkinChoice::for_game(&dir, self.profile_key.as_deref())
+        } else {
+            crate::own_skin::SkinChoice::for_profile(&dir, self.profile_key.as_deref())
+        };
         page.elyby = crate::elyby::enabled(&dir);
         page.warning = None;
         if !page.name.focused {
             page.name.set_value(&page.saved);
         }
+        self.relayout();
     }
     /// A line in red on the Skin Customization page (a skin the game could not put on).
     pub fn skin_warning(&mut self, text: String) {
@@ -3403,6 +3449,154 @@ impl OptionsUi {
     /// What Skin Customization asked of the game since the last call.
     pub fn take_skin_actions(&mut self) -> Vec<SkinAction> {
         std::mem::take(&mut self.skin.actions)
+    }
+    fn select_skin(&mut self, file: Option<String>) {
+        if self.skin.choice.file != file {
+            self.skin.choice.file = file;
+            self.skin.warning = None;
+            self.skin
+                .actions
+                .push(SkinAction::Choice(self.skin.choice.clone()));
+        }
+    }
+
+    fn select_wardrobe_tab(&mut self, capes: bool) {
+        self.skin.capes = capes;
+        self.finish_wardrobe_drag();
+        self.skin.angle = 0.0;
+        self.skin.auto_rotate_since = self.skin.auto_rotate_since.map(|_| Instant::now());
+        self.scroll = 0.0;
+    }
+
+    pub fn viewing_wardrobe_capes(&self) -> bool {
+        self.page() == Page::Skin && self.skin.capes
+    }
+
+    pub fn wardrobe_rotation(&self) -> f32 {
+        let facing = if self.skin.capes { 180.0 } else { 22.5 };
+        facing + self.wardrobe_angle()
+    }
+
+    fn wardrobe_angle(&self) -> f32 {
+        let spin = self
+            .skin
+            .auto_rotate_since
+            .filter(|_| self.skin.drag_x.is_none())
+            .map_or(0.0, |since| since.elapsed().as_secs_f32() * 36.0);
+        (self.skin.angle + spin).rem_euclid(360.0)
+    }
+
+    fn toggle_wardrobe_auto_rotate(&mut self) {
+        self.skin.angle = self.wardrobe_angle();
+        self.skin.auto_rotate_since = self.skin.auto_rotate_since.is_none().then(Instant::now);
+    }
+
+    pub fn wardrobe_preview_at(&self, size: (f32, f32), cursor: (f32, f32)) -> bool {
+        self.wardrobe_preview_rect(size.0, size.1)
+            .is_some_and(|[x0, y0, x1, y1]| ui::hovered(cursor, x0, y0, x1 - x0, y1 - y0))
+    }
+
+    fn finish_wardrobe_drag(&mut self) {
+        if self.skin.drag_x.take().is_some() && self.skin.auto_rotate_since.is_some() {
+            self.skin.auto_rotate_since = Some(Instant::now());
+        }
+    }
+
+    fn select_cape(&mut self, choice: crate::own_skin::CapeChoice) {
+        self.skin.warning = None;
+        self.skin.actions.push(SkinAction::Cape(choice));
+    }
+
+    fn cape_rows(&self) -> Vec<Row> {
+        use crate::own_skin::CapeChoice;
+        let pick = |choice, label: Text, width| {
+            let label = if self.wardrobe_cape == choice {
+                label.with_color(0x55_FF_55)
+            } else {
+                label
+            };
+            button(0.0, 0.0, width, label, Act::SelectCape(choice))
+        };
+        let mut rows = vec![
+            Row::Buttons(
+                pick(
+                    CapeChoice::Account,
+                    tr("starling.wardrobe.account_cape"),
+                    150.0,
+                ),
+                Some(pick(
+                    CapeChoice::Hidden,
+                    tr("starling.wardrobe.hide_cape"),
+                    150.0,
+                )),
+            ),
+            Row::Buttons(
+                button(
+                    0.0,
+                    0.0,
+                    310.0,
+                    tr("starling.wardrobe.import_cape"),
+                    Act::ImportCape,
+                ),
+                None,
+            ),
+        ];
+        for pair in self.wardrobe_capes.chunks(2) {
+            let card = |(id, title): &(String, String)| {
+                pick(
+                    CapeChoice::Local(id.clone()),
+                    Text::literal(clipped(title, 23)),
+                    150.0,
+                )
+            };
+            rows.push(Row::Buttons(card(&pair[0]), pair.get(1).map(card)));
+        }
+        rows.push(Row::Paragraph(lang::get("starling.wardrobe.local_cape")));
+        match &self.skin_cloud {
+            crate::own_skin::Cloud::Ely => rows.extend(self.skin_cloud_rows()),
+            crate::own_skin::Cloud::Microsoft(_) => {
+                if self.wardrobe_account_busy {
+                    rows.push(Row::Note(lang::get("starling.wardrobe.loading_capes")));
+                } else if let Some(capes) = &self.wardrobe_account_capes {
+                    if capes.is_empty() {
+                        rows.push(Row::Note(lang::get("starling.wardrobe.no_owned_capes")));
+                    }
+                    for (id, name, active) in capes {
+                        let widget = button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            Text::translate(
+                                if *active {
+                                    "starling.wardrobe.active_cape"
+                                } else {
+                                    "starling.wardrobe.activate_cape"
+                                },
+                                &[Text::literal(clipped(name, 24))],
+                            ),
+                            Act::ActivateCape(id.clone()),
+                        );
+                        rows.push(Row::Buttons(
+                            if *active { inactive(widget) } else { widget },
+                            None,
+                        ));
+                    }
+                } else {
+                    rows.push(Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("starling.wardrobe.load_capes"),
+                            Act::FetchCapes,
+                        ),
+                        None,
+                    ));
+                }
+            }
+            crate::own_skin::Cloud::Local => {}
+        }
+        rows
     }
     /// What the skin button calls no file of `skins/`: an account's own skin, else the default.
     fn skin_default_name(&self) -> String {
@@ -3610,6 +3804,7 @@ impl OptionsUi {
     }
     fn push(&mut self, page: Page) {
         self.relayout();
+        self.finish_wardrobe_drag();
         self.stack.push(page);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
@@ -3730,6 +3925,9 @@ impl OptionsUi {
         }
     }
     fn scrollbar_x(&self, width: f32) -> f32 {
+        if let Some((left, preview, list)) = self.wardrobe_columns(width) {
+            return left + preview + 12.0 + list + 4.0;
+        }
         (width / 2.0).floor()
             + match self.page() {
                 Page::KeyBinds => 178.0,
@@ -4145,14 +4343,15 @@ impl OptionsUi {
                 }
                 let page = &self.skin;
                 let mut rows = if let Some(name) = &self.profile_name {
-                    vec![
-                        Row::Note(
-                            tr("starling.account.active")
-                                .plain()
-                                .replacen("%s", name, 1),
-                        ),
-                        Row::Note(tr("starling.account.name_in_accounts").plain()),
-                    ]
+                    let mut rows = vec![Row::Note(
+                        tr("starling.account.active")
+                            .plain()
+                            .replacen("%s", name, 1),
+                    )];
+                    if !self.wardrobe_enabled {
+                        rows.push(Row::Note(tr("starling.account.name_in_accounts").plain()));
+                    }
+                    rows
                 } else {
                     vec![Row::Field]
                 };
@@ -4169,19 +4368,10 @@ impl OptionsUi {
                         ),
                     });
                 }
-                let default = self.skin_default_name();
-                let skin = page
-                    .choice
-                    .file
-                    .as_deref()
-                    .map_or(default.as_str(), crate::own_skin::shown_name);
-                let skin = button(
-                    0.0,
-                    0.0,
-                    150.0,
-                    Text::literal(format!("Skin: {}", clipped(skin, 18))),
-                    Act::NextSkin,
-                );
+                if self.wardrobe_enabled && page.capes {
+                    rows.extend(self.cape_rows());
+                    return rows;
+                }
                 let model = if page.choice.slim { "Slim" } else { "Classic" };
                 let model = button(
                     0.0,
@@ -4196,8 +4386,23 @@ impl OptionsUi {
                 } else {
                     inactive(model)
                 };
-                rows.push(Row::Buttons(skin, Some(model)));
-                rows.extend(self.skin_cloud_rows());
+                let pick = |file: Option<&str>, label: Text, width| {
+                    button(
+                        0.0,
+                        0.0,
+                        width,
+                        if page.choice.file.as_deref() == file {
+                            label.with_color(0x55_FF_55)
+                        } else {
+                            label
+                        },
+                        Act::SelectSkin(file.map(str::to_owned)),
+                    )
+                };
+                rows.push(Row::Buttons(
+                    pick(None, Text::literal(self.skin_default_name()), 150.0),
+                    Some(model),
+                ));
                 let elyby = |width: f32| {
                     let on = if page.elyby { "ON" } else { "OFF" };
                     button(
@@ -4209,13 +4414,13 @@ impl OptionsUi {
                     )
                 };
                 // A phone's own file picker: the file chosen comes through the import inbox.
-                if cfg!(target_os = "android") {
+                if self.wardrobe_enabled {
                     rows.push(Row::Buttons(
                         button(
                             0.0,
                             0.0,
                             150.0,
-                            Text::literal("Choose a File..."),
+                            tr("starling.wardrobe.import_skin"),
                             Act::PickSkin,
                         ),
                         Some(elyby(150.0)),
@@ -4224,17 +4429,23 @@ impl OptionsUi {
                     rows.push(Row::Buttons(elyby(310.0), None));
                 }
                 if page.files.is_empty() {
-                    rows.push(Row::Note(
-                        "No skins yet: put 64x64 PNGs in the skins folder".into(),
-                    ));
+                    rows.push(Row::Paragraph(lang::get("starling.wardrobe.empty")));
                 }
-                // Vanilla's protocol: other players get the skin of the profile from the server.
-                rows.push(Row::Note(
-                    "Only you see this skin. On a server, others see".into(),
-                ));
-                rows.push(Row::Note(
-                    "the skin Mojang has for your account, or the default".into(),
-                ));
+                for pair in page.files.chunks(2) {
+                    let card = |file: &String| {
+                        let name = self
+                            .wardrobe_skin_titles
+                            .get(file)
+                            .map_or(file.as_str(), String::as_str);
+                        let name = crate::own_skin::shown_name(name);
+                        pick(Some(file), Text::literal(clipped(name, 19)), 150.0)
+                    };
+                    rows.push(Row::Buttons(card(&pair[0]), pair.get(1).map(card)));
+                }
+                rows.extend(self.skin_cloud_rows());
+                if page.choice.file.is_some() {
+                    rows.push(Row::Paragraph(lang::get("starling.wardrobe.local_skin")));
+                }
                 // Offline play's skins: by the player's name, where nothing else gives one.
                 if page.elyby {
                     rows.push(Row::Note(
@@ -4886,6 +5097,22 @@ impl OptionsUi {
             }
             return Vec::new();
         }
+        if self.page() == Page::Skin && self.wardrobe_enabled && !right {
+            if drag {
+                if let Some(last_x) = self.skin.drag_x {
+                    self.skin.angle = (self.skin.angle - (x - last_x) * 2.5).rem_euclid(360.0);
+                    self.skin.drag_x = Some(x);
+                    return Vec::new();
+                }
+            } else {
+                self.finish_wardrobe_drag();
+                if self.wardrobe_preview_at(size, (x, y)) {
+                    self.skin.angle = self.wardrobe_angle();
+                    self.skin.drag_x = Some(x);
+                    return Vec::new();
+                }
+            }
+        }
         if self.page() == Page::SplitSetup {
             use crate::split_ui::Click;
             if right {
@@ -5412,13 +5639,16 @@ impl OptionsUi {
                         Act::AccessibilityHelp => events.push(Event::AccessibilityHelp),
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
-                        Act::NextSkin => {
-                            let page = &mut self.skin;
-                            page.choice.file =
-                                crate::own_skin::next(&page.files, page.choice.file.as_deref());
-                            page.warning = None;
-                            page.actions.push(SkinAction::Choice(page.choice.clone()));
-                        }
+                        Act::SelectSkin(file) => self.select_skin(file.clone()),
+                        Act::WardrobeTab(capes) => self.select_wardrobe_tab(*capes),
+                        Act::AutoRotateWardrobe => self.toggle_wardrobe_auto_rotate(),
+                        Act::SelectCape(cape) => self.select_cape(cape.clone()),
+                        Act::ImportCape => self.skin.actions.push(SkinAction::PickCape),
+                        Act::FetchCapes => self.skin.actions.push(SkinAction::AccountCape(None)),
+                        Act::ActivateCape(id) => self
+                            .skin
+                            .actions
+                            .push(SkinAction::AccountCape(Some(id.clone()))),
                         Act::SkinModel => {
                             let page = &mut self.skin;
                             page.choice.slim = !page.choice.slim;
@@ -5483,6 +5713,7 @@ impl OptionsUi {
         }
     }
     pub fn release(&mut self) -> Vec<Event> {
+        self.finish_wardrobe_drag();
         self.scrollbar_drag_y = None;
         if let Some(p) = &mut self.pack_screen {
             p.release();
@@ -5869,6 +6100,7 @@ impl OptionsUi {
         }
     }
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
+        self.finish_wardrobe_drag();
         self.relayout();
         let mut events = Vec::new();
         // A pack's screen goes back to the one that opened it.
@@ -6714,6 +6946,15 @@ impl OptionsUi {
                         Act::ImportGpuDriver => events.push(Event::ImportGpuDriver),
                         Act::RestartGame => events.push(Event::RestartGame),
                         Act::ExportRepro => events.push(Event::ExportRepro),
+                        Act::SelectSkin(file) => self.select_skin(file),
+                        Act::WardrobeTab(capes) => self.select_wardrobe_tab(capes),
+                        Act::AutoRotateWardrobe => self.toggle_wardrobe_auto_rotate(),
+                        Act::SelectCape(cape) => self.select_cape(cape),
+                        Act::ImportCape => self.skin.actions.push(SkinAction::PickCape),
+                        Act::FetchCapes => self.skin.actions.push(SkinAction::AccountCape(None)),
+                        Act::ActivateCape(id) => {
+                            self.skin.actions.push(SkinAction::AccountCape(Some(id)))
+                        }
                         // Starling's pages answer taps only.
                         Act::CustomButtons
                         | Act::CustomAdd
@@ -6730,7 +6971,6 @@ impl OptionsUi {
                         | Act::CanvasImport(_)
                         | Act::TouchLayout
                         | Act::BedrockInventory
-                        | Act::NextSkin
                         | Act::SkinModel
                         | Act::PickSkin
                         | Act::OpenSkinFolder
@@ -10342,7 +10582,42 @@ mod tests {
     }
 
     #[test]
-    fn the_skin_page_takes_a_name_and_cycles_the_skins() {
+    fn dragging_the_wardrobe_preview_keeps_the_pointer_when_it_crosses_the_list() {
+        let atlas = atlas();
+        let mut settings = Settings::default();
+        let mut ui = OptionsUi {
+            skin_page: true,
+            wardrobe_enabled: true,
+            stack: vec![Page::Skin],
+            ..Default::default()
+        };
+        let size = (490.0, 260.0);
+        let [left, top, right, _] = ui.wardrobe_preview_rect(size.0, size.1).unwrap();
+        let start = left + 20.0;
+        let end = right + 40.0;
+        let y = top + 20.0;
+        let click = |ui: &mut OptionsUi, s: &mut Settings, x, drag| {
+            ui.click(s, &atlas, x, y, size, [1470, 780], drag, false)
+        };
+        assert_eq!(ui.wardrobe_rotation(), 22.5);
+        assert!(click(&mut ui, &mut settings, start, false).is_empty());
+        assert!(click(&mut ui, &mut settings, end, true).is_empty());
+        let turned = 22.5 + (-(end - start) * 2.5_f32).rem_euclid(360.0);
+        assert_eq!(ui.wardrobe_rotation(), turned);
+        assert_eq!(ui.scroll, 0.0);
+        ui.release();
+        click(&mut ui, &mut settings, end + 20.0, true);
+        assert_eq!(ui.wardrobe_rotation(), turned);
+        assert!(ui.take_skin_actions().is_empty());
+
+        ui.toggle_wardrobe_auto_rotate();
+        assert!(ui.skin.auto_rotate_since.is_some());
+        ui.toggle_wardrobe_auto_rotate();
+        assert!(ui.skin.auto_rotate_since.is_none());
+    }
+
+    #[test]
+    fn the_skin_page_takes_a_name_and_selects_saved_skins() {
         use winit::keyboard::KeyCode;
         let atlas = atlas();
         let mut s = Settings::default();
@@ -10408,8 +10683,10 @@ mod tests {
             ui.take_skin_actions(),
             [SkinAction::Name("Steve_2X".into())]
         );
-        // Default, each skin, Default again; the model once there is a skin.
-        let next = find(&mut ui, Act::NextSkin).0;
+        // Any saved skin can be chosen directly, and the account's skin can be restored.
+        let steve = find(&mut ui, Act::SelectSkin(Some("steve.png".into()))).0;
+        let alex = find(&mut ui, Act::SelectSkin(Some("alex.png".into()))).0;
+        let default = find(&mut ui, Act::SelectSkin(None)).0;
         let mut choice_after = |ui: &mut OptionsUi, at: (f32, f32)| {
             assert!(click(ui, &mut s, at).contains(&Event::ButtonClick));
             match ui.take_skin_actions().as_slice() {
@@ -10417,16 +10694,18 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         };
-        let alex = choice_after(&mut ui, next);
-        assert_eq!(alex.file.as_deref(), Some("alex.png"));
+        assert_eq!(
+            choice_after(&mut ui, steve).file.as_deref(),
+            Some("steve.png")
+        );
         let (model, active) = find(&mut ui, Act::SkinModel);
         assert!(active);
         assert!(choice_after(&mut ui, model).slim);
         assert_eq!(
-            choice_after(&mut ui, next).file.as_deref(),
-            Some("steve.png")
+            choice_after(&mut ui, alex).file.as_deref(),
+            Some("alex.png")
         );
-        assert_eq!(choice_after(&mut ui, next).file, None);
+        assert_eq!(choice_after(&mut ui, default).file, None);
         let (folder, active) = find(&mut ui, Act::OpenSkinFolder);
         assert!(active);
         click(&mut ui, &mut s, folder);
@@ -10455,7 +10734,7 @@ mod tests {
             })
             .collect();
         assert!(acts.contains(&&Act::Cycle(Opt::ModelPart(0))));
-        assert!(!acts.contains(&&Act::NextSkin) && !acts.contains(&&Act::OpenSkinFolder));
+        assert!(!acts.contains(&&Act::SelectSkin(None)) && !acts.contains(&&Act::OpenSkinFolder));
     }
 
     #[test]
