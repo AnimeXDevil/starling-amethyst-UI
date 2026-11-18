@@ -493,7 +493,13 @@ impl Loading {
             return;
         }
         if self.setup.onboarding_visible() {
-            // The setup choice only needs redraws for input and window events.
+            // Draw the first frame explicitly, then redraw only for input and window events.
+            if !self.shown
+                && !self.suspended
+                && let Some(window) = &self.window
+            {
+                window.request_redraw();
+            }
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }
