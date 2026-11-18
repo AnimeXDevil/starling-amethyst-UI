@@ -618,7 +618,21 @@ impl RegionWriter {
         Ok(())
     }
 
-    pub fn finish(mut self) -> io::Result<()> {
+    pub fn finish(self) -> io::Result<()> {
+        // Hard-link publication fails atomically if another writer won the name.
+        self.finish_with(|temporary, destination| fs::hard_link(temporary, destination))
+    }
+
+    /// Finish into an upgrade staging path reserved by the caller. Android's
+    /// shared storage does not support hard links, including within one folder.
+    pub(crate) fn finish_staged(self) -> io::Result<()> {
+        self.finish_with(|temporary, destination| fs::rename(temporary, destination))
+    }
+
+    fn finish_with(
+        mut self,
+        publish: impl FnOnce(&Path, &Path) -> io::Result<()>,
+    ) -> io::Result<()> {
         if self.failed {
             return Err(invalid("cannot publish a failed region writer"));
         }
@@ -632,8 +646,7 @@ impl RegionWriter {
             self.file.write_all(&value.to_be_bytes())?;
         }
         self.file.sync_all()?;
-        // Hard-link publication fails atomically if another writer won the name.
-        fs::hard_link(&self.temporary, &self.destination)?;
+        publish(&self.temporary, &self.destination)?;
         self.committed = true;
         Ok(())
     }
