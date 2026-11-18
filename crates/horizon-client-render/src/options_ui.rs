@@ -2278,7 +2278,10 @@ pub enum SkinAction {
     Cape(crate::own_skin::CapeChoice),
     PickCape,
     LoadAccountCapes,
-    AccountCape(Option<String>),
+    SaveWardrobe {
+        cape: Option<Option<String>>,
+        skin: Option<crate::own_skin::SkinChoice>,
+    },
     /// The skins folder (on a phone without the Starling folder, its offer).
     OpenFolder,
     /// Ask the system for a skin file; it arrives through the import inbox.
@@ -2583,6 +2586,7 @@ pub struct OptionsUi {
     pub wardrobe_account_capes: Option<Vec<AccountCape>>,
     pending_account_cape: Option<Option<String>>,
     pending_skin_upload: bool,
+    pub wardrobe_saving: bool,
     pub wardrobe_account_busy: bool,
     /// Whether the Mods, Resource Packs and Shader Packs pages have their Catalog button: the
     /// game's options on a phone (`offer_catalog`). The menus before the game can't show it.
@@ -2733,6 +2737,7 @@ impl Default for OptionsUi {
             wardrobe_account_capes: None,
             pending_account_cape: None,
             pending_skin_upload: false,
+            wardrobe_saving: false,
             wardrobe_account_busy: false,
             profile_name: None,
             profile_key: None,
@@ -3518,6 +3523,7 @@ impl OptionsUi {
     }
 
     pub fn discard_wardrobe_changes(&mut self) {
+        self.wardrobe_saving = false;
         self.pending_account_cape = None;
         self.pending_skin_upload = false;
     }
@@ -3557,17 +3563,45 @@ impl OptionsUi {
     }
 
     fn done(&mut self, s: &mut Settings) -> Vec<Event> {
-        if self.page() == Page::Skin {
-            if let Some(id) = self.pending_account_cape.take() {
-                self.skin.actions.push(SkinAction::AccountCape(id));
+        if self.page() == Page::Skin && self.wardrobe_enabled {
+            if self.wardrobe_saving {
+                return Vec::new();
             }
-            if self.pending_skin_upload {
+            let cape = self.pending_account_cape.clone();
+            let skin = self.pending_skin_upload.then(|| self.skin.choice.clone());
+            if cape.is_some() || skin.is_some() {
+                self.wardrobe_saving = true;
+                self.skin.warning = None;
                 self.skin
                     .actions
-                    .push(SkinAction::Upload(self.skin.choice.clone()));
+                    .push(SkinAction::SaveWardrobe { cape, skin });
+                self.relayout();
+                return Vec::new();
             }
         }
         self.back(s)
+    }
+
+    pub fn wardrobe_cape_saved(&mut self) {
+        self.pending_account_cape = None;
+    }
+
+    pub fn finish_wardrobe_save(
+        &mut self,
+        settings: &mut Settings,
+        result: Result<(), String>,
+    ) -> Vec<Event> {
+        if !std::mem::take(&mut self.wardrobe_saving) || self.page() != Page::Skin {
+            return Vec::new();
+        }
+        match result {
+            Ok(()) => self.back(settings),
+            Err(error) => {
+                self.scroll = 0.0;
+                self.skin_warning(lang::get_or(&error, &error));
+                Vec::new()
+            }
+        }
     }
 
     fn select_cape(&mut self, choice: crate::own_skin::CapeChoice) {
@@ -4430,6 +4464,9 @@ impl OptionsUi {
                 rows
             }
             Page::Skin => {
+                if self.wardrobe_saving {
+                    return Vec::new();
+                }
                 // SkinCustomizationScreen: the seven layers, then Main Hand; in the game's own
                 // options, the player's name and skin before them.
                 let mut opts: Vec<Opt> = (0..MODEL_PART_KEYS.len()).map(Opt::ModelPart).collect();
@@ -6193,6 +6230,9 @@ impl OptionsUi {
         }
     }
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
+        if self.page() == Page::Skin && self.wardrobe_saving {
+            return Vec::new();
+        }
         self.finish_wardrobe_drag();
         self.relayout();
         let mut events = Vec::new();
@@ -10736,13 +10776,36 @@ mod tests {
         ui.queue_skin_upload();
         assert!(ui.take_skin_actions().is_empty());
         ui.done(&mut s);
+        let request = SkinAction::SaveWardrobe {
+            cape: Some(None),
+            skin: Some(ui.skin.choice.clone()),
+        };
+        assert_eq!(ui.take_skin_actions(), vec![request.clone()]);
+        assert_eq!(ui.page(), Page::Skin);
+        assert!(ui.wardrobe_saving);
+        ui.done(&mut s);
+        ui.back(&mut s);
+        assert_eq!(ui.page(), Page::Skin);
+        assert!(ui.take_skin_actions().is_empty());
+
+        ui.finish_wardrobe_save(&mut s, Err("Network error".into()));
+        assert_eq!(ui.page(), Page::Skin);
+        assert_eq!(ui.skin.warning.as_deref(), Some("Network error"));
+        ui.done(&mut s);
+        assert_eq!(ui.take_skin_actions(), vec![request]);
+        ui.wardrobe_cape_saved();
+        ui.finish_wardrobe_save(&mut s, Err("Upload failed".into()));
+        ui.done(&mut s);
         assert_eq!(
             ui.take_skin_actions(),
-            vec![
-                SkinAction::AccountCape(None),
-                SkinAction::Upload(ui.skin.choice.clone())
-            ]
+            vec![SkinAction::SaveWardrobe {
+                cape: None,
+                skin: Some(ui.skin.choice.clone())
+            }]
         );
+        ui.finish_wardrobe_save(&mut s, Ok(()));
+        assert_ne!(ui.page(), Page::Skin);
+
         ui.stack.push(Page::Skin);
         ui.stage_account_cape(Some("new".into()));
         ui.queue_skin_upload();

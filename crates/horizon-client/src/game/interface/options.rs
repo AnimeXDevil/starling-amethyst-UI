@@ -705,20 +705,27 @@ impl Game<'_> {
                     #[cfg(target_os = "android")]
                     self.pick_wardrobe_png(crate::ha_launcher::skins::library::Kind::Cape);
                 }
-                SkinAction::LoadAccountCapes => {
+                SkinAction::LoadAccountCapes =>
+                {
                     #[cfg(target_os = "android")]
-                    self.account_capes(None);
+                    if let Err(error) = self.account_capes(None) {
+                        self.ui.options.skin_warning(error);
+                    }
                 }
-                SkinAction::AccountCape(id) => {
+                SkinAction::SaveWardrobe { cape, skin } => {
                     #[cfg(target_os = "android")]
-                    self.account_capes(Some(id));
+                    self.save_wardrobe(cape, skin);
                     #[cfg(not(target_os = "android"))]
-                    let _ = id;
+                    let _ = (cape, skin);
                 }
                 SkinAction::OpenFolder => self.open_game_folder(&Self::skins_dir()),
                 SkinAction::PickFile => self.pick_skin_file(),
                 SkinAction::ElyBy(on) => self.keep_elyby(on),
-                SkinAction::Upload(choice) => self.upload_own_skin(choice),
+                SkinAction::Upload(choice) => {
+                    if let Err(error) = self.upload_own_skin(choice) {
+                        self.ui.options.skin_warning(error);
+                    }
+                }
                 SkinAction::ElySite => self.open_ely_skins(),
             }
         }

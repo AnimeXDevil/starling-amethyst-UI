@@ -460,24 +460,14 @@ impl Game<'_> {
 
     /// Skin Customization's upload: the chosen skin, written anew, to the playing Microsoft
     /// account's profile (`accounts::upload_skin`), for every server to show.
-    pub(in crate::game) fn upload_own_skin(&mut self, choice: SkinChoice) {
-        #[cfg(target_os = "android")]
-        if self.wardrobe_cape_busy() {
-            self.own_skin.wardrobe.pending_upload = Some(choice);
-            return;
+    pub(in crate::game) fn upload_own_skin(&mut self, choice: SkinChoice) -> Result<(), String> {
+        let key = horizon_client::accounts::player_key().ok_or("starling.skin.error.signed_out")?;
+        let file = choice.file.ok_or("starling.skin.upload_choose")?;
+        let png = own_skin::upload_png(&Self::skins_dir(), &file)?;
+        if !horizon_client::accounts::upload_skin(key, png, choice.slim) {
+            return Err("starling.skin.error.busy".into());
         }
-        let Some(key) = horizon_client::accounts::player_key() else {
-            return;
-        };
-        let Some(file) = choice.file else {
-            let why = horizon_client::lang::get("starling.skin.upload_choose");
-            self.ui.options.skin_warning(why);
-            return;
-        };
-        match own_skin::upload_png(&Self::skins_dir(), &file) {
-            Ok(png) => horizon_client::accounts::upload_skin(key, png, choice.slim),
-            Err(e) => self.ui.options.skin_warning(e),
-        }
+        Ok(())
     }
 
     /// Skin Customization's ely.by button: the page where an Ely.by account changes its skin.

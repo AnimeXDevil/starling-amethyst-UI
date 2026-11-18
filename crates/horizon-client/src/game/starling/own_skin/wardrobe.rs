@@ -8,7 +8,11 @@ use crate::ha_launcher::{
         library::{Kind, Library},
     },
 };
-use horizon_client::{hud::HudBatch, options_ui::AccountCape, own_skin::CapeChoice};
+use horizon_client::{
+    hud::HudBatch,
+    options_ui::AccountCape,
+    own_skin::{CapeChoice, Cloud, SkinChoice, Upload},
+};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
@@ -33,7 +37,8 @@ pub(super) struct Wardrobe {
     account_uploaded: bool,
     account_cape_url: Option<String>,
     account_error: Option<String>,
-    pub(super) pending_upload: Option<horizon_client::own_skin::SkinChoice>,
+    pending_upload: Option<SkinChoice>,
+    saving_skin: bool,
 }
 
 impl Game<'_> {
@@ -123,6 +128,19 @@ impl Game<'_> {
         if self.own_skin.wardrobe.account_worker.is_some() {
             self.ensure_wardrobe_profile();
         }
+        if self.own_skin.wardrobe.saving_skin {
+            let result = match &self.ui.options.skin_cloud {
+                Cloud::Microsoft(Upload::Sending) => None,
+                Cloud::Microsoft(Upload::Sent) => Some(Ok(())),
+                Cloud::Microsoft(Upload::Failed(error)) => Some(Err(error.clone())),
+                _ => Some(Err("starling.skin.error.signed_out".into())),
+            };
+            if let Some(result) = result {
+                self.own_skin.wardrobe.saving_skin = false;
+                self.finish_wardrobe_save(result);
+                return;
+            }
+        }
         if let Some(result) =
             self.own_skin
                 .wardrobe
@@ -165,38 +183,77 @@ impl Game<'_> {
                     self.own_skin.wardrobe.account_uploaded = false;
                     if capes.activated {
                         self.choose_own_cape(CapeChoice::Account);
+                        self.ui.options.wardrobe_cape_saved();
+                        if let Some(choice) = self.own_skin.wardrobe.pending_upload.take() {
+                            self.start_wardrobe_skin_save(choice);
+                        } else {
+                            self.finish_wardrobe_save(Ok(()));
+                        }
                     }
                 }
                 Err(err) => {
                     log::warn!("Wardrobe: {err}");
-                    self.own_skin.wardrobe.account_error = Some(err);
+                    if self.ui.options.wardrobe_saving {
+                        self.own_skin.wardrobe.pending_upload = None;
+                        self.finish_wardrobe_save(Err(err));
+                    } else {
+                        self.own_skin.wardrobe.account_error = Some(err);
+                    }
                 }
-            }
-            if let Some(choice) = self.own_skin.wardrobe.pending_upload.take() {
-                self.upload_own_skin(choice);
             }
         }
     }
 
-    pub(super) fn wardrobe_cape_busy(&self) -> bool {
-        self.own_skin.wardrobe.account_worker.is_some()
+    pub(in crate::game) fn save_wardrobe(
+        &mut self,
+        cape: Option<Option<String>>,
+        skin: Option<SkinChoice>,
+    ) {
+        if cape.is_some() {
+            match self.account_capes(cape) {
+                Ok(()) => self.own_skin.wardrobe.pending_upload = skin,
+                Err(error) => self.finish_wardrobe_save(Err(error)),
+            }
+        } else if let Some(choice) = skin {
+            self.start_wardrobe_skin_save(choice);
+        }
     }
 
-    pub(in crate::game) fn account_capes(&mut self, change: Option<Option<String>>) {
+    fn start_wardrobe_skin_save(&mut self, choice: SkinChoice) {
+        match self.upload_own_skin(choice) {
+            Ok(()) => self.own_skin.wardrobe.saving_skin = true,
+            Err(error) => self.finish_wardrobe_save(Err(error)),
+        }
+    }
+
+    fn finish_wardrobe_save(&mut self, result: Result<(), String>) {
+        let events = self
+            .ui
+            .options
+            .finish_wardrobe_save(&mut self.settings, result);
+        if let Err(error) = self.handle_option_events(events) {
+            log::warn!("Wardrobe: {error}");
+        }
+    }
+
+    pub(in crate::game) fn account_capes(
+        &mut self,
+        change: Option<Option<String>>,
+    ) -> Result<(), String> {
         self.ensure_wardrobe_profile();
         if self.own_skin.wardrobe.account_worker.is_some() {
-            return;
+            return Err("starling.skin.error.busy".into());
         }
         let key = crate::accounts::player_key();
         if key.is_none() {
-            return;
+            return Err("starling.skin.error.signed_out".into());
         }
         match (&change, &self.ui.options.wardrobe_account_capes) {
             (None, None) => {}
             (Some(Some(id)), Some(rows))
                 if rows.iter().any(|cape| cape.id == *id && !cape.active) => {}
             (Some(None), Some(rows)) if rows.iter().any(|cape| cape.active) => {}
-            _ => return,
+            _ => return Err("starling.wardrobe.capes_changed".into()),
         }
         let root = Self::wardrobe_root();
         let (send, receive) = mpsc::channel();
@@ -213,7 +270,32 @@ impl Game<'_> {
                 if let Some(id) = &change {
                     cloud::activate_cape(&account, &secrets, id.as_deref())?;
                 }
-                let (capes, image) = cloud::fetch_account_capes(&secrets, &root)?;
+                let mut snapshot = cloud::fetch_account_capes(&secrets, &root)?;
+                if let Some(id) = &change {
+                    for delay in [250, 500] {
+                        if snapshot
+                            .0
+                            .iter()
+                            .find(|cape| cape.active)
+                            .map(|cape| &cape.id)
+                            == id.as_ref()
+                        {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(delay));
+                        snapshot = cloud::fetch_account_capes(&secrets, &root)?;
+                    }
+                    if snapshot
+                        .0
+                        .iter()
+                        .find(|cape| cape.active)
+                        .map(|cape| &cape.id)
+                        != id.as_ref()
+                    {
+                        return Err("starling.wardrobe.capes_changed".into());
+                    }
+                }
+                let (capes, image) = snapshot;
                 if change.is_some() {
                     let url = capes
                         .iter()
@@ -243,6 +325,7 @@ impl Game<'_> {
             })();
             let _ = send.send(result);
         });
+        Ok(())
     }
 
     fn refresh_wardrobe(&mut self) {
@@ -320,6 +403,7 @@ impl Game<'_> {
         };
         self.own_skin.wardrobe.account_error = None;
         self.own_skin.wardrobe.pending_upload = None;
+        self.own_skin.wardrobe.saving_skin = false;
         self.ui.options.wardrobe_account_capes = None;
         self.ui.options.discard_wardrobe_changes();
         self.ui.options.wardrobe_account_busy = self.own_skin.wardrobe.account_worker.is_some();

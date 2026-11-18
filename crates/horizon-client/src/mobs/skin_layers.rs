@@ -29,7 +29,7 @@ const ALPHA_CUTOFF: u8 = 8;
 
 /// Thickness in model pixels, including a small overlap with the body so
 /// coplanar faces cannot leave cracks where the layers meet.
-const MIN_THICKNESS: f32 = 0.5;
+const MIN_THICKNESS: f32 = 1.0;
 const BODY_OVERLAP: f32 = 1.0 / 1024.0;
 
 /// Fill the player's outer parts down to the corresponding faces of the body.
@@ -311,7 +311,7 @@ mod tests {
             underside
                 .vertices
                 .iter()
-                .all(|v| v[2] == 0.0 && v[3..] == [0.125, 0.125])
+                .all(|v| v[2] == -0.5 && v[3..] == [0.125, 0.125])
         );
         for v in polygons[0].vertices {
             assert_eq!(v[2], 0.5);
@@ -325,7 +325,7 @@ mod tests {
                     .dot(glam::Vec3::from_array(polygon.normal))
                     > 0.0
             );
-            assert_eq!(polygon.vertices.iter().filter(|v| v[2] == 0.0).count(), 2);
+            assert_eq!(polygon.vertices.iter().filter(|v| v[2] == -0.5).count(), 2);
             assert_eq!(polygon.vertices.iter().filter(|v| v[2] == 0.5).count(), 2);
         }
         // Every wall is square: the corners on both surfaces have identical
@@ -336,7 +336,7 @@ mod tests {
                     polygon
                         .vertices
                         .iter()
-                        .any(|inner| { inner[2] == 0.0 && inner[..2] == outer[..2] })
+                        .any(|inner| { inner[2] == -0.5 && inner[..2] == outer[..2] })
                 );
             }
         }

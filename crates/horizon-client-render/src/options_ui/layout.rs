@@ -922,7 +922,15 @@ impl OptionsUi {
                     }
                     _ => None,
                 };
-                if let Some((label, act)) = folder {
+                if page == Page::Skin && self.wardrobe_saving {
+                    out.push(inactive(button(
+                        cx - 100.0,
+                        h - 27.0,
+                        200.0,
+                        tr("starling.wardrobe.syncing"),
+                        Act::Done,
+                    )));
+                } else if let Some((label, act)) = folder {
                     // Android's way to find mods, resource packs and shader packs.
                     let shelf = catalog_shelf(page).filter(|_| self.catalog_buttons);
                     let (open_w, catalog) =
