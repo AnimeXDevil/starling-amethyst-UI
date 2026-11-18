@@ -2030,6 +2030,9 @@ pub enum Page {
     /// Starling's performance calibration, from the graphics screen's Calibrate...: what it
     /// found, and its buttons (`calibrate`, set by game/starling/perf_lab.rs).
     PerfCalibration,
+    /// Custom GPU drivers (Android arm64, `gpu_drivers`, #470): the system's or one installed,
+    /// from the graphics screen's GPU Drivers...; the pick loads at the next start.
+    GpuDrivers,
     /// Horizon's controller settings and button binds.
     Controller,
     PadBinds,
@@ -2155,6 +2158,13 @@ pub(crate) enum Act {
     PlayMusicTrack(String, String),
     /// The Music page: turn this track off, or back on.
     MusicTrackOn(String, bool),
+    /// The GPU Drivers page: pick the driver with this folder id for the next start (or the
+    /// system driver when it is picked again), delete it, ask the system for a package (it
+    /// arrives through the import inbox), or restart now to play the pick.
+    PickGpuDriver(String),
+    DeleteGpuDriver(String),
+    ImportGpuDriver,
+    RestartGame,
 }
 #[derive(Clone, Debug, PartialEq)]
 enum WKind {
@@ -2275,6 +2285,11 @@ pub enum Event {
     PerfLab(u8),
     /// One of the calibration page's buttons (`calibrate`), by index.
     Calibrate(u8),
+    /// The GPU Drivers page's Import...: a driver package (.adpkg, .zip) through the system's
+    /// picker, which arrives through the import inbox (#470).
+    ImportGpuDriver,
+    /// The GPU driver pick changed: start again to play it (Android, #470).
+    RestartGame,
     /// The Pack Options page closed with changes: the player's choices of its entries, the
     /// ones that differ from their defaults (the others went back to theirs).
     PackOptions {
@@ -2898,6 +2913,104 @@ enum Row {
     Canvas(u32),
     /// A line of red text: what was refused.
     Warning(String),
+}
+/// The GPU Drivers page (Android arm64, #470): the system driver or one installed driver,
+/// applied at the next start, the notice when a driver was set aside for crashing starts, and
+/// Import... for a package.
+fn gpu_driver_rows() -> Vec<Row> {
+    let drivers = crate::gpu_drivers::list();
+    let selected = crate::gpu_drivers::selected();
+    let active = crate::gpu_drivers::active().map(|(id, _)| id.to_owned());
+    let mut rows = vec![Row::Paragraph(
+        tr("horizon.pages.gpu_drivers.warning").plain(),
+    )];
+    if let Some(notice) = crate::gpu_drivers::take_notice() {
+        rows.push(Row::Paragraph(notice));
+    }
+    if let Some(id) = &active
+        && let Some(driver) = drivers.iter().find(|d| &d.id == id)
+    {
+        rows.push(Row::Note(
+            Text::translate(
+                "horizon.pages.gpu_drivers.playing",
+                &[Text::literal(driver.label())],
+            )
+            .plain(),
+        ));
+    }
+    if selected != active {
+        rows.push(Row::Note(tr("options.restartRequired").plain()));
+        rows.push(Row::Buttons(
+            button(
+                0.0,
+                0.0,
+                310.0,
+                tr("horizon.pages.gpu_drivers.restart"),
+                Act::RestartGame,
+            ),
+            None,
+        ));
+    }
+    let marked = |on: bool, name: String| if on { format!("> {name} <") } else { name };
+    rows.push(Row::Buttons(
+        button(
+            0.0,
+            0.0,
+            310.0,
+            Text::literal(marked(
+                selected.is_none(),
+                tr("horizon.pages.gpu_drivers.system").plain(),
+            )),
+            Act::PickGpuDriver(String::new()),
+        ),
+        None,
+    ));
+    for driver in &drivers {
+        let on = selected.as_deref() == Some(driver.id.as_str());
+        rows.push(Row::Buttons(
+            button(
+                0.0,
+                0.0,
+                150.0,
+                Text::literal(marked(on, driver.label())),
+                Act::PickGpuDriver(driver.id.clone()),
+            ),
+            Some(button(
+                0.0,
+                0.0,
+                150.0,
+                tr("horizon.pages.gpu_drivers.delete"),
+                Act::DeleteGpuDriver(driver.id.clone()),
+            )),
+        ));
+    }
+    rows.push(Row::Buttons(
+        button(
+            0.0,
+            0.0,
+            310.0,
+            tr("horizon.pages.gpu_drivers.import"),
+            Act::ImportGpuDriver,
+        ),
+        None,
+    ));
+    if let Some(id) = &selected
+        && let Some(driver) = drivers.iter().find(|d| &d.id == id)
+        && !driver.meta.description.is_empty()
+    {
+        rows.push(Row::Paragraph(driver.meta.description.clone()));
+    }
+    rows
+}
+/// A GPU Drivers page pick: that driver for the next start, or the system's when it was the
+/// pick already (or `id` is empty).
+fn pick_gpu_driver(id: &str) {
+    let selected = crate::gpu_drivers::selected();
+    crate::gpu_drivers::select(if selected.as_deref() == Some(id) {
+        ""
+    } else {
+        id
+    });
 }
 /// A widget's tooltip (`setTooltip`), unwrapped: drawn while hovered, and
 /// its narration's hint.
@@ -3600,6 +3713,7 @@ impl OptionsUi {
                 "options.videoTitle"
             }
             Page::PerfCalibration => "starling.calibrate.title",
+            Page::GpuDrivers => "horizon.pages.gpu_drivers",
             Page::Controller | Page::PadBinds => "horizon.pages.controller",
             Page::ControllerRadial => "horizon.pages.controller_radial",
             Page::ControllerRadialName => "horizon.radial.name_title",
@@ -3895,6 +4009,7 @@ impl OptionsUi {
                 }
                 rows
             }
+            Page::GpuDrivers => gpu_driver_rows(),
             Page::PerfCalibration => {
                 let mut rows = vec![Row::Paragraph(lang::get("starling.calibrate.about"))];
                 if self.calibrate.is_empty() && self.calibrate_notes.is_empty() {
@@ -5329,6 +5444,10 @@ impl OptionsUi {
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
                         Act::PerfLab(i) => events.push(Event::PerfLab(*i)),
                         Act::Calibrate(i) => events.push(Event::Calibrate(*i)),
+                        Act::PickGpuDriver(id) => pick_gpu_driver(id),
+                        Act::DeleteGpuDriver(id) => crate::gpu_drivers::remove(id),
+                        Act::ImportGpuDriver => events.push(Event::ImportGpuDriver),
+                        Act::RestartGame => events.push(Event::RestartGame),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
@@ -6590,6 +6709,10 @@ impl OptionsUi {
                         Act::DiagnosticsGpu => events.push(Event::DiagnosticsGpu),
                         Act::PerfLab(i) => events.push(Event::PerfLab(i)),
                         Act::Calibrate(i) => events.push(Event::Calibrate(i)),
+                        Act::PickGpuDriver(id) => pick_gpu_driver(&id),
+                        Act::DeleteGpuDriver(id) => crate::gpu_drivers::remove(&id),
+                        Act::ImportGpuDriver => events.push(Event::ImportGpuDriver),
+                        Act::RestartGame => events.push(Event::RestartGame),
                         Act::ExportRepro => events.push(Event::ExportRepro),
                         // Starling's pages answer taps only.
                         Act::CustomButtons

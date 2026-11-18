@@ -146,6 +146,9 @@ pub struct Manifest {
     pub shadow: Option<Shadow>,
     /// Relief as geometry near the camera, if the pack asks for it; needs `[material]`.
     pub displacement: Option<Displacement>,
+    /// Hardware ray tracing: the pack traces rays against the world's BLAS/TLAS
+    /// (`rt_trace`, `rt_occluded`). Needs a ray-query device; refused elsewhere.
+    pub ray_tracing: Option<RayTracing>,
 }
 
 /// `[displacement]`: within `distance` of the camera, the faces of solid terrain whose
@@ -260,6 +263,18 @@ pub struct Reflection {
     #[serde(default)]
     pub option: Option<String>,
 }
+
+/// `[ray_tracing]`: the pack uses hardware ray queries (`rt_trace`, `rt_occluded`
+/// in the material and post stages) against the world's BLAS/TLAS. Without a
+/// ray-query device the pack is refused with its name in the log.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RayTracing {}
+
+/// `[ray_tracing]`, unchecked.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRayTracing {}
 
 /// `[[textures]]`: a PNG of the pack every stage reads, as `<id>` and `<id>_sampler`.
 #[derive(Clone, Debug, PartialEq)]
@@ -523,6 +538,7 @@ struct Raw {
     reflection: Option<Reflection>,
     shadow: Option<Shadow>,
     displacement: Option<RawDisplacement>,
+    ray_tracing: Option<RawRayTracing>,
 }
 
 #[derive(Deserialize)]
@@ -957,6 +973,9 @@ impl Manifest {
                 return Err(err(format!("reflection.option: `{id}` is no option")));
             }
         }
+        if raw.ray_tracing.is_some() && raw.material.is_none() && raw.post.is_empty() {
+            return Err(err("[ray_tracing] needs [material] or [[post]]".into()));
+        }
         if let Some(s) = &raw.shadow {
             if unlit && raw.post.is_empty() {
                 return Err(err(match api {
@@ -1088,6 +1107,7 @@ impl Manifest {
             reflection: raw.reflection,
             shadow: raw.shadow,
             displacement,
+            ray_tracing: raw.ray_tracing.map(|_| RayTracing {}),
         })
     }
 

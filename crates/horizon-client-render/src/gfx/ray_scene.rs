@@ -83,7 +83,7 @@ pub(in crate::gfx) struct RayScene {
 impl RayScene {
     /// The scene, when the device has ray queries (`ray_query`).
     pub(in crate::gfx) fn new(device: &wgpu::Device) -> Option<Self> {
-        if !super::on(device) {
+        if !super::on(device) || !super::horizon_scene() {
             return None;
         }
         let reach = std::env::var("HORIZON_RT_CHUNKS")

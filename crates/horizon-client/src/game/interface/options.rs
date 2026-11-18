@@ -658,6 +658,13 @@ impl Game<'_> {
                     }
                 }
                 Event::OpenShaderPackFolder => self.open_game_folder(&Self::shader_packs_dir()),
+                Event::ImportGpuDriver => {
+                    horizon_client::platform::pick_file();
+                }
+                Event::RestartGame => {
+                    #[cfg(target_os = "android")]
+                    crate::android::restart_app();
+                }
                 Event::NativeSettings(i) => self.native_settings_refresh(i),
                 Event::NativeSetting(i, j) => self.native_setting_event(i, j),
                 Event::Credits => self.open_win_screen(false, super::win::Finish::Options),

@@ -120,6 +120,7 @@ pub(super) async fn open_adapter(
         ));
     }
     describe_adapter(adapter);
+    ray_query::note_offer(adapter);
     let info = adapter.get_info();
     let limits = adapter.limits();
     if let Err(e) = check_layers(adapter, layers) {
@@ -165,7 +166,7 @@ pub(super) async fn open_adapter(
         limits.max_storage_buffer_binding_size,
         limits.max_texture_array_layers,
     ));
-    let desc = wgpu::DeviceDescriptor {
+    let mut desc = wgpu::DeviceDescriptor {
         label: Some("Horizon device"),
         required_features: features,
         required_limits: limits,
@@ -176,17 +177,31 @@ pub(super) async fn open_adapter(
         experimental_features: ray_query::experimental(features),
         ..Default::default()
     };
-    #[cfg(not(target_os = "macos"))]
-    let opened = match info.backend {
-        wgpu::Backend::Vulkan => horizon_hdr::open_vulkan_device(adapter, &desc),
-        _ => None,
+    let open = async |desc: &wgpu::DeviceDescriptor<'_>| {
+        #[cfg(not(target_os = "macos"))]
+        if info.backend == wgpu::Backend::Vulkan
+            && let Some(opened) = horizon_hdr::open_vulkan_device(adapter, desc)
+        {
+            return opened;
+        }
+        adapter.request_device(desc).await
     };
-    #[cfg(target_os = "macos")]
-    let opened = None;
-    let opened = match opened {
-        Some(opened) => opened,
-        None => adapter.request_device(&desc).await,
-    };
+    let mut opened = open(&desc).await;
+    // Ray tracing (experimental, #470): a device that won't open with ray queries opens without.
+    if let Err(e) = &opened
+        && desc
+            .required_features
+            .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
+    {
+        log::warn!(
+            "Horizon renderer: the ray-tracing device failed to open ({e}); opening a plain one \
+             instead"
+        );
+        desc.required_features
+            .remove(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+        desc.experimental_features = wgpu::ExperimentalFeatures::disabled();
+        opened = open(&desc).await;
+    }
     let (device, queue) = match opened {
         Ok(opened) => opened,
         Err(e) => return Err(AdapterFailure::Failed(format!("{name} device: {e}"))),

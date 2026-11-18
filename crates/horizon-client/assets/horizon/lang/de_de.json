@@ -1046,5 +1046,11 @@
   "horizon.tempban.success": "%1$s für %2$s, bis %3$s",
   "horizon.tempban.usage": "/tempban <Spieler> <Dauer> [Grund]",
   "horizon.title.not_affiliated": "Nicht mit Mojang oder Microsoft verbunden",
-  "key.emote": "Emote-Rad"
+  "key.emote": "Emote-Rad",
+  "Ray Tracing": "Raytracing",
+  "Hardware ray tracing (ray queries) where the GPU offers it. Next start.": "Hardware-Raytracing (Ray-Queries), wo die GPU es anbietet. Nach Neustart.",
+  "Ray Tracing (Experimental)": "Raytracing (experimentell)",
+  "Experimental: hardware ray tracing for shader packs that use it. Next start.": "Experimentell: Hardware-Raytracing für Shader-Pakete, die es nutzen. Nach Neustart.",
+  "GPU Drivers...": "GPU-Treiber …",
+  "A custom Vulkan driver, like Turnip, instead of the system's. Next start.": "Ein eigener Vulkan-Treiber, etwa Turnip, statt dem des Systems. Nach Neustart."
 }

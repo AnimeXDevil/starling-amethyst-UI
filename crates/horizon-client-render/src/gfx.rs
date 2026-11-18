@@ -467,6 +467,7 @@ pub mod panorama;
 mod readback;
 mod resident;
 mod reuse;
+mod rt;
 mod screenshot;
 pub use screenshot::{PendingScreenshot, ScreenshotSave};
 mod screenshot_readback;
@@ -1527,6 +1528,9 @@ pub struct Renderer {
     outline: wgpu::Buffer,
     depth: wgpu::TextureView,
     sections: resident::Resident<SectionGpu>,
+    /// One BLAS per live section and one TLAS over them (Advanced graphics' Ray
+    /// Tracing): built as sections mesh, only on a ray-query device.
+    rt: rt::RtWorld,
     lods: FxHashMap<crate::lod::TileKey, lod::Tile>,
     /// Far tiles' occlusion culling slots (`lod::Tile::cull_slot`): those
     /// free, and the next never used.
@@ -2455,7 +2459,29 @@ async fn open_device(
 ) -> Result<Opened> {
     let wgpu_backend = std::env::var_os("WGPU_BACKEND").is_some();
     let mut api = api.with_env();
-    if api == GraphicsApi::Auto
+    // A custom GPU driver (Android, gpu_drivers) replaces the system's libvulkan: Vulkan,
+    // whatever the setting says, and no sidestep to OpenGL ES for GPUs whose stock driver
+    // crashes (that is what the custom driver is for). Off Android nothing sets one.
+    let custom_driver = crate::gpu_drivers::active().map(|(id, _)| id);
+    if let Some(id) = custom_driver {
+        if api == GraphicsApi::OpenGl {
+            // An explicit OpenGL ES choice wins over a chosen driver: the way back when a
+            // custom Vulkan driver misbehaves past startup.
+            log::info!("Horizon renderer: OpenGL ES chosen: the custom GPU driver {id} stays off");
+        } else {
+            if api != GraphicsApi::Vulkan {
+                log::info!(
+                    "Horizon renderer: custom GPU driver {id} chosen: Vulkan, not {}",
+                    api.label()
+                );
+            } else {
+                log::info!("Horizon renderer: custom GPU driver {id} chosen");
+            }
+            api = GraphicsApi::Vulkan;
+        }
+    }
+    if custom_driver.is_none()
+        && api == GraphicsApi::Auto
         && !wgpu_backend
         && cfg!(target_os = "android")
         && let Some(gpu) = vulkan_gpu_name(window)
@@ -2864,6 +2890,14 @@ fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
 }
 impl Renderer {
+    /// Whether this renderer's device was armed for hardware ray tracing (ray queries):
+    /// the adapter offered `EXPERIMENTAL_RAY_QUERY` and Ray Tracing (experimental) was
+    /// switched on when the device opened (#470).
+    pub fn ray_tracing(&self) -> bool {
+        self.device
+            .features()
+            .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
+    }
     /// Uploads one generation of prepared geometry. A failed upload leaves the previous
     /// generation in place.
     pub fn install_prepared_models(
@@ -5511,6 +5545,7 @@ impl Renderer {
             outline,
             depth,
             sections: resident::Resident::default(),
+            rt: rt::RtWorld::default(),
             lods: FxHashMap::default(),
             lod_cull_free: Vec::new(),
             lod_cull_next: 0,
@@ -6330,7 +6365,15 @@ impl Renderer {
         let facts = MeshFacts::of(mesh);
         let fading = self.before_mesh(key, &facts);
         let section = self.upload_mesh(mesh);
+        let uploaded = section.is_some();
         self.after_mesh(key, &facts, section, fading);
+        // Ray tracing's triangle soup (#470, experimental), on a ray-query device with a
+        // ray-tracing pack: solid quads baked into world space for one BLAS per section.
+        if uploaded && self.rt_enabled() && !mesh.solid.is_empty() {
+            let origin = rt::section_origin(key);
+            self.rt
+                .note_upload(key, rt::expand_section_positions(&mesh.solid, origin));
+        }
     }
     /// Section `key`'s new mesh drawn from now on, its quads uploaded (`section`: none when it
     /// has none, or the arena had no room).
@@ -6642,6 +6685,7 @@ impl Renderer {
     }
     fn release_section(&mut self, key: SectionKey) {
         if let Some(s) = self.sections.remove(key) {
+            self.rt.forget(key);
             self.release_mesh(s);
         }
     }
@@ -6934,6 +6978,7 @@ impl Renderer {
         self.block_entity_revision = next_block_entity_revision();
         self.sections.clear();
         self.ray_clear();
+        self.rt.clear();
         self.lods.clear();
         self.lod_cutout.clear();
         self.lod_retiring.clear();
@@ -7173,6 +7218,7 @@ impl Renderer {
                     // Far terrain draws the column: it fades out over it.
                     self.leave_section(key);
                 } else if let Some(section) = self.sections.remove(key) {
+                    self.rt.forget(key);
                     released.push(section);
                 }
             }
@@ -7204,6 +7250,9 @@ impl Renderer {
         self.light_revision += (before - self.light_blocks.len()) as u64;
         self.section_uploaded.retain(|key, _| kept(key));
         let released = self.sections.remove_columns(&gone);
+        for &(x, z) in columns {
+            self.rt.forget_column(x, z);
+        }
         self.release_meshes(released);
     }
     /// Gives the removed sections' quads back to their arenas; the sections themselves
@@ -7790,6 +7839,22 @@ impl Renderer {
             self.native = None;
             return Ok(Vec::new());
         };
+        // Hardware ray tracing needs a ray-query device: refuse the pack with its name
+        // rather than failing its pipelines' TLAS binding.
+        if report.manifest.ray_tracing.is_some() && !self.ray_tracing() {
+            return Err(format!(
+                "{} needs a ray-tracing GPU (Advanced graphics' Ray Tracing): \
+                 this device offers no ray queries",
+                report.manifest.name
+            ));
+        }
+        // The TLAS the pack's bind groups share: created empty here, filled as sections
+        // build BLASes. The object is stable, so the groups stay valid across rebuilds.
+        let tlas = report
+            .manifest
+            .ray_tracing
+            .as_ref()
+            .map(|_| self.rt.ensure_tlas(&self.device).clone());
         let terrain = native_material::TerrainShape {
             globals: &self.terrain_layout,
             flat: self.flat.as_ref().map(|f| &f.draw_layout),
@@ -7809,6 +7874,7 @@ impl Renderer {
             report,
             &constants,
             lights,
+            tlas.as_ref(),
         )?;
         self.native = pack.draws().then_some(pack);
         if self.native.is_some() {
@@ -8245,6 +8311,9 @@ impl Renderer {
             let result = self.write_capture(&request, frame);
             self.capture_result = Some(result.map_err(|e| e.to_string()));
         }
+        // Ray tracing's BLAS/TLAS follow the meshed sections (nothing unless
+        // the device was armed for ray queries at the start).
+        self.rt_sync(frame.camera);
         let scaled = self.screenshot_size();
         let rendered = match scaled {
             Some(size) => self.draw_scaled_frame(frame, size),
@@ -8278,6 +8347,20 @@ impl Renderer {
         }
         // A scaled screenshot's frame never reached the window.
         rendered.map(|drawn| drawn && scaled.is_none())
+    }
+    /// Builds pending ray-tracing BLASes and rebuilds the TLAS (Advanced
+    /// graphics' Ray Tracing, while a ray-tracing pack runs).
+    fn rt_sync(&mut self, camera: DVec3) {
+        if self.rt_enabled() {
+            self.rt.sync(&self.device, &self.queue, camera);
+        }
+    }
+
+    /// Whether the world builds ray-tracing structures this frame: an armed
+    /// device plus a running ray-tracing pack. Without a pack reading it the
+    /// world builds no structures at all.
+    fn rt_enabled(&self) -> bool {
+        self.ray_tracing() && self.native.as_ref().is_some_and(|n| n.ray_tracing)
     }
     /// Whether the device's loss callback has fired. A surface reconfigure
     /// alone cannot restore resources belonging to a lost device.

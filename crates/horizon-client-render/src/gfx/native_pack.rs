@@ -28,6 +28,8 @@ pub struct NativePack {
     pub particle_lights: Vec<horizon_shader_api::manifest::ParticleLight>,
     /// `[[lights]]`, for the colour of held and dropped items' light.
     pub light_colors: Vec<horizon_shader_api::manifest::LightColor>,
+    /// Whether a ray-tracing pack runs: set from its manifest at activation.
+    pub ray_tracing: bool,
     /// GPU time of each pass, while the renderer asks for it (`pack_timing.rs`).
     pub timing: Option<PassTiming>,
 }
@@ -90,12 +92,13 @@ impl NativePack {
         report: Report,
         constants: &[(String, f64)],
         lights: super::block_light::LightTable,
+        tlas: Option<&wgpu::Tlas>,
     ) -> Result<(Self, Vec<String>), String> {
         // A backend may refuse a layout or pipeline the pack asks for (a stage's bindings
         // past its sampled-texture limit, say, as OpenGL's 16 was before #10095): the pack
         // is refused with that error instead of a validation panic in the renderer.
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let built = Self::build(device, queue, terrain, report, constants, lights);
+        let built = Self::build(device, queue, terrain, report, constants, lights, tlas);
         let refused = pollster::block_on(scope.pop());
         match (built, refused) {
             (Ok(built), None) => Ok(built),
@@ -111,6 +114,7 @@ impl NativePack {
         report: Report,
         constants: &[(String, f64)],
         lights: super::block_light::LightTable,
+        tlas: Option<&wgpu::Tlas>,
     ) -> Result<(Self, Vec<String>), String> {
         let (globals, format) = (terrain.globals, terrain.format);
         let textures = super::native_post::pack_textures(device, queue, &report);
@@ -130,6 +134,7 @@ impl NativePack {
             lights,
             terrain.pbr,
             (api, terrain.linear && api == horizon_shader_api::Api::V0_2),
+            tlas,
         );
         // `[displacement]`, unless its option is off; nothing to displace without heights.
         let displacement = report
@@ -256,7 +261,9 @@ impl NativePack {
         let post = (!post.is_empty() || api == horizon_shader_api::Api::V0_2)
             .then(|| {
                 let manifest = &report.manifest;
-                NativePost::new(device, post, manifest, constants, format, &frame, tonemap)
+                NativePost::new(
+                    device, post, manifest, constants, format, &frame, tonemap, tlas,
+                )
             })
             .transpose()?;
         let mut labels: Vec<String> = sky.iter().map(|s| s.label.clone()).collect();
@@ -270,9 +277,11 @@ impl NativePack {
         if let Some(post) = &post {
             labels.extend(post.labels().into_iter().map(str::to_owned));
         }
+        let ray_tracing = report.manifest.ray_tracing.is_some();
         let pack = Self {
             particle_lights: report.manifest.particle_lights.clone(),
             light_colors: report.manifest.lights.clone(),
+            ray_tracing,
             frame,
             sky,
             material,
@@ -381,7 +390,15 @@ mod tests {
         .map(|(n, t)| (n.to_owned(), t.as_bytes().to_vec()))
         .into();
         let report = check(&Pack::from_files(files).unwrap()).unwrap();
-        let built = NativePack::new(&device, &queue, &terrain, report, &[], Default::default());
+        let built = NativePack::new(
+            &device,
+            &queue,
+            &terrain,
+            report,
+            &[],
+            Default::default(),
+            None,
+        );
         assert!(built.is_err(), "the pack should be refused");
     }
 

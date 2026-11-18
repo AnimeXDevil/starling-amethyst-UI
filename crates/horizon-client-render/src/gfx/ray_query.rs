@@ -42,9 +42,60 @@ pub(in crate::gfx) fn quad_indices(device: &wgpu::Device, quads: u32) -> wgpu::B
     })
 }
 
-/// Whether the player asked for ray tracing (the device needs the feature from its creation).
+/// Whether the player asked for ray tracing (the device needs the feature from its creation):
+/// `HORIZON_RAY_TRACING`, or Starling's Ray Tracing switch (experimental, #470), which shader
+/// packs with `[ray_tracing]` trace against (`gfx/rt.rs`).
 fn requested() -> bool {
+    horizon_scene() || crate::graphics::ray_tracing_wanted()
+}
+
+/// Whether Horizon's own scene (`ray_scene`) is built: only on `HORIZON_RAY_TRACING`. Starling's
+/// switch builds #470's structures (`gfx/rt.rs`) instead, and two would cost twice.
+pub(in crate::gfx) fn horizon_scene() -> bool {
     asked(std::env::var("HORIZON_RAY_TRACING").ok().as_deref())
+}
+
+/// The Ray Tracing switch's offer (#470): greyed out where the adapter has no ray queries,
+/// with the device extensions it lacks, which the log names too.
+pub(super) fn note_offer(adapter: &wgpu::Adapter) {
+    let info = adapter.get_info();
+    let offered = adapter.features().contains(RAY_QUERY);
+    crate::graphics::offer_ray_tracing(offered);
+    if offered {
+        crate::graphics::set_ray_tracing_missing(None);
+        log::info!(
+            "Horizon renderer: {} offers ray queries (the Ray Tracing switch is available)",
+            info.name
+        );
+        return;
+    }
+    // wgpu offers ray queries only when the driver lists all four extensions.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let missing = horizon_hdr::ray_query_missing_extensions(adapter).unwrap_or_default();
+        crate::graphics::set_ray_tracing_missing((!missing.is_empty()).then_some(&missing));
+        if missing.is_empty() {
+            log::info!(
+                "Horizon renderer: {} lists the ray-query extensions, but wgpu offers no ray \
+                 queries; the Ray Tracing switch stays off",
+                info.name
+            );
+        } else {
+            log::info!(
+                "Horizon renderer: {} offers no ray queries; driver lacks {}. The Ray Tracing \
+                 switch stays off",
+                info.name,
+                missing.join(", ")
+            );
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::graphics::set_ray_tracing_missing(None);
+        log::info!(
+            "Horizon renderer: Metal offers no ray queries; the Ray Tracing switch stays off"
+        );
+    }
 }
 
 /// Whether `HORIZON_RAY_TRACING` set to `var` asks for ray tracing: only in a `horizon-extras`
