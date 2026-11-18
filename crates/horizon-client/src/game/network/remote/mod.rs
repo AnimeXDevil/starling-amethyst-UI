@@ -6208,13 +6208,6 @@ impl Game<'_> {
             }
         }
     }
-    #[cfg(target_os = "android")]
-    pub(in crate::game) fn reload_own_profile_textures(&mut self) {
-        if let Some(remote) = &mut self.remote {
-            remote.own_profile = OwnProfile::Idle;
-        }
-    }
-
     fn poll_own_profile(&mut self) {
         let auth = self.auth();
         let Some(r) = self.remote.as_mut() else {
@@ -6251,7 +6244,7 @@ impl Game<'_> {
     /// texel, built once per (skin, slim) from the decoded image the skin
     /// downloader still holds (`horizon_client::mobs::skin_layers`). `None`
     /// while the option is off or the image is not in memory yet.
-    fn skin_3d_model(
+    pub(in crate::game) fn skin_3d_model(
         &self,
         kind: &std::sync::Arc<horizon_client::mobs::MobType>,
         skin: &str,

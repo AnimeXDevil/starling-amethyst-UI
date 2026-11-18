@@ -87,19 +87,40 @@ fn response(result: Result<ureq::Response, ureq::Error>) -> Result<Value, String
         ),
     }
 }
+fn microsoft_snapshot(profile: &str, secrets: &Secrets) -> Result<Snapshot, String> {
+    let value = response(
+        crate::ha_launcher::account::request_to("GET", profile)
+            .set(
+                "Authorization",
+                &format!("Bearer {}", secrets.access_token()),
+            )
+            .call(),
+    )?;
+    Ok(official_snapshot(&value))
+}
+
+pub(crate) fn fetch_account_capes(
+    secrets: &Secrets,
+    root: &Path,
+) -> Result<(Vec<Texture>, Option<PathBuf>), String> {
+    if secrets.provider() != Provider::Microsoft {
+        return Err("Sign in to Microsoft to manage account capes.".into());
+    }
+    let capes = microsoft_snapshot(PROFILE, secrets)?.capes;
+    let cape = capes
+        .iter()
+        .find(|cape| cape.active)
+        .map(|cape| download(root, &cape.url, true))
+        .transpose()?;
+    Ok((capes, cape))
+}
+
 pub fn fetch(account: &Account, secrets: &Secrets, root: &Path) -> Result<Cache, String> {
     if account.provider != secrets.provider() {
         return Err("Account and session providers do not match.".into());
     }
     let snapshot = match account.provider {
-        Provider::Microsoft => official_snapshot(&response(
-            crate::ha_launcher::account::request_to("GET", PROFILE)
-                .set(
-                    "Authorization",
-                    &format!("Bearer {}", secrets.access_token()),
-                )
-                .call(),
-        )?),
+        Provider::Microsoft => microsoft_snapshot(PROFILE, secrets)?,
         Provider::Ely => {
             let value = response(
                 crate::ha_launcher::account::request_to(
@@ -252,17 +273,13 @@ fn activate_cape_at(
         );
     }
     if let Some(id) = id {
-        // Re-fetch ownership immediately before activation. Never offer unowned official capes.
-        let value = response(
-            crate::ha_launcher::account::request_to("GET", profile)
-                .set(
-                    "Authorization",
-                    &format!("Bearer {}", secrets.access_token()),
-                )
-                .call(),
-        )?;
-        if !official_snapshot(&value).capes.iter().any(|c| c.id == id) {
+        // Confirm ownership and skip writing a cape that is already active.
+        let capes = microsoft_snapshot(profile, secrets)?.capes;
+        let Some(cape) = capes.iter().find(|cape| cape.id == id) else {
             return Err("This cape does not belong to the signed-in account.".into());
+        };
+        if cape.active {
+            return Ok(());
         }
         response(
             crate::ha_launcher::account::request_to("PUT", &format!("{profile}/capes/active"))
@@ -293,7 +310,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let profile = format!("http://{}/profile", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
-            for index in 0..4 {
+            for index in 0..5 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
@@ -340,7 +357,8 @@ mod tests {
                     }
                     _ => {
                         assert!(first.starts_with("GET /profile "));
-                        (200,serde_json::json!({"capes":[{"id":"owned","alias":"Owned cape","url":"https://textures.minecraft.net/texture/abc","state":"INACTIVE"}]}).to_string())
+                        let state = if index == 4 { "ACTIVE" } else { "INACTIVE" };
+                        (200,serde_json::json!({"capes":[{"id":"owned","alias":"Owned cape","url":"https://textures.minecraft.net/texture/abc","state":state}]}).to_string())
                     }
                 };
                 write!(stream,"HTTP/1.1 {status} Result\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
@@ -362,6 +380,8 @@ mod tests {
                 .unwrap_err()
                 .contains("does not belong")
         );
+        // The server only offers a profile GET for the already equipped cape.
+        activate_cape_at(&profile, &account, &secrets, Some("owned")).unwrap();
         server.join().unwrap();
     }
     #[test]

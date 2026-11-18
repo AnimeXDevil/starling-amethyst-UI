@@ -13,9 +13,10 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
 const LOCAL_CAPE: &str = "capes/starling-local";
+const ACCOUNT_CAPE: &str = "capes/starling-account";
 struct AccountCapes {
     rows: Vec<(String, String, bool)>,
-    equipped_url: Option<String>,
+    equipped_image: Option<Vec<u8>>,
     activated: bool,
 }
 
@@ -27,7 +28,9 @@ pub(super) struct Wardrobe {
     cape: CapeChoice,
     cape_image: Option<Vec<u8>>,
     uploaded: bool,
-    account_worker: Option<Receiver<Result<AccountCapes, String>>>,
+    account_worker: Option<(Option<String>, Receiver<Result<AccountCapes, String>>)>,
+    account_image: Option<Vec<u8>>,
+    account_uploaded: bool,
     account_cape_url: Option<String>,
 }
 
@@ -67,17 +70,7 @@ impl Game<'_> {
                 mob.slim = slim;
             }
         }
-        self.ensure_wardrobe_profile();
-        let server_cape = mob.cape.filter(|location| location != LOCAL_CAPE);
-        let account_cape = if self.own_skin.wardrobe.cape == CapeChoice::Account {
-            self.account_cape_preview().or(server_cape)
-        } else {
-            None
-        };
-        mob.cape = self.wardrobe_cape(account_cape);
-        if !self.settings.file.bool("modelPart_cape") {
-            mob.cape = None;
-        }
+        self.dress_wardrobe_preview(&mut mob);
         let data = if self.res.rest_ready() {
             self.res.mob_data()
         } else if let Some(data) = &self.own_skin.title_data {
@@ -110,32 +103,44 @@ impl Game<'_> {
             }
         }
         self.own_skin.wardrobe.open = open;
-        if let Some(result) = self
-            .own_skin
-            .wardrobe
-            .account_worker
-            .as_ref()
-            .and_then(|worker| match worker.try_recv() {
-                Ok(result) => Some(result),
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    Some(Err("Could not load account capes".into()))
-                }
-                Err(mpsc::TryRecvError::Empty) => None,
-            })
+        if self.own_skin.wardrobe.account_worker.is_some() {
+            self.ensure_wardrobe_profile();
+        }
+        if let Some(result) =
+            self.own_skin
+                .wardrobe
+                .account_worker
+                .as_ref()
+                .and_then(|(_, worker)| match worker.try_recv() {
+                    Ok(result) => Some(result),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        Some(Err("Could not load account capes".into()))
+                    }
+                    Err(mpsc::TryRecvError::Empty) => None,
+                })
         {
-            self.own_skin.wardrobe.account_worker = None;
+            let owner = self
+                .own_skin
+                .wardrobe
+                .account_worker
+                .take()
+                .and_then(|(owner, _)| owner);
             self.ui.options.wardrobe_account_busy = false;
             self.ui.options.refresh_skin_page();
+            if owner.is_none() || owner != crate::accounts::player_key() {
+                return;
+            }
             match result {
                 Ok(capes) => {
                     self.ui.options.wardrobe_account_capes = Some(capes.rows);
-                    self.own_skin.wardrobe.account_cape_url = capes.equipped_url;
+                    self.own_skin.wardrobe.account_image = capes.equipped_image;
+                    self.own_skin.wardrobe.account_uploaded = false;
                     if capes.activated {
                         self.choose_own_cape(CapeChoice::Account);
-                        self.reload_own_profile_textures();
                     }
                 }
-                Err(err) => self.ui.options.skin_warning(err),
+                Err(err) if open => self.ui.options.skin_warning(err),
+                Err(err) => log::warn!("Wardrobe: {err}"),
             }
         }
     }
@@ -146,11 +151,20 @@ impl Game<'_> {
             return;
         }
         let key = crate::accounts::player_key();
+        if key.is_none() {
+            return;
+        }
+        match (&id, &self.ui.options.wardrobe_account_capes) {
+            (None, Some(_)) => return,
+            (Some(id), Some(rows))
+                if rows.iter().any(|(cape, _, active)| cape == id && !active) => {}
+            (Some(_), _) => return,
+            (None, None) => {}
+        }
         let root = Self::wardrobe_root();
         let (send, receive) = mpsc::channel();
-        self.own_skin.wardrobe.account_worker = Some(receive);
+        self.own_skin.wardrobe.account_worker = Some((key.clone(), receive));
         self.ui.options.wardrobe_account_busy = true;
-        self.ui.options.wardrobe_account_capes = None;
         std::thread::spawn(move || {
             let result = (|| {
                 let (account, secrets) = session::selected_session("")?
@@ -161,18 +175,15 @@ impl Game<'_> {
                 if let Some(id) = &id {
                     cloud::activate_cape(&account, &secrets, Some(id))?;
                 }
-                let capes = cloud::fetch(&account, &secrets, &root)?.snapshot.capes;
-                let equipped_url = capes
-                    .iter()
-                    .find(|cape| cape.active)
-                    .map(|cape| cape.url.clone());
+                let (capes, image) = cloud::fetch_account_capes(&secrets, &root)?;
+                let equipped_image = image.as_deref().map(Self::decode_cape).transpose()?;
                 let rows = capes
                     .into_iter()
                     .map(|cape| (cape.id, cape.title, cape.active))
                     .collect();
                 Ok(AccountCapes {
                     rows,
-                    equipped_url,
+                    equipped_image,
                     activated: id.is_some(),
                 })
             })();
@@ -244,13 +255,17 @@ impl Game<'_> {
         if self.own_skin.wardrobe.profile.as_ref() == Some(&key) {
             return false;
         }
-        self.own_skin.wardrobe.account_worker = None;
+        if let Some((owner, _)) = &mut self.own_skin.wardrobe.account_worker {
+            *owner = None;
+        }
+        self.own_skin.wardrobe.account_image = None;
+        self.own_skin.wardrobe.account_uploaded = false;
         self.own_skin.wardrobe.account_cape_url = match crate::accounts::profiles().player() {
             Some(starling_account::Player::Account(account)) => account.cape,
             _ => None,
         };
         self.ui.options.wardrobe_account_capes = None;
-        self.ui.options.wardrobe_account_busy = false;
+        self.ui.options.wardrobe_account_busy = self.own_skin.wardrobe.account_worker.is_some();
         let choice = CapeChoice::load(&Self::player_dir(), key.as_deref()).unwrap_or_default();
         let image = Self::cape_image(&choice).ok().flatten();
         self.set_wardrobe_cape(key, choice, image);
@@ -285,10 +300,48 @@ impl Game<'_> {
         }
     }
 
+    pub(super) fn dress_wardrobe_preview(&mut self, mob: &mut horizon_client::mobs::Mob) {
+        mob.extra.hidden_model_parts = !self.settings.file.model_customisation() & 0x7F;
+        if self.settings.extras.three_d_skin_layers && mob.skin.is_none() {
+            let skin = &mob.kind.texture;
+            let missing = self.skin_downloads.borrow().image(skin).is_none();
+            if missing
+                && let Ok(png) = self
+                    .pack
+                    .source
+                    .read(&format!("assets/minecraft/textures/{skin}.png"))
+                && let Ok((width, height, rgba)) = horizon_client::hud::decode_bytes(&png)
+                && let Some(image) =
+                    horizon_client::skins::process_legacy_skin(width, height, &rgba)
+            {
+                self.skin_downloads
+                    .borrow_mut()
+                    .remember_image(skin, &image);
+            }
+        }
+        let skin = mob.skin.as_deref().unwrap_or(&mob.kind.texture);
+        mob.skin_3d = self.skin_3d_model(&mob.kind, skin, mob.slim);
+        let server_cape = mob
+            .cape
+            .take()
+            .filter(|cape| cape != LOCAL_CAPE && cape != ACCOUNT_CAPE);
+        if mob.extra.hidden_model_parts & 1 == 0 {
+            mob.cape = self.wardrobe_cape(server_cape);
+        }
+    }
+
     pub(in crate::game) fn wardrobe_cape(&mut self, account: Option<String>) -> Option<String> {
         self.ensure_wardrobe_profile();
         match &self.own_skin.wardrobe.cape {
-            CapeChoice::Account => account,
+            CapeChoice::Account if self.ui.options.wardrobe_account_capes.is_some() => {
+                if !self.own_skin.wardrobe.account_uploaded || !self.show_skin(ACCOUNT_CAPE) {
+                    let image = self.own_skin.wardrobe.account_image.clone()?;
+                    self.store_skin(ACCOUNT_CAPE.into(), image);
+                    self.own_skin.wardrobe.account_uploaded = true;
+                }
+                self.show_skin(ACCOUNT_CAPE).then(|| ACCOUNT_CAPE.into())
+            }
+            CapeChoice::Account => account.or_else(|| self.account_cape_preview()),
             CapeChoice::Hidden => None,
             CapeChoice::Local(_) => {
                 if !self.own_skin.wardrobe.uploaded || !self.show_skin(LOCAL_CAPE) {
@@ -325,9 +378,12 @@ impl Game<'_> {
             return Ok(None);
         };
         let path = Library::image(&Self::wardrobe_root(), id)?;
-        let image = skins::read_cape(&skins::read_file(&path)?)?;
+        Self::decode_cape(&path).map(Some)
+    }
+
+    fn decode_cape(path: &std::path::Path) -> Result<Vec<u8>, String> {
+        let image = skins::read_cape(&skins::read_file(path)?)?;
         horizon_client::skins::process_cape(image.width(), image.height(), image.as_raw())
-            .map(Some)
             .ok_or_else(|| "Could not read this cape".into())
     }
 }

@@ -149,6 +149,7 @@ impl Game<'_> {
             .as_deref()
             .map(|file| own_skin::load(&Self::skins_dir(), file))
             .transpose()?;
+        self.skin_3d.borrow_mut().forget(LOCATION);
         let skin = &mut self.own_skin;
         skin.loaded = true;
         skin.image = image;
@@ -579,6 +580,12 @@ impl Game<'_> {
         let Some(layout) = self.title_layout(batch.width, batch.height) else {
             return;
         };
+        let Some(player) = &self.own_skin.title else {
+            return;
+        };
+        let mut mob = player.mob.clone();
+        #[cfg(target_os = "android")]
+        self.dress_wardrobe_preview(&mut mob);
         // The world's mob data once it loaded, else the title's own (only the model is drawn).
         let data = if self.res.rest_ready() {
             self.res.mob_data()
@@ -594,7 +601,6 @@ impl Game<'_> {
         let mid = (x0 + x1) / 2.0;
         // AnimationUtils.bobModelPart reads the age; the head looks a little around, slowly.
         let seconds = self.started.elapsed().as_secs_f32();
-        let mut mob = player.mob.clone();
         mob.age = (seconds * 20.0) as u32;
         let centre = (
             mid - 8.0 * (seconds * 0.45).sin(),

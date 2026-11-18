@@ -861,7 +861,14 @@ impl Game<'_> {
             let chest = self.armor[1].as_ref().map(|s| &*s.item);
             // CapeLayer: no cape on an invisible player (`isInvisible`, whoever looks).
             if !self.own_invisible() {
-                self.player_cape_geometry(m, chest, camera, alpha as f32, packed, out);
+                self.player_cape_geometry(
+                    m,
+                    chest,
+                    camera,
+                    alpha as f32,
+                    (self.res.mob_data(), packed),
+                    out,
+                );
             }
             self.player_ears_geometry(
                 m,
@@ -1028,7 +1035,7 @@ impl Game<'_> {
             .filter(|_| in_world)
             .map(|s| &*s.item);
         if !self.own_invisible() {
-            self.player_cape_geometry(&m, chest, camera, 1.0, 240 | 240 << 8, &mut verts);
+            self.player_cape_geometry(&m, chest, camera, 1.0, (data, 240 | 240 << 8), &mut verts);
         }
         self.player_ears_geometry(
             &m,
@@ -1235,7 +1242,7 @@ impl Game<'_> {
         chest: Option<&str>,
         camera: glam::DVec3,
         partial: f32,
-        light: u32,
+        (data, light): (&horizon_client::mobs::MobData, u32),
         out: &mut Vec<horizon_client_render::render_geometry::Vertex>,
     ) {
         let Some(rect) = m
@@ -1249,15 +1256,17 @@ impl Game<'_> {
             return;
         }
         // CapeLayer.hasLayer: the worn stack's own `equippable` asset.
-        let items = self.res.items();
-        let equippable = match m
-            .extra
-            .slot_stack(horizon_items::equipment::CHEST)
-            .filter(|s| chest == Some(&*s.item))
-        {
-            Some(s) => horizon_client::item_sync::equippable(s, items),
-            None => chest.and_then(|item| horizon_client::item_sync::item_equippable(item, items)),
-        };
+        let equippable = chest.and_then(|chest| {
+            let items = self.res.items();
+            match m
+                .extra
+                .slot_stack(horizon_items::equipment::CHEST)
+                .filter(|s| chest == &*s.item)
+            {
+                Some(s) => horizon_client::item_sync::equippable(s, items),
+                None => horizon_client::item_sync::item_equippable(chest, items),
+            }
+        });
         let layers = equippable
             .filter(|e| e.slot == "chest")
             .and_then(|e| e.asset_id)
@@ -1275,7 +1284,7 @@ impl Game<'_> {
             base,
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
-            self.res.mob_data(),
+            data,
             out,
         );
     }
