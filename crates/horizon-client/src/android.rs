@@ -471,7 +471,13 @@ pub fn first_frame_shown() {
     static SHOWN_GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     use std::sync::atomic::Ordering;
     if IN_GAME.load(Ordering::Relaxed) && !SHOWN_GAME.swap(true, Ordering::Relaxed) {
-        crate::ha_launcher::acknowledge_play(&logging::private_home());
+        // Use the same directory as `main` did when selecting the startup route,
+        // even when a test overrides HORIZON_PRIVATE for its resources and logs.
+        let private = APP
+            .get()
+            .and_then(AndroidApp::internal_data_path)
+            .unwrap_or_else(|| PathBuf::from("/data/local/tmp/horizon"));
+        crate::ha_launcher::acknowledge_play(&private);
     }
     crate::gpu_drivers::note_first_frame();
     with_activity(|env, activity| {
