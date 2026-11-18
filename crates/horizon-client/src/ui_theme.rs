@@ -714,7 +714,7 @@ const BOOT_TEXT: u32 = color::hex(0xFFFFFF, 255);
 const BOOT_LOG: u32 = color::hex(0x9BA1A6, 255);
 
 /// The boot screen while the menu is not ready yet: the wordmark centred on
-/// pure black and the console's last lines at the bottom right, as the
+/// pure black and the console's last lines at the bottom left, as the
 /// terminal prints them.
 pub fn draw_boot(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String]) {
     // Pure black under everything: the frame's panorama (the title artwork
@@ -727,12 +727,12 @@ pub fn draw_boot(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String]) {
         batch.height,
         color::hex(0x000000, 255),
     );
-    wordmark(atlas, batch);
-    draw_boot_log(atlas, batch, logs);
+    let wordmark_bottom = wordmark(atlas, batch);
+    draw_boot_log_below(atlas, batch, logs, wordmark_bottom + 12.0);
 }
 
-/// The wordmark with its tagline, centred.
-fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
+/// The wordmark and tagline, returning the bottom of their block in UI units.
+fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) -> f32 {
     let mut ui = Ui::new(atlas, batch, (0.0, 0.0));
     let size = (ui.w / 16.0).clamp(display(), 96.0);
     let small = (size * 0.25).clamp(micro(), 18.0);
@@ -748,18 +748,23 @@ fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
         "Rust based minecraft client",
     );
     ui.finish();
+    top + block
 }
 
 /// The console's last lines at the bottom left, over any loading screen: long
 /// lines wrap word-wise, the block grows upwards.
 pub fn draw_boot_log(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String]) {
+    draw_boot_log_below(atlas, batch, logs, 0.0);
+}
+
+fn draw_boot_log_below(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String], top: f32) {
     if logs.is_empty() {
         return;
     }
     let mut ui = Ui::new(atlas, batch, (0.0, 0.0));
     let (size, line, pad) = (micro(), micro() * 1.5, 16.0);
     let max_w = ui.w / 2.0;
-    let max_rows = (((ui.h - pad) / line) as usize).clamp(1, 24);
+    let max_rows = (((ui.h - pad - top) / line) as usize).min(24);
     let mut y = ui.h - pad - line;
     let mut drawn = 0;
     'lines: for text in logs.iter().rev() {
@@ -1004,6 +1009,27 @@ mod tests {
         let mut batch = HudBatch::scratch([1280, 720]);
         draw_boot_log(&atlas, &mut batch, &[]);
         assert!(batch.vertices.is_empty() && batch.patches.is_empty());
+        reset_atlas();
+    }
+
+    #[test]
+    fn a_full_boot_console_stays_below_the_wordmark() {
+        reset_atlas();
+        let atlas = HudAtlas::boot();
+        let mut batch = HudBatch::scratch([2408, 1080]);
+        draw_boot(&atlas, &mut batch, &[]);
+        let logo_bottom = batch.vertices[6..]
+            .iter()
+            .map(|v| v.pos[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let console_start = batch.vertices.len();
+
+        let mut batch = HudBatch::scratch([2408, 1080]);
+        let logs = vec!["[Render thread/INFO]: loading game resources".to_owned(); 40];
+        draw_boot(&atlas, &mut batch, &logs);
+        let console = &batch.vertices[console_start..];
+        assert!(!console.is_empty());
+        assert!(console.iter().all(|v| v.pos[1] > logo_bottom));
         reset_atlas();
     }
 
