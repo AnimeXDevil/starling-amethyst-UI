@@ -44,9 +44,10 @@ enum Step {
         link: String,
     },
     /// The official files on their way: files and bytes so far, and in all.
-    Download([u64; 4]),
+    CheckingFiles,
+    Download(starling_account::files::Progress),
     /// Java on its way: bytes so far, and in all.
-    Java(u64, u64),
+    Java(u64, u64, Option<std::time::Instant>),
     Unpacking,
     /// horizon-prepare's last line.
     Preparing(String),
@@ -158,7 +159,11 @@ impl Setup {
 fn waiting(step: &Step) -> bool {
     matches!(
         step,
-        Step::Download(_) | Step::Java(..) | Step::Unpacking | Step::Preparing(_)
+        Step::CheckingFiles
+            | Step::Download(_)
+            | Step::Java(..)
+            | Step::Unpacking
+            | Step::Preparing(_)
     )
 }
 
@@ -170,7 +175,7 @@ fn step(setup: &Setup, failure: &str) -> Step {
         return Step::Failed(format!("The prepared game files did not load: {failure}"));
     }
     match preparer::stage() {
-        Stage::Java(done, total) => return Step::Java(done, total),
+        Stage::Java(done, total, started) => return Step::Java(done, total, Some(started)),
         Stage::Unpacking => return Step::Unpacking,
         Stage::Preparing(line) => return Step::Preparing(line),
         Stage::Done => return Step::Done,
@@ -178,13 +183,11 @@ fn step(setup: &Setup, failure: &str) -> Step {
         Stage::Idle => {}
     }
     match accounts::files() {
-        Files::Checking => return Step::Download([0; 4]),
-        Files::Downloading(p) => {
-            return Step::Download([p.files as u64, p.files_total as u64, p.bytes, p.bytes_total]);
-        }
+        Files::Checking => return Step::CheckingFiles,
+        Files::Downloading(progress) => return Step::Download(progress),
         Files::Failed(e) => return Step::Failed(e),
         // Ready: the preparing starts by itself (poll_setup).
-        Files::Ready => return Step::Java(0, 0),
+        Files::Ready => return Step::Java(0, 0, None),
         Files::Missing => {}
     }
     if setup.form.is_some() {
@@ -287,6 +290,34 @@ fn mb(bytes: u64) -> String {
     format!("{:.0}", bytes as f64 / 1_000_000.0)
 }
 
+fn duration(seconds: u64) -> String {
+    if seconds >= 3600 {
+        format!("{}h {:02}m", seconds / 3600, seconds / 60 % 60)
+    } else {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    }
+}
+
+fn transfer_details(
+    received: u64,
+    remaining: u64,
+    elapsed: std::time::Duration,
+    stalled: bool,
+) -> String {
+    let mut details = format!("{} elapsed", duration(elapsed.as_secs()));
+    if stalled {
+        details.push_str(" · Waiting for the next file to finish");
+    } else if received > 0 && elapsed.as_secs() >= 3 {
+        let rate = received as f64 / elapsed.as_secs_f64();
+        let remaining = duration((remaining as f64 / rate).ceil() as u64);
+        details = format!(
+            "{:.2} MB/s avg · {details} · ~{remaining} left",
+            rate / 1_000_000.0
+        );
+    }
+    details
+}
+
 /// What the step says: title, body, and the line under it.
 fn texts(step: &Step) -> (&'static str, String, Option<String>) {
     match step {
@@ -327,23 +358,52 @@ fn texts(step: &Step) -> (&'static str, String, Option<String>) {
             format!("On {link}, enter this code:"),
             Some(tr("waiting_browser")),
         ),
-        Step::Download([files, files_total, bytes, bytes_total]) => (
+        Step::CheckingFiles => (
+            "Checking game files",
+            "Checking the version and asset list.".into(),
+            None,
+        ),
+        Step::Download(progress) => (
             "Downloading the game",
             "From Mojang's servers, checked file by file.".into(),
-            Some(if *bytes_total > 0 {
+            Some(if let Some(started) = progress.transfer_started {
+                let stalled = progress
+                    .last_transfer
+                    .unwrap_or(started)
+                    .elapsed()
+                    .as_secs()
+                    >= 15;
+                let details = transfer_details(
+                    progress.downloaded_bytes,
+                    progress.bytes_total.saturating_sub(progress.bytes),
+                    started.elapsed(),
+                    stalled,
+                );
                 format!(
-                    "{files} of {files_total} files, {} of {} MB",
-                    mb(*bytes),
-                    mb(*bytes_total)
+                    "{} of {} MB · {} of {} files\n{details}",
+                    mb(progress.bytes),
+                    mb(progress.bytes_total),
+                    progress.files,
+                    progress.files_total
                 )
             } else {
-                "Checking the files".into()
+                format!(
+                    "Checking existing files · {} of {}",
+                    progress.files, progress.files_total
+                )
             }),
         ),
-        Step::Java(done, total) => (
-            "Preparing the game",
-            "Downloading Java, which prepares the game files.".into(),
-            (*total > 0).then(|| format!("{} of {} MB", mb(*done), mb(*total))),
+        Step::Java(done, total, started) => (
+            "Downloading Java",
+            "Java is needed to prepare the game files on this device.".into(),
+            started.map(|started| {
+                format!(
+                    "{} of {} MB\n{}",
+                    mb(*done),
+                    mb(*total),
+                    transfer_details(*done, total.saturating_sub(*done), started.elapsed(), false)
+                )
+            }),
         ),
         Step::Unpacking => ("Preparing the game", "Unpacking Java.".into(), None),
         Step::Preparing(line) => (
@@ -363,9 +423,10 @@ fn texts(step: &Step) -> (&'static str, String, Option<String>) {
 /// The fraction done, for the bar.
 fn fraction(step: &Step) -> Option<f32> {
     match step {
-        Step::Download([_, _, bytes, total]) | Step::Java(bytes, total) if *total > 0 => {
-            Some((*bytes as f64 / *total as f64) as f32)
+        Step::Download(progress) if progress.bytes_total > 0 => {
+            Some((progress.bytes as f64 / progress.bytes_total as f64) as f32)
         }
+        Step::Java(bytes, total, _) if *total > 0 => Some((*bytes as f64 / *total as f64) as f32),
         _ => None,
     }
 }

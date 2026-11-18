@@ -285,7 +285,10 @@ pub enum Start {
 /// unless the chosen instance opens directly.
 pub fn start(private: &Path, home: &Path) -> Start {
     let open = std::fs::remove_file(private.join(OPEN)).is_ok();
-    let play = std::fs::remove_file(private.join(PLAY)).is_ok();
+    let play = private.join(PLAY).is_file();
+    if open {
+        acknowledge_play(private);
+    }
     let config = catalog::Config::load(home);
     display::migrate_preferences(&config, home);
     if !open && (play || config.open_directly) {
@@ -296,14 +299,31 @@ pub fn start(private: &Path, home: &Path) -> Start {
     Start::Launcher
 }
 
+/// Keep the Play request until the game draws, so Android recovery retries the same startup.
+pub fn acknowledge_play(private: &Path) {
+    if let Err(error) = std::fs::remove_file(private.join(PLAY))
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        log::warn!("Launcher: could not clear the launch request: {error}");
+    }
+}
+
 /// The game's next start, in the instance the launcher chose: the app starts again
 /// (`StarlingActivity.restart`).
-pub fn play() {
-    let _ = std::fs::write(horizon_client::logging::private_home().join(PLAY), b"");
-    crate::android::restart_app_saying(&horizon_client::lang::get_or(
-        "starling.restart.play",
-        "Starting the game…",
-    ));
+pub fn play(installed: bool) -> Result<(), String> {
+    let marker = horizon_client::logging::private_home().join(PLAY);
+    std::fs::write(&marker, b"")
+        .map_err(|error| format!("Could not save the launch request. {error}"))?;
+    let message = if installed {
+        horizon_client::lang::get_or("starling.restart.play", "Starting Starling…")
+    } else {
+        horizon_client::lang::get_or("starling.restart.setup", "Opening setup…")
+    };
+    if !crate::android::call_restart(&message) {
+        let _ = std::fs::remove_file(marker);
+        return Err("Android could not start Starling. Try again.".into());
+    }
+    Ok(())
 }
 
 /// Set by the Launcher button: the game ends as Quit ends it (the world saved first), then the app

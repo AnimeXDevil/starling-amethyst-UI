@@ -1186,9 +1186,8 @@ impl Launcher {
         self.targets.push((eq_btn_rect, Action::OpenControlEditor));
 
         let brand_w = (eq_btn_rect[0] - 66.0).max(70.0);
-        ui.text(Face::SemiBold, 16.0, 54.0, 10.0, my3_text(), "Horizon");
-        let version_line = format!("Android {}", crate::ha_launcher::backend::VERSION);
-        let fitted_version = ui.fit_text(Face::Regular, 11.0, &version_line, brand_w);
+        ui.text(Face::SemiBold, 16.0, 54.0, 10.0, my3_text(), "Starling");
+        let fitted_version = ui.fit_text(Face::Regular, 11.0, &self.app_version, brand_w);
         ui.text(
             Face::Regular,
             11.0,
@@ -1466,8 +1465,8 @@ impl Launcher {
 
                 let btn_y = (h - 92.0).max(card_y + card_h + 12.0);
                 let play_w = content_w.min(256.0);
-                let is_launching = self.launching || self.session_worker.is_some();
-                if is_launching && installed {
+                let is_launching = self.launching;
+                if is_launching {
                     let radius = 19.0;
                     ui.rounded(content_x, btn_y, play_w, 46.0, radius, my3_accent_soft());
                     ui.stroke_rounded(content_x, btn_y, play_w, 46.0, radius, 1.6, my3_accent());
@@ -1483,19 +1482,23 @@ impl Launcher {
                         15.0,
                         [content_x + 12.0, btn_y + 4.0, play_w - 24.0, 26.0],
                         my3_text(),
-                        "Launching...",
+                        if installed {
+                            "Starting Starling…"
+                        } else {
+                            "Opening setup…"
+                        },
                     );
                 } else {
                     button(
                         &mut ui,
                         &mut self.targets,
                         [content_x, btn_y, play_w, 46.0],
-                        if installed {
+                        if self.error.is_some() {
+                            "Try again"
+                        } else if installed {
                             "Play Minecraft 26.3"
-                        } else if self.error.is_some() {
-                            "Retry installation"
                         } else {
-                            "Download Minecraft 26.3"
+                            "Set up Starling"
                         },
                         Action::Play,
                         true,
@@ -2107,28 +2110,13 @@ impl Launcher {
         }
         crate::ha_launcher::documents::draw_ui(&mut ui);
         if !self.anim.intro_done {
-            let session_prog = if self.session_worker.is_some() {
-                0.30
-            } else {
-                0.55
-            };
-            let loading_progress = (0.45f32 + session_prog).clamp(0.0, 1.0);
-            if loading_progress >= 0.999 && self.anim.intro_elapsed >= 1.55 {
+            if self.anim.intro_elapsed >= 1.55 {
                 self.anim.intro_done = true;
             } else {
-                let intro_status = if self.session_worker.is_some() {
-                    "Syncing account session & skins..."
-                } else if self.catalog.search_worker_active() {
-                    "Loading content catalog..."
-                } else {
-                    ""
-                };
-                ui.draw_horizon_intro(self.anim.intro_elapsed, loading_progress, intro_status);
-                if loading_progress >= 0.999 {
-                    self.targets.clear();
-                    self.list_targets.clear();
-                    self.targets.push(([0.0, 0.0, w, h], Action::SkipIntro));
-                }
+                ui.draw_horizon_intro(self.anim.intro_elapsed, 1.0, "");
+                self.targets.clear();
+                self.list_targets.clear();
+                self.targets.push(([0.0, 0.0, w, h], Action::SkipIntro));
             }
         }
         ui.finish();
@@ -5363,9 +5351,6 @@ impl Launcher {
     }
 
     pub(super) fn activate(&mut self, events: &ActiveEventLoop) -> Result<()> {
-        if self.session_worker.is_some() && self.chooser.is_none() && !self.exit_confirmation {
-            return Ok(());
-        }
         let (Some(r), Some(gui)) = (&self.renderer, &self.gui) else {
             return Ok(());
         };
@@ -6075,9 +6060,6 @@ impl Launcher {
                     accounts.selected = Some(account.key());
                     accounts.save()?;
                 }
-                self.session_ready = false;
-                self.prepared_session = None;
-                self.session_worker = None;
                 self.login.refresh_status();
                 self.refresh_wardrobe_account();
             }
@@ -6089,9 +6071,6 @@ impl Launcher {
                 let mut accounts = crate::ha_launcher::account::Accounts::load();
                 accounts.selected = None;
                 accounts.save()?;
-                self.session_ready = false;
-                self.prepared_session = None;
-                self.session_worker = None;
                 self.login.choosing = false;
                 self.login.refresh_status();
                 self.refresh_wardrobe_account();
@@ -6105,9 +6084,6 @@ impl Launcher {
             Some(Action::SubmitEly) => {
                 self.catalog.editing = None;
                 crate::ha_launcher::platform::hide();
-                self.session_ready = false;
-                self.prepared_session = None;
-                self.session_worker = None;
                 if !self.login.pending() {
                     self.login.start_ely();
                 }
@@ -6119,9 +6095,6 @@ impl Launcher {
                 self.refresh_wardrobe_account();
             }
             Some(Action::DeviceSignIn) => {
-                self.session_ready = false;
-                self.prepared_session = None;
-                self.session_worker = None;
                 self.login
                     .start_device(&self.catalog.config.microsoft_client_id);
             }
@@ -6132,15 +6105,9 @@ impl Launcher {
             }
             Some(Action::ReviewApp) => self.login.review_app(),
             Some(Action::SignIn) => {
-                self.session_ready = false;
-                self.prepared_session = None;
-                self.session_worker = None;
                 self.login.start(&self.catalog.config.microsoft_client_id);
             }
             Some(Action::SignOut) => {
-                self.session_ready = false;
-                self.prepared_session = None;
-                self.session_worker = None;
                 self.login.sign_out();
                 self.refresh_wardrobe_account();
             }
@@ -6323,10 +6290,6 @@ impl Launcher {
             Some(Action::Dismiss) => {
                 self.exit_confirmation = false;
                 self.chooser = None;
-                if self.session_worker.is_none() {
-                    self.session_ready = false;
-                    self.prepared_session = None;
-                }
             }
             Some(Action::Logs) => {
                 self.catalog.status = crate::ha_launcher::diagnostics::summary(&self.home);

@@ -468,6 +468,11 @@ pub fn open_file_access_settings() {
 /// The game drew its first frame: the activity lets its window show, and the system's
 /// starting window (the app icon) goes.
 pub fn first_frame_shown() {
+    static SHOWN_GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    use std::sync::atomic::Ordering;
+    if IN_GAME.load(Ordering::Relaxed) && !SHOWN_GAME.swap(true, Ordering::Relaxed) {
+        crate::ha_launcher::acknowledge_play(&logging::private_home());
+    }
     crate::gpu_drivers::note_first_frame();
     with_activity(|env, activity| {
         env.call_method(activity, "firstFrame", "()V", &[])
@@ -512,11 +517,11 @@ pub fn restart_app_saying(message: &str) {
     if IN_GAME.load(std::sync::atomic::Ordering::Relaxed) {
         crate::ha_launcher::restart_into_game();
     }
-    call_restart(message);
+    let _ = call_restart(message);
 }
 
 /// `StarlingActivity.restart(String)`: the restart screen shows `message`.
-fn call_restart(message: &str) {
+pub(crate) fn call_restart(message: &str) -> bool {
     keep_restart_look();
     with_activity(|env, activity| {
         let text = env.new_string(message)?;
@@ -527,7 +532,8 @@ fn call_restart(message: &str) {
             &[jni::objects::JValue::Object(&text)],
         )
         .map(drop)
-    });
+    })
+    .is_some()
 }
 
 /// The launcher's colours for the restart screen, which draws its intro as it ends
@@ -1644,7 +1650,7 @@ pub fn finish_and_exit() -> ! {
     crate::diagnostics::finish();
     // The Launcher button: the app starts again into the launcher once this process is gone.
     if crate::ha_launcher::launcher_next() {
-        call_restart(&horizon_client::lang::get_or(
+        let _ = call_restart(&horizon_client::lang::get_or(
             "starling.restart.launcher",
             "Opening the launcher…",
         ));
