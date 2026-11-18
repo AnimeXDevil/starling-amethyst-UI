@@ -151,7 +151,7 @@ pub(super) enum WorldRenderer {
 /// world renderer anyway (a hidden window may never be asked to redraw).
 pub(super) const TITLE_FRAME_WAIT: Duration = Duration::from_secs(1);
 impl Loading {
-    fn show_starting_status(&self) -> bool {
+    fn show_startup_console(&self) -> bool {
         cfg!(target_os = "android")
             && self.failure.is_none()
             && !self.setup.starting
@@ -167,6 +167,7 @@ impl Loading {
     /// Wait for one title frame first, unless a world is waiting to open.
     pub(super) fn ready_for_handoff(&self) -> bool {
         self.title_drawn
+            || (self.show_startup_console() && self.shown)
             || self.menu.pending.is_some()
             || self.ui_at.is_none_or(|at| at.elapsed() >= TITLE_FRAME_WAIT)
     }
@@ -346,7 +347,7 @@ impl Loading {
         if self.onboarding_input(&event) {
             return;
         }
-        if self.show_starting_status()
+        if self.show_startup_console()
             && matches!(
                 event,
                 WindowEvent::Touch(_)
@@ -531,9 +532,18 @@ impl Loading {
             return;
         }
         self.poll_menu_realms(event_loop);
-        if self.show_starting_status() && self.shown && (self.gui.is_none() || self.title_drawn) {
-            // The status is static. Keep polling for the handoff without acquiring more
-            // swapchain frames while the driver's worker compiles the game's pipelines.
+        if self.show_startup_console() && self.shown {
+            let console_due = self
+                .menu
+                .diagnostic_frame
+                .is_none_or(|last| last.elapsed() >= Duration::from_millis(200));
+            // Poll the loader without competing for the device while the game renderer builds.
+            if self.world_renderer.is_none()
+                && console_due
+                && let Some(w) = &self.window
+            {
+                w.request_redraw();
+            }
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(16),
             ));
@@ -553,6 +563,12 @@ impl Loading {
         event_loop.set_control_flow(ControlFlow::Poll);
     }
     pub(super) fn draw(&mut self) {
+        let console = self.show_startup_console();
+        let onboarding = self.setup.onboarding_visible();
+        // Android may still deliver a redraw queued just before the renderer started building.
+        if console && !onboarding && self.shown && self.world_renderer.is_some() {
+            return;
+        }
         let _frame = startup::step("loading.frame");
         let diagnostic_started = Instant::now();
         let diagnostic_elapsed = self
@@ -569,8 +585,6 @@ impl Loading {
             return;
         };
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
-        let starting = self.show_starting_status();
-        let onboarding = self.setup.onboarding_visible();
         if onboarding {
             self.draw_setup(&mut batch, "");
         } else if self.failure.is_some() && self.menu.options_open {
@@ -585,32 +599,10 @@ impl Loading {
         } else if self.setup.starting {
             // Prepared: the setup stays until the menu's own font has come.
             self.draw_setup(&mut batch, "");
-        } else if starting {
-            use horizon_client::ui_theme::{Face, Ui, color};
+        } else if console {
             let atlas = self.gui.as_ref().map_or(&self.boot, |gui| &gui.atlas);
-            let mut ui = Ui::new(atlas, &mut batch, (0.0, 0.0));
-            ui.fill(0.0, 0.0, ui.w, ui.h, color::bg());
-            ui.text_centered(
-                Face::Semibold,
-                26.0,
-                ui.w / 2.0,
-                ui.h / 2.0 - 32.0,
-                color::text(),
-                "Starling",
-            );
-            ui.text_centered(
-                Face::Regular,
-                15.0,
-                ui.w / 2.0,
-                ui.h / 2.0 + 6.0,
-                color::MUTED,
-                if self.gui.is_none() {
-                    "Loading resources…"
-                } else {
-                    "Preparing graphics…"
-                },
-            );
-            ui.finish();
+            let logs = horizon_client::logging::recent_lines();
+            horizon_client::ui_theme::draw_boot(atlas, &mut batch, &logs);
         } else {
             self.draw_menu(&mut batch);
         }
@@ -622,7 +614,7 @@ impl Loading {
         );
         let diagnostic_prepared = diagnostic_started.elapsed();
         let drawn = if let Some(boot) = &mut self.boot_renderer {
-            match boot.render(&batch, yaw, !starting && !onboarding) {
+            match boot.render(&batch, yaw, !console && !onboarding) {
                 Ok(drawn) => drawn,
                 Err(e) => {
                     log::warn!("Horizon: loading screen frame failed: {e}");
@@ -1156,6 +1148,11 @@ impl ApplicationHandler for App {
                 return;
             }
             App::Loading(loading) => {
+                #[cfg(target_os = "android")]
+                if crate::ha_launcher::launcher_next() {
+                    event_loop.exit();
+                    return;
+                }
                 loading.about_to_wait(event_loop);
                 if loading.error.is_some() {
                     event_loop.exit();

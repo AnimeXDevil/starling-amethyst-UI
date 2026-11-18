@@ -446,7 +446,7 @@ fn texts(step: &Step) -> (&'static str, String, Option<String>) {
         #[cfg(target_os = "android")]
         Step::StartupScreen { error, .. } => (
             "Starling is ready",
-            "What should open when you tap the Starling icon? You can change this later in Settings > Launcher."
+            "Open the launcher or go straight to the game. Starling remembers your choice. Change it anytime in Settings > Launcher."
                 .into(),
             error.clone(),
         ),

@@ -128,5 +128,9 @@ impl Loading {
             return;
         }
         self.setup.onboarding = None;
+        if !directly {
+            crate::ha_launcher::back_to_launcher();
+            horizon_client::preparer::drop_downloads(&self.vanilla_root);
+        }
     }
 }
