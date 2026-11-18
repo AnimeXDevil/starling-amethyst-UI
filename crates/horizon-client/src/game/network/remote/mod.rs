@@ -6264,12 +6264,7 @@ impl Game<'_> {
             .cloned()
             .unwrap_or_else(|| kind.model.clone());
         let image = self.skin_downloads.borrow().image(skin)?.to_vec();
-        let model = std::sync::Arc::new(skin_layers::extrude(
-            &base,
-            &image,
-            skin_layers::SIZE,
-            skin_layers::DEPTH,
-        )?);
+        let model = std::sync::Arc::new(skin_layers::extrude(&base, &image, skin_layers::SIZE)?);
         self.skin_3d.borrow_mut().insert(key, model.clone());
         Some(model)
     }
