@@ -291,7 +291,9 @@ pub fn start(private: &Path, home: &Path) -> Start {
     }
     let config = catalog::Config::load(home);
     display::migrate_preferences(&config, home);
-    if !open && (play || config.open_directly) {
+    if !open
+        && (play || config.open_directly || config.onboarding == catalog::OnboardingState::Chosen)
+    {
         let instance = config.profile_home(home);
         let _ = std::fs::create_dir_all(&instance);
         return Start::Game(instance);

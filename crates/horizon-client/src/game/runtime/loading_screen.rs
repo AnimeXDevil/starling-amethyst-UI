@@ -493,6 +493,10 @@ impl Loading {
             return;
         }
         if self.setup.onboarding_visible() {
+            #[cfg(target_os = "android")]
+            if self.finish_saved_onboarding() {
+                return;
+            }
             // Draw the first frame explicitly, then redraw only for input and window events.
             if !self.shown
                 && !self.suspended
@@ -576,6 +580,9 @@ impl Loading {
     pub(super) fn draw(&mut self) {
         let console = self.show_startup_console();
         let onboarding = self.setup.onboarding_visible();
+        if onboarding && self.setup.onboarding_already_chosen() {
+            return;
+        }
         // Android may still deliver a redraw queued just before the renderer started building.
         if console && !onboarding && self.shown && self.world_renderer.is_some() {
             return;

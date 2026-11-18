@@ -13,6 +13,7 @@ use winit::{
 
 pub(super) struct Onboarding {
     pub(super) visible: bool,
+    pub(super) chosen: bool,
     pub(super) directly: bool,
     pub(super) error: Option<String>,
     cursor: PhysicalPosition<f64>,
@@ -24,7 +25,7 @@ impl Setup {
         let mut config = Config::load(&home);
         let pending = match config.onboarding {
             OnboardingState::Complete => false,
-            OnboardingState::Pending => true,
+            OnboardingState::Pending | OnboardingState::Chosen => true,
             OnboardingState::Unseen if !resources.join("horizon-resources.json").is_file() => {
                 config.onboarding = OnboardingState::Pending;
                 if let Err(error) = config.save(&home) {
@@ -37,6 +38,7 @@ impl Setup {
         Self {
             onboarding: pending.then_some(Onboarding {
                 visible: resources.join("horizon-resources.json").is_file(),
+                chosen: config.onboarding == OnboardingState::Chosen,
                 directly: config.open_directly,
                 error: None,
                 cursor: PhysicalPosition::new(-1.0, -1.0),
@@ -107,6 +109,19 @@ impl Loading {
             | WindowEvent::MouseWheel { .. } => {}
             _ => return false,
         }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+        true
+    }
+
+    pub(in crate::game) fn finish_saved_onboarding(&mut self) -> bool {
+        let Some(onboarding) = self.setup.onboarding.as_mut().filter(|setup| setup.chosen) else {
+            return false;
+        };
+        onboarding.chosen = false;
+        let directly = onboarding.directly;
+        self.finish_onboarding(directly);
         if let Some(window) = &self.window {
             window.request_redraw();
         }

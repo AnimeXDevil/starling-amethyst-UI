@@ -407,6 +407,16 @@ impl Launcher {
         {
             return Ok(());
         }
+        if !crate::ha_launcher::client::official_install::ready(&self.home)
+            && matches!(
+                self.catalog.config.onboarding,
+                crate::ha_launcher::catalog::OnboardingState::Unseen
+                    | crate::ha_launcher::catalog::OnboardingState::Pending
+            )
+        {
+            self.open_chooser(super::chooser::Kind::SetupDestination);
+            return Ok(());
+        }
         crate::ha_launcher::diagnostics::heartbeat(
             "play_requested",
             || serde_json::json!({"renderer":self.catalog.config.renderer.label(),"resolution_percent":self.catalog.config.game_render_scale(&self.home).percent()}),

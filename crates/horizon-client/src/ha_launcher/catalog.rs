@@ -122,6 +122,7 @@ pub enum OnboardingState {
     #[default]
     Unseen,
     Pending,
+    Chosen,
     Complete,
 }
 impl OnboardingState {

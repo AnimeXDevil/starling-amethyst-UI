@@ -180,6 +180,13 @@ impl Setup {
         false
     }
 
+    pub(in crate::game) fn onboarding_already_chosen(&self) -> bool {
+        #[cfg(target_os = "android")]
+        return self.onboarding.as_ref().is_some_and(|setup| setup.chosen);
+        #[cfg(not(target_os = "android"))]
+        false
+    }
+
     /// How soon the screen draws again: often while the water or the settings show.
     pub(super) fn frame(&self, settings_open: bool) -> std::time::Duration {
         let lively = self.pond.get().is_some() || settings_open;

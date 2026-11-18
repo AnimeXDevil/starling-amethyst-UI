@@ -236,6 +236,7 @@ pub(super) enum Action {
     Page(Page),
     SettingsCat(SettingsCategory),
     Play,
+    ChooseSetupDestination(bool),
     PauseInstall,
     CancelInstall,
     PauseCatalogDownload,
@@ -6135,6 +6136,13 @@ impl Launcher {
                 self.catalog.browse(&self.home);
             }
             Some(Action::Play) => self.action(events)?,
+            Some(Action::ChooseSetupDestination(directly)) => {
+                self.chooser = None;
+                self.catalog.config.open_directly = directly;
+                self.catalog.config.onboarding =
+                    crate::ha_launcher::catalog::OnboardingState::Chosen;
+                self.action(events)?;
+            }
             Some(Action::WardrobeKind(cape)) => {
                 self.wardrobe.set_tab(cape);
                 self.catalog.scroll = 0.0;
