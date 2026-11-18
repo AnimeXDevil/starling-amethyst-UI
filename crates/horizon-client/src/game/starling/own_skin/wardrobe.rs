@@ -514,7 +514,7 @@ impl Game<'_> {
         self.again_skin(&location).then_some(location)
     }
 
-    fn wardrobe_root() -> PathBuf {
+    pub(in crate::game) fn wardrobe_root() -> PathBuf {
         Self::player_dir().join("game-wardrobe")
     }
 

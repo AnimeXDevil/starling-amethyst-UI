@@ -719,6 +719,10 @@ impl Game<'_> {
                     let _ = (cape, skin);
                 }
                 SkinAction::OpenFolder => self.open_game_folder(&Self::skins_dir()),
+                SkinAction::OpenWardrobeFolder => {
+                    #[cfg(target_os = "android")]
+                    self.open_game_folder(&Self::wardrobe_root().join("images"));
+                }
                 SkinAction::PickFile => self.pick_skin_file(),
                 SkinAction::ElyBy(on) => self.keep_elyby(on),
                 SkinAction::Upload(choice) => {

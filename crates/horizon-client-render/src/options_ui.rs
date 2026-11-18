@@ -2152,6 +2152,8 @@ pub(crate) enum Act {
     SkinModel,
     PickSkin,
     OpenSkinFolder,
+    OpenWardrobeFolder,
+    RetryWardrobeSync,
     ElyBySkins,
     /// The chosen skin to the Microsoft account's profile; an Ely.by account's skin page.
     UploadSkin,
@@ -2284,6 +2286,7 @@ pub enum SkinAction {
     },
     /// The skins folder (on a phone without the Starling folder, its offer).
     OpenFolder,
+    OpenWardrobeFolder,
     /// Ask the system for a skin file; it arrives through the import inbox.
     PickFile,
     /// Ely.by Skins turned on or off (`elyby`): keep it.
@@ -2587,6 +2590,7 @@ pub struct OptionsUi {
     pending_account_cape: Option<Option<String>>,
     pending_skin_upload: bool,
     wardrobe_sync_started: Option<Instant>,
+    wardrobe_sync_failed: bool,
     pub wardrobe_account_busy: bool,
     /// Whether the Mods, Resource Packs and Shader Packs pages have their Catalog button: the
     /// game's options on a phone (`offer_catalog`). The menus before the game can't show it.
@@ -2738,6 +2742,7 @@ impl Default for OptionsUi {
             pending_account_cape: None,
             pending_skin_upload: false,
             wardrobe_sync_started: None,
+            wardrobe_sync_failed: false,
             wardrobe_account_busy: false,
             profile_name: None,
             profile_key: None,
@@ -3524,6 +3529,7 @@ impl OptionsUi {
 
     pub fn discard_wardrobe_changes(&mut self) {
         self.wardrobe_sync_started = None;
+        self.wardrobe_sync_failed = false;
         self.pending_account_cape = None;
         self.pending_skin_upload = false;
     }
@@ -3574,20 +3580,32 @@ impl OptionsUi {
         }
     }
 
+    fn wardrobe_sync_pending(&self) -> bool {
+        self.pending_account_cape.is_some() || self.pending_skin_upload
+    }
+
+    fn start_wardrobe_sync(&mut self) {
+        if self.wardrobe_saving() || !self.wardrobe_sync_pending() {
+            return;
+        }
+        let cape = self.pending_account_cape.clone();
+        let skin = self.pending_skin_upload.then(|| self.skin.choice.clone());
+        self.wardrobe_sync_started = Some(Instant::now());
+        self.wardrobe_sync_failed = false;
+        self.skin.warning = None;
+        self.skin
+            .actions
+            .push(SkinAction::SaveWardrobe { cape, skin });
+        self.relayout();
+    }
+
     fn done(&mut self, s: &mut Settings) -> Vec<Event> {
         if self.page() == Page::Skin && self.wardrobe_enabled {
             if self.wardrobe_saving() {
                 return Vec::new();
             }
-            let cape = self.pending_account_cape.clone();
-            let skin = self.pending_skin_upload.then(|| self.skin.choice.clone());
-            if cape.is_some() || skin.is_some() {
-                self.wardrobe_sync_started = Some(Instant::now());
-                self.skin.warning = None;
-                self.skin
-                    .actions
-                    .push(SkinAction::SaveWardrobe { cape, skin });
-                self.relayout();
+            if self.wardrobe_sync_pending() && !self.wardrobe_sync_failed {
+                self.start_wardrobe_sync();
                 return Vec::new();
             }
         }
@@ -3609,6 +3627,7 @@ impl OptionsUi {
         match result {
             Ok(()) => self.back(settings),
             Err(error) => {
+                self.wardrobe_sync_failed = true;
                 self.scroll = 0.0;
                 self.skin_warning(lang::get_or(&error, &error));
                 Vec::new()
@@ -5590,6 +5609,10 @@ impl OptionsUi {
                             self.push(*p)
                         }
                         Act::Done => events.extend(self.done(s)),
+                        Act::RetryWardrobeSync => self.start_wardrobe_sync(),
+                        Act::OpenWardrobeFolder => {
+                            self.skin.actions.push(SkinAction::OpenWardrobeFolder)
+                        }
                         Act::Cycle(opt) => {
                             events.extend(self.cycle_option(s, *opt, self.shift, framebuffer));
                         }
@@ -6981,6 +7004,10 @@ impl OptionsUi {
                             self.focus_from_keyboard = false;
                             self.can_change_value = false;
                             events.extend(self.done(s));
+                        }
+                        Act::RetryWardrobeSync => self.start_wardrobe_sync(),
+                        Act::OpenWardrobeFolder => {
+                            self.skin.actions.push(SkinAction::OpenWardrobeFolder)
                         }
                         Act::Cycle(opt) => {
                             events.extend(self.cycle_option(s, opt, shift, self.framebuffer));
@@ -10786,6 +10813,16 @@ mod tests {
             ..Default::default()
         };
         ui.skin.choice.file = Some("skin.png".into());
+        ui.select_wardrobe_tab(true);
+        let (widgets, ..) = ui.layout(&s, 490.0, 260.0);
+        assert!(widgets.iter().any(|widget| matches!(
+            &widget.kind,
+            WKind::Button {
+                act: Act::OpenWardrobeFolder,
+                active: true,
+                ..
+            }
+        )));
         ui.stage_account_cape(Some("new".into()));
         assert_eq!(ui.pending_account_cape().flatten().unwrap().id, "new");
         ui.stage_account_cape(Some("old".into()));
@@ -10828,11 +10865,18 @@ mod tests {
         ui.finish_wardrobe_save(&mut s, Err("Network error".into()));
         assert_eq!(ui.page(), Page::Skin);
         assert_eq!(ui.skin.warning.as_deref(), Some("Network error"));
-        ui.done(&mut s);
+        let (widgets, ..) = ui.layout(&s, 490.0, 260.0);
+        for action in [Act::RetryWardrobeSync, Act::Done] {
+            assert!(widgets.iter().any(|widget| matches!(
+                &widget.kind,
+                WKind::Button { act, active: true, .. } if act == &action
+            )));
+        }
+        ui.start_wardrobe_sync();
         assert_eq!(ui.take_skin_actions(), vec![request]);
         ui.wardrobe_cape_saved();
         ui.finish_wardrobe_save(&mut s, Err("Upload failed".into()));
-        ui.done(&mut s);
+        ui.start_wardrobe_sync();
         assert_eq!(
             ui.take_skin_actions(),
             vec![SkinAction::SaveWardrobe {
@@ -10846,7 +10890,11 @@ mod tests {
         ui.stack.push(Page::Skin);
         ui.stage_account_cape(Some("new".into()));
         ui.queue_skin_upload();
-        ui.back(&mut s);
+        ui.done(&mut s);
+        assert_eq!(ui.take_skin_actions().len(), 1);
+        ui.finish_wardrobe_save(&mut s, Err("Network error".into()));
+        ui.done(&mut s);
+        assert_ne!(ui.page(), Page::Skin);
         assert!(ui.take_skin_actions().is_empty());
         assert!(ui.pending_account_cape().is_none() && !ui.pending_skin_upload);
     }

@@ -938,13 +938,29 @@ impl OptionsUi {
                     }
                     // Starling's Mods page.
                     Page::NativeGame => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
-                    Page::Skin if self.skin_page && !self.viewing_wardrobe_capes() => {
-                        Some(("Open Skin Folder", Act::OpenSkinFolder))
+                    Page::Skin if self.viewing_wardrobe_capes() => {
+                        Some(("starling.wardrobe.open_folder", Act::OpenWardrobeFolder))
                     }
+                    Page::Skin if self.skin_page => Some(("Open Skin Folder", Act::OpenSkinFolder)),
                     _ => None,
+                };
+                let wardrobe_pending = wardrobe.is_some() && self.wardrobe_sync_pending();
+                let done_label = if wardrobe_pending && !self.wardrobe_sync_failed {
+                    "starling.wardrobe.sync_and_done"
+                } else {
+                    "gui.done"
                 };
                 if page == Page::Skin && self.wardrobe_saving() {
                     out.push(inactive(done(h - 27.0)));
+                } else if wardrobe_pending && self.wardrobe_sync_failed {
+                    out.push(button(
+                        cx - 154.0,
+                        h - 27.0,
+                        150.0,
+                        tr("starling.wardrobe.retry_sync"),
+                        Act::RetryWardrobeSync,
+                    ));
+                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
                 } else if let Some((label, act)) = folder {
                     // Android's way to find mods, resource packs and shader packs.
                     let shelf = catalog_shelf(page).filter(|_| self.catalog_buttons);
@@ -965,7 +981,7 @@ impl OptionsUi {
                         label
                     };
                     out.push(button(cx - 154.0, h - 27.0, open_w, tr(label), act));
-                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
+                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr(done_label), Act::Done));
                 } else {
                     out.push(done(h - 27.0));
                 }
