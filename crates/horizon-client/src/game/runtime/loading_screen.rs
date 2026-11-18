@@ -342,6 +342,10 @@ impl Loading {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
             return;
         }
+        #[cfg(target_os = "android")]
+        if self.onboarding_input(&event) {
+            return;
+        }
         if self.show_starting_status()
             && matches!(
                 event,
@@ -566,7 +570,10 @@ impl Loading {
         };
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let starting = self.show_starting_status();
-        if self.failure.is_some() && self.menu.options_open {
+        let onboarding = self.setup.onboarding_visible();
+        if onboarding {
+            self.draw_setup(&mut batch, "");
+        } else if self.failure.is_some() && self.menu.options_open {
             // The setup's settings: the menu's own screens, in the skin it put on.
             self.draw_menu(&mut batch);
         } else if let Some(failure) = &self.failure {
@@ -615,7 +622,7 @@ impl Loading {
         );
         let diagnostic_prepared = diagnostic_started.elapsed();
         let drawn = if let Some(boot) = &mut self.boot_renderer {
-            match boot.render(&batch, yaw, !starting) {
+            match boot.render(&batch, yaw, !starting && !onboarding) {
                 Ok(drawn) => drawn,
                 Err(e) => {
                     log::warn!("Horizon: loading screen frame failed: {e}");
@@ -933,6 +940,15 @@ impl Loading {
         // A window in the background has no surface for the game's renderer: the loaded
         // resources wait for it to come back.
         if self.menu.reload_packs || self.suspended || !self.ready_for_handoff() {
+            return None;
+        }
+        #[cfg(target_os = "android")]
+        if self.failure.is_none()
+            && self.gui.is_some()
+            && matches!(self.loaded, Some(Ok(_)))
+            && (!threaded || matches!(self.world_renderer, Some(WorldRenderer::Built(_))))
+            && self.show_onboarding()
+        {
             return None;
         }
         let renderer = match self.world_renderer.take() {

@@ -271,6 +271,14 @@ pub(super) fn run_loading(
             )
         })
     });
+    #[cfg(target_os = "android")]
+    let setup = if options.offscreen || options.world.is_some() {
+        setup::Setup::default()
+    } else {
+        setup::Setup::for_launch(&vanilla_root)
+    };
+    #[cfg(not(target_os = "android"))]
+    let setup = setup::Setup::default();
     let loading = Loading {
         window: None,
         renderer: None,
@@ -297,7 +305,7 @@ pub(super) fn run_loading(
         menu,
         error: None,
         failure: None,
-        setup: Default::default(),
+        setup,
         touch_pointer: Default::default(),
         imports: Default::default(),
         audio: None,

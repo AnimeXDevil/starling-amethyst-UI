@@ -6,6 +6,8 @@
 //! game's settings, drawn in the low-budget skin the app carries (packaging/lowbudget).
 mod account_form;
 pub(super) mod fishing;
+#[cfg(target_os = "android")]
+mod onboarding;
 use account_form::{Form, Kind};
 
 use super::{Audio, Loading, UiResources};
@@ -51,6 +53,12 @@ enum Step {
     Unpacking,
     /// horizon-prepare's last line.
     Preparing(String),
+    /// First setup completed: choose what the app opens on subsequent starts.
+    #[cfg(target_os = "android")]
+    StartupScreen {
+        directly: bool,
+        error: Option<String>,
+    },
     /// Prepared: the game loads.
     Done,
     /// The last attempt failed, and why.
@@ -98,6 +106,8 @@ enum Action {
     Back,
     Settings,
     Diagnostics,
+    #[cfg(target_os = "android")]
+    FinishOnboarding(bool),
 }
 
 #[derive(Default)]
@@ -130,6 +140,8 @@ pub(super) struct Setup {
     /// Prepared and loading: the setup stays up until the menu's font is there (the loading
     /// screen without it draws every letter as an empty box).
     pub(super) starting: bool,
+    #[cfg(target_os = "android")]
+    onboarding: Option<onboarding::Onboarding>,
     /// The buttons as last drawn (dp): rectangle and what it does.
     buttons: Cell<[Option<([f32; 4], Action)>; 5]>,
     fishing: fishing::Fishing,
@@ -147,7 +159,20 @@ pub(super) struct Setup {
 /// The unpacked skin's folder and its menus, or why they did not load.
 type SkinLoad = (std::path::PathBuf, Result<UiResources, String>);
 
+fn setup_density(width: u32, height: u32) -> f32 {
+    (width as f32 / 1040.0)
+        .min(height as f32 / 700.0)
+        .clamp(1.0, 4.0)
+}
+
 impl Setup {
+    pub(in crate::game) fn onboarding_visible(&self) -> bool {
+        #[cfg(target_os = "android")]
+        return self.onboarding.as_ref().is_some_and(|setup| setup.visible);
+        #[cfg(not(target_os = "android"))]
+        false
+    }
+
     /// How soon the screen draws again: often while the water or the settings show.
     pub(super) fn frame(&self, settings_open: bool) -> std::time::Duration {
         let lively = self.pond.get().is_some() || settings_open;
@@ -168,6 +193,13 @@ fn waiting(step: &Step) -> bool {
 }
 
 fn step(setup: &Setup, failure: &str) -> Step {
+    #[cfg(target_os = "android")]
+    if let Some(onboarding) = setup.onboarding.as_ref().filter(|setup| setup.visible) {
+        return Step::StartupScreen {
+            directly: onboarding.directly,
+            error: onboarding.error.clone(),
+        };
+    }
     if setup.starting {
         return Step::Done;
     }
@@ -411,6 +443,13 @@ fn texts(step: &Step) -> (&'static str, String, Option<String>) {
             "This takes a few minutes. Keep Starling open.".into(),
             Some(line.clone()),
         ),
+        #[cfg(target_os = "android")]
+        Step::StartupScreen { error, .. } => (
+            "Starling is ready",
+            "What should open when you tap the Starling icon? You can change this later in Settings > Launcher."
+                .into(),
+            error.clone(),
+        ),
         Step::Done => (
             "Starting Starling",
             "The game files are ready.".into(),
@@ -452,6 +491,11 @@ fn buttons(step: &Step) -> Vec<(String, Action)> {
         Step::Horizon(true) => vec![
             literal("Next", Action::HorizonDone),
             literal("Pick the folder again", Action::Horizon),
+        ],
+        #[cfg(target_os = "android")]
+        Step::StartupScreen { .. } => vec![
+            literal("Game", Action::FinishOnboarding(true)),
+            literal("Launcher", Action::FinishOnboarding(false)),
         ],
         Step::Start => vec![
             (tr("setup.microsoft"), Action::SignIn),
@@ -756,7 +800,14 @@ impl Loading {
                     bw,
                     button_h,
                 ];
-                let (fill, ink) = if i == 0 {
+                let primary = match (&step, action) {
+                    #[cfg(target_os = "android")]
+                    (Step::StartupScreen { directly, .. }, Action::FinishOnboarding(choice)) => {
+                        directly == choice
+                    }
+                    _ => i == 0,
+                };
+                let (fill, ink) = if primary {
                     (color::ACCENT, color::ON_ACCENT)
                 } else {
                     (color::raised(), color::text())
@@ -877,8 +928,7 @@ impl Loading {
     pub(super) fn setup_touch(&mut self, touch: &Touch) {
         let Some(window) = &self.window else { return };
         let size = window.inner_size();
-        let (pw, ph) = (size.width as f32, size.height as f32);
-        let density = (pw / 1040.0).min(ph / 700.0).clamp(1.0, 4.0);
+        let density = setup_density(size.width, size.height);
         let p = [
             touch.location.x as f32 / density,
             touch.location.y as f32 / density,
@@ -921,6 +971,10 @@ impl Loading {
             }
             return;
         }
+        self.setup_action_at(&inside);
+    }
+
+    fn setup_action_at(&mut self, inside: &impl Fn([f32; 4]) -> bool) {
         let hit = self
             .setup
             .buttons
@@ -933,6 +987,8 @@ impl Loading {
     }
     fn setup_action(&mut self, action: Action) {
         match action {
+            #[cfg(target_os = "android")]
+            Action::FinishOnboarding(directly) => self.finish_onboarding(directly),
             Action::Ely => {
                 self.setup.provider = Some(Kind::Ely);
                 self.setup.dismiss_signin_error = true;
