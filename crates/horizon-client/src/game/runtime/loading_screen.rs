@@ -151,6 +151,17 @@ pub(super) enum WorldRenderer {
 /// world renderer anyway (a hidden window may never be asked to redraw).
 pub(super) const TITLE_FRAME_WAIT: Duration = Duration::from_secs(1);
 impl Loading {
+    fn show_starting_status(&self) -> bool {
+        cfg!(target_os = "android")
+            && self.failure.is_none()
+            && !self.setup.starting
+            && self.menu.pending.is_none()
+            && self
+                .options
+                .as_ref()
+                .is_some_and(|options| !options.offscreen)
+    }
+
     /// The handoff and, offscreen, the world renderer's build run on the main
     /// thread, so either before the title is on the screen holds the title back.
     /// Wait for one title frame first, unless a world is waiting to open.
@@ -329,6 +340,16 @@ impl Loading {
         mut event: WindowEvent,
     ) {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
+            return;
+        }
+        if self.show_starting_status()
+            && matches!(
+                event,
+                WindowEvent::Touch(_)
+                    | WindowEvent::MouseInput { .. }
+                    | WindowEvent::KeyboardInput { .. }
+            )
+        {
             return;
         }
         if self.failure.is_some()
@@ -520,6 +541,7 @@ impl Loading {
         event_loop.set_control_flow(ControlFlow::Poll);
     }
     pub(super) fn draw(&mut self) {
+        let _frame = startup::step("loading.frame");
         let diagnostic_started = Instant::now();
         let diagnostic_elapsed = self
             .menu
@@ -535,6 +557,7 @@ impl Loading {
             return;
         };
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
+        let starting = self.show_starting_status();
         if self.failure.is_some() && self.menu.options_open {
             // The setup's settings: the menu's own screens, in the skin it put on.
             self.draw_menu(&mut batch);
@@ -547,6 +570,28 @@ impl Loading {
         } else if self.setup.starting {
             // Prepared: the setup stays until the menu's own font has come.
             self.draw_setup(&mut batch, "");
+        } else if starting {
+            use horizon_client::ui_theme::{Face, Ui, color};
+            let atlas = self.gui.as_ref().map_or(&self.boot, |gui| &gui.atlas);
+            let mut ui = Ui::new(atlas, &mut batch, (0.0, 0.0));
+            ui.fill(0.0, 0.0, ui.w, ui.h, color::bg());
+            ui.text_centered(
+                Face::Semibold,
+                26.0,
+                ui.w / 2.0,
+                ui.h / 2.0 - 32.0,
+                color::text(),
+                "Starling",
+            );
+            ui.text_centered(
+                Face::Regular,
+                15.0,
+                ui.w / 2.0,
+                ui.h / 2.0 + 6.0,
+                color::MUTED,
+                "Starting the game…",
+            );
+            ui.finish();
         } else {
             self.draw_menu(&mut batch);
         }
@@ -559,7 +604,7 @@ impl Loading {
         let diagnostic_prepared = diagnostic_started.elapsed();
         let drawn = if let Some(boot) = &mut self.boot_renderer {
             match boot.render(&batch, yaw) {
-                Ok(()) => true,
+                Ok(drawn) => drawn,
                 Err(e) => {
                     log::warn!("Horizon: loading screen frame failed: {e}");
                     false
@@ -635,7 +680,7 @@ impl Loading {
                 renderer.gpu_times.clear();
             }
         }
-        if !self.shown {
+        if drawn && !self.shown {
             self.shown = true;
             startup::mark("loading_screen.shown");
             log::info!(
@@ -913,6 +958,7 @@ impl Loading {
             self.settings.file.int("maxAnisotropyBit"),
         );
         let renderer_at = Instant::now();
+        let renderer_step = startup::step("handoff.renderer");
         let renderer = match built {
             Some(mut renderer) => {
                 // The window keeps the one surface it has: the boot renderer's, its last frame
@@ -962,6 +1008,7 @@ impl Loading {
                 })?
             }
         };
+        drop(renderer_step);
         log::info!(
             "Horizon: world renderer ready after {} ms",
             self.started.elapsed().as_millis()
@@ -969,6 +1016,7 @@ impl Loading {
         let renderer_ms = renderer_at.elapsed().as_millis();
         // Audio is made on the main thread: the menu's since its first frame, read again from the
         // resource packs' root where they change it, else made now.
+        let audio_step = startup::step("handoff.audio");
         let audio = if !options.execution_role.is_client() {
             Audio::silent(&loaded.pack.source)
         } else {
@@ -982,13 +1030,16 @@ impl Loading {
                 None => Audio::with_device(&loaded.pack.source, &self.settings.sound_device),
             }
         };
+        drop(audio_step);
         // The menu read its language from the prepared root alone (`set_root`) and
         // `load_resources` skips it on this path: read it again with the mods' layers, in the
         // language picked in the menu.
-        horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&loaded.pack.source],
-            &horizon_client::lang::code(),
-        ));
+        startup::time("handoff.language", || {
+            horizon_client::lang::set(horizon_client::lang::Language::load(
+                &[&loaded.pack.source],
+                &horizon_client::lang::code(),
+            ));
+        });
         let pack_error = loaded.pack_error.or_else(|| self.pack_error.take());
         // The game borrows its shared resources for the process's lifetime,
         // like the single copy an integrated server would share.

@@ -243,7 +243,7 @@ impl BootRenderer {
     }
 
     /// One frame of the loading screen: the panorama behind, the batch over it.
-    pub fn render(&mut self, batch: &HudBatch, yaw: f32) -> Result<()> {
+    pub fn render(&mut self, batch: &HudBatch, yaw: f32) -> Result<bool> {
         // The borrow of the surface ends with the acquisition, so the arm below may resize.
         let frame = match self
             .surface
@@ -251,7 +251,7 @@ impl BootRenderer {
             .map(wgpu::Surface::get_current_texture)
         {
             // Suspended: there is no window to draw on until `resume`.
-            None => return Ok(()),
+            None => return Ok(false),
             Some(
                 wgpu::CurrentSurfaceTexture::Success(frame)
                 | wgpu::CurrentSurfaceTexture::Suboptimal(frame),
@@ -267,7 +267,7 @@ impl BootRenderer {
                 if let Some(surface) = &self.surface {
                     surface.configure(&self.device, &self.config);
                 }
-                return Ok(());
+                return Ok(false);
             }
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -338,7 +338,7 @@ impl BootRenderer {
         if let Some(marker) = self.start_marker.take() {
             let _ = std::fs::remove_file(marker);
         }
-        Ok(())
+        Ok(true)
     }
 
     /// The device and the window's format, for the world's renderer to be made on while this one

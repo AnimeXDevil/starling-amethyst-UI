@@ -337,6 +337,7 @@ pub(super) enum Action {
     // Animation & Diagnostics Modal actions
     ToggleLauncherAnimations,
     ToggleOpenDirectly,
+    ChooseStartupScreen(bool),
     ToggleGameAnimations,
     CloseDiagnosticsSummary,
     OpenReportsFolder,
@@ -1462,6 +1463,43 @@ impl Launcher {
                         self.catalog.config.renderer.label()
                     ),
                 );
+
+                if !installed && !self.launching {
+                    let x = content_x + 22.0;
+                    let y = card_y + 92.0;
+                    let width = ((content_w - 56.0) / 2.0).min(160.0);
+                    ui.text(
+                        Face::SemiBold,
+                        16.0,
+                        x,
+                        y,
+                        my3_text(),
+                        "When you open Starling",
+                    );
+                    button(
+                        &mut ui,
+                        &mut self.targets,
+                        [x, y + 28.0, width, 42.0],
+                        "Launcher",
+                        Action::ChooseStartupScreen(false),
+                        !self.catalog.config.open_directly,
+                    );
+                    button(
+                        &mut ui,
+                        &mut self.targets,
+                        [x + width + 12.0, y + 28.0, width, 42.0],
+                        "Game",
+                        Action::ChooseStartupScreen(true),
+                        self.catalog.config.open_directly,
+                    );
+                    let hint = ui.fit_text(
+                        Face::Regular,
+                        12.0,
+                        "Change this later in Settings > Launcher.",
+                        content_w - 44.0,
+                    );
+                    ui.text(Face::Regular, 12.0, x, y + 82.0, my3_muted(), &hint);
+                }
 
                 let btn_y = (h - 92.0).max(card_y + card_h + 12.0);
                 let play_w = content_w.min(256.0);
@@ -4134,8 +4172,8 @@ impl Launcher {
                         SettingControl::Button(&profile_str, Action::Profile, false),
                     ),
                     (
-                        "Open directly in this instance",
-                        "Skip the launcher on start; its button on the title screen and pause menu comes back",
+                        "Open directly in the game",
+                        "Start in the selected instance. H > Launcher and the pause menu can still open the launcher",
                         SettingControl::Toggle(c.open_directly, Action::ToggleOpenDirectly),
                     ),
                     (
@@ -6324,6 +6362,10 @@ impl Launcher {
                 } else {
                     "Starling opens in the launcher.".into()
                 };
+            }
+            Some(Action::ChooseStartupScreen(direct)) => {
+                self.catalog.config.open_directly = direct;
+                self.catalog.config.save(&self.home)?;
             }
             Some(Action::ToggleLauncherAnimations) => {
                 self.catalog.config.disable_launcher_animations =

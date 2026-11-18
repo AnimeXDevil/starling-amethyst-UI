@@ -37,6 +37,7 @@ pub(super) struct Launcher {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     gui: Option<game::UiResources>,
+    gui_loader: Option<std::thread::JoinHandle<std::result::Result<game::UiResources, String>>>,
     pub(super) audio: Option<crate::ha_launcher::client::audio::Audio>,
     cursor: (f64, f64),
     mouse_down: bool,
@@ -185,6 +186,7 @@ impl Launcher {
             window: None,
             renderer: None,
             gui: None,
+            gui_loader: None,
             audio: None,
             cursor: (0.0, 0.0),
             mouse_down: false,
@@ -272,30 +274,66 @@ impl Launcher {
                 crate::ha_launcher::client::graphics::GraphicsApi::Auto
             },
         )?;
-        let atlas = source
-            .as_ref()
-            .and_then(|source| match HudAtlas::build(source) {
-                Ok(atlas) => Some(atlas),
-                Err(error) => {
-                    log::warn!("Launcher: the resources' GUI atlas: {error}");
-                    None
-                }
-            })
-            .unwrap_or_else(HudAtlas::boot);
+        let panorama = Arc::new(crate::ha_launcher::client::gfx::panorama::Faces::colour([
+            0, 0, 0, 255,
+        ]));
         let gui = game::UiResources {
-            atlas,
-            panorama: Arc::new(crate::ha_launcher::client::gfx::panorama::Faces::colour([
-                0, 0, 0, 255,
-            ])),
-            sounds: source
-                .as_ref()
-                .map(crate::ha_launcher::client::sound_events::SoundRegistry::load),
+            atlas: HudAtlas::boot(),
+            panorama: panorama.clone(),
+            sounds: None,
         };
+        self.gui_loader = source.and_then(|source| {
+            std::thread::Builder::new()
+                .name("launcher-assets".into())
+                .spawn(move || {
+                    Ok(game::UiResources {
+                        atlas: HudAtlas::build(&source).map_err(|error| error.to_string())?,
+                        panorama,
+                        sounds: Some(
+                            crate::ha_launcher::client::sound_events::SoundRegistry::load(&source),
+                        ),
+                    })
+                })
+                .inspect_err(|error| {
+                    log::warn!("Launcher: could not start UI asset loading: {error}")
+                })
+                .ok()
+        });
         renderer.set_loading_ui(&gui.atlas, gui.panorama.as_ref())?;
         self.renderer = Some(renderer);
         self.window = Some(window);
         self.gui = Some(gui);
         Ok(())
+    }
+
+    fn poll_gui_assets(&mut self) {
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
+        if !renderer.has_presented()
+            || self
+                .gui_loader
+                .as_ref()
+                .is_none_or(|worker| !worker.is_finished())
+        {
+            return;
+        }
+        let Some(worker) = self.gui_loader.take() else {
+            return;
+        };
+        match worker.join() {
+            Ok(Ok(gui)) => match renderer.set_loading_ui(&gui.atlas, gui.panorama.as_ref()) {
+                Ok(()) => {
+                    crate::ha_launcher::client::ui_theme::reset_atlas();
+                    self.gui = Some(gui);
+                }
+                Err(error) => log::warn!("Launcher: could not use the prepared GUI atlas: {error}"),
+            },
+            Ok(Err(error)) => {
+                log::warn!("Launcher: could not load the prepared GUI atlas: {error}")
+            }
+            Err(_) => log::warn!("Launcher: GUI asset loading stopped unexpectedly"),
+        }
     }
 
     fn request_back(&mut self) {
@@ -550,6 +588,7 @@ impl ApplicationHandler for Launcher {
     }
     fn about_to_wait(&mut self, events: &ActiveEventLoop) {
         crate::ha_launcher::diagnostics::heartbeat("launcher", || serde_json::json!({}));
+        self.poll_gui_assets();
         if let Some(result) = self
             .diagnostic_export
             .as_ref()

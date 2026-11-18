@@ -33,6 +33,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    pub fn has_presented(&self) -> bool {
+        self.shown && !self.suspended && !self.boot.detached
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.boot.resize(width, height);
         let [width, height] = self.boot.size();
@@ -65,7 +69,9 @@ impl Renderer {
         if self.suspended || self.boot.detached {
             return Ok(false);
         }
-        self.boot.render(batch, 0.0)?;
+        if !self.boot.render(batch, 0.0)? {
+            return Ok(false);
+        }
         if !self.shown {
             self.shown = true;
             crate::android::first_frame_shown();
