@@ -299,7 +299,7 @@ pub(crate) fn export_from(home: &Path, player: &Path) -> Result<PathBuf, String>
                                     | "previous-error.txt"
                             ))
                     {
-                        files.push((entry.path(), name.into_owned()));
+                        files.push((entry.path(), name));
                     }
                 }
             }

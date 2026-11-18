@@ -433,14 +433,14 @@ impl ApplicationHandler for Launcher {
             events.exit();
         }
     }
-    fn suspended(&mut self, events: &ActiveEventLoop) {
+    fn suspended(&mut self, _events: &ActiveEventLoop) {
         crate::ha_launcher::diagnostics::heartbeat("suspended", || serde_json::json!({}));
         self.drag = None;
         if let Some(renderer) = &mut self.renderer {
             renderer.suspend_surface();
         }
     }
-    fn window_event(&mut self, events: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, events: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         if crate::ha_launcher::documents::handle_event(&event) {
             return;
         }
