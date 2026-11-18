@@ -69,7 +69,7 @@ impl Renderer {
         if self.suspended || self.boot.detached {
             return Ok(false);
         }
-        if !self.boot.render(batch, 0.0)? {
+        if !self.boot.render(batch, 0.0, false)? {
             return Ok(false);
         }
         if !self.shown {

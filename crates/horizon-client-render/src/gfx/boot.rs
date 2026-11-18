@@ -243,13 +243,14 @@ impl BootRenderer {
     }
 
     /// One frame of the loading screen: the panorama behind, the batch over it.
-    pub fn render(&mut self, batch: &HudBatch, yaw: f32) -> Result<bool> {
+    pub fn render(&mut self, batch: &HudBatch, yaw: f32, show_panorama: bool) -> Result<bool> {
         // The borrow of the surface ends with the acquisition, so the arm below may resize.
-        let frame = match self
-            .surface
-            .as_ref()
-            .map(wgpu::Surface::get_current_texture)
-        {
+        let acquired = crate::spans::startup::time("boot.acquire", || {
+            self.surface
+                .as_ref()
+                .map(wgpu::Surface::get_current_texture)
+        });
+        let frame = match acquired {
             // Suspended: there is no window to draw on until `resume`.
             None => return Ok(false),
             Some(
@@ -274,14 +275,16 @@ impl BootRenderer {
             format: Some(self.config.format),
             ..Default::default()
         });
-        self.panorama.prepare(
-            &self.device,
-            &self.queue,
-            self.config.width,
-            self.config.height,
-            yaw,
-            10.0,
-        );
+        if show_panorama {
+            self.panorama.prepare(
+                &self.device,
+                &self.queue,
+                self.config.width,
+                self.config.height,
+                yaw,
+                10.0,
+            );
+        }
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -320,7 +323,9 @@ impl BootRenderer {
                 }),
                 ..Default::default()
             });
-            self.panorama.draw(&mut pass);
+            if show_panorama {
+                self.panorama.draw(&mut pass);
+            }
         }
         self.hud.draw_range(
             &mut encoder,
@@ -333,8 +338,8 @@ impl BootRenderer {
             None,
         );
         self.uploads.finish(&encoder);
-        self.queue.submit([encoder.finish()]);
-        self.queue.present(frame);
+        crate::spans::startup::time("boot.submit", || self.queue.submit([encoder.finish()]));
+        crate::spans::startup::time("boot.present", || self.queue.present(frame));
         if let Some(marker) = self.start_marker.take() {
             let _ = std::fs::remove_file(marker);
         }

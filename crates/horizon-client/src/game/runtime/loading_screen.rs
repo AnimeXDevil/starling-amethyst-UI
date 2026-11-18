@@ -527,6 +527,14 @@ impl Loading {
             return;
         }
         self.poll_menu_realms(event_loop);
+        if self.show_starting_status() && self.shown && (self.gui.is_none() || self.title_drawn) {
+            // The status is static. Keep polling for the handoff without acquiring more
+            // swapchain frames while the driver's worker compiles the game's pipelines.
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
+        }
         if let Some(next) = loading_frame_due(self.menu.diagnostic_frame) {
             event_loop.set_control_flow(ControlFlow::WaitUntil(next));
             return;
@@ -589,7 +597,11 @@ impl Loading {
                 ui.w / 2.0,
                 ui.h / 2.0 + 6.0,
                 color::MUTED,
-                "Starting the game…",
+                if self.gui.is_none() {
+                    "Loading resources…"
+                } else {
+                    "Preparing graphics…"
+                },
             );
             ui.finish();
         } else {
@@ -603,7 +615,7 @@ impl Loading {
         );
         let diagnostic_prepared = diagnostic_started.elapsed();
         let drawn = if let Some(boot) = &mut self.boot_renderer {
-            match boot.render(&batch, yaw) {
+            match boot.render(&batch, yaw, !starting) {
                 Ok(drawn) => drawn,
                 Err(e) => {
                     log::warn!("Horizon: loading screen frame failed: {e}");
