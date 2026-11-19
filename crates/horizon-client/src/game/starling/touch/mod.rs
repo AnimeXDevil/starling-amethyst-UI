@@ -692,8 +692,13 @@ impl Game<'_> {
     }
 
     /// A short buzz of the phone (Bedrock's "Vibrate when breaking blocks" and "when splitting
-    /// items"): while the touch screen plays and the layout leaves vibration on.
+    /// items"): while the touch screen plays and the layout leaves vibration on. Only the client's
+    /// game buzzes: the integrated server's breaks the same block (`player_break_block`) with
+    /// controls it never loaded, so their default left the phone buzzing with vibration off.
     pub(super) fn touch_vibrate(&self, millis: u32) {
+        if !self.options.execution_role.is_client() {
+            return;
+        }
         #[cfg(target_os = "android")]
         let on = self.mobile.controls.settings.vibrate;
         #[cfg(not(target_os = "android"))]
