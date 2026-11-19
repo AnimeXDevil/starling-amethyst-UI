@@ -21,6 +21,22 @@ impl OptionsLayout {
     }
 }
 impl OptionsUi {
+    /// The preview and the options list share the available width.
+    pub(super) fn wardrobe_columns(&self, width: f32) -> Option<(f32, f32, f32)> {
+        if self.page() != Page::Skin || !self.wardrobe_enabled {
+            return None;
+        }
+        let total = (width - 26.0).min(480.0);
+        let preview = (total * 0.33).floor();
+        Some(((width - total) / 2.0, preview, total - preview - 12.0))
+    }
+
+    pub fn wardrobe_preview_rect(&self, width: f32, height: f32) -> Option<[f32; 4]> {
+        let (left, preview, _) = self.wardrobe_columns(width)?;
+        let bottom = height - 59.0;
+        (bottom > 33.0).then_some([left, 33.0, left + preview, bottom])
+    }
+
     /// Something the page layout reads changed: make it again at the next
     /// read, once.
     pub(super) fn relayout(&mut self) {
@@ -657,6 +673,12 @@ impl OptionsUi {
             // Drawn by `pack_screen` and `mods_screen`.
             Page::Packs | Page::Mods => {}
             _ => {
+                let wardrobe = self.wardrobe_columns(w);
+                let (list_left, list_w) = wardrobe
+                    .map_or((cx - 155.0, 310.0), |(x, preview, list)| {
+                        (x + preview + 12.0, list)
+                    });
+                let pair_w = (list_w - 10.0) / 2.0;
                 if matches!(page, Page::Video | Page::Controls | Page::ModBrowser) {
                     top = 38.0;
                 }
@@ -677,6 +699,63 @@ impl OptionsUi {
                     list: false,
                     row: 0,
                 });
+                if wardrobe.is_some() && self.wardrobe_saving() {
+                    top = 33.0;
+                    let center = (top + bottom) * 0.5;
+                    for (key, y) in [
+                        ("starling.wardrobe.syncing", center - 23.0),
+                        (self.wardrobe_sync_stage(), center - 8.0),
+                    ] {
+                        out.push(Widget {
+                            x: list_left,
+                            y,
+                            w: list_w,
+                            h: 9.0,
+                            kind: WKind::Text {
+                                text: tr(key),
+                                color: u32::MAX,
+                                centered: true,
+                            },
+                            list: false,
+                            row: 0,
+                        });
+                    }
+                } else if let Some((left, preview, _)) = wardrobe {
+                    top = 58.0;
+                    for (i, key) in ["starling.wardrobe.skins_tab", "starling.wardrobe.capes_tab"]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let capes = i == 1;
+                        let label = if self.skin.capes == capes {
+                            tr(key).with_color(0x55_FF_55)
+                        } else {
+                            tr(key)
+                        };
+                        out.push(button(
+                            list_left + i as f32 * (pair_w + 10.0),
+                            33.0,
+                            pair_w,
+                            label,
+                            Act::WardrobeTab(capes),
+                        ));
+                    }
+                    out.push(button(
+                        left,
+                        h - 55.0,
+                        preview,
+                        generic(
+                            "starling.wardrobe.rotate",
+                            on_off(self.skin.auto_rotate_since.is_some()),
+                        ),
+                        Act::AutoRotateWardrobe,
+                    ));
+                }
+                let (text_left, text_w) = if wardrobe.is_some() {
+                    (list_left, list_w)
+                } else {
+                    (0.0, w)
+                };
                 let list_start = out.len();
                 let mut y = top + 2.0 - self.scroll;
                 for row in self.list_rows(s) {
@@ -692,9 +771,9 @@ impl OptionsUi {
                         }
                         Row::Note(text) => {
                             out.push(Widget {
-                                x: 0.0,
+                                x: text_left,
                                 y: y + 4.0,
-                                w,
+                                w: text_w,
                                 h: 9.0,
                                 kind: WKind::Text {
                                     text: Text::literal(text),
@@ -708,12 +787,12 @@ impl OptionsUi {
                         }
                         Row::Paragraph(text) => {
                             // Minecraft's font draws nearly every glyph at most 6 pixels wide.
-                            let chars = (((w - 20.0) / 6.0).floor() as usize).max(16);
+                            let chars = (((text_w - 20.0) / 6.0).floor() as usize).max(16);
                             for line in wrap_words(&text, chars) {
                                 out.push(Widget {
-                                    x: 0.0,
+                                    x: text_left,
                                     y: y + 4.0,
-                                    w,
+                                    w: text_w,
                                     h: 9.0,
                                     kind: WKind::Text {
                                         text: Text::literal(line),
@@ -728,31 +807,47 @@ impl OptionsUi {
                             y += 5.0;
                         }
                         Row::Big(opt) => {
-                            out.push(option_widget(s, opt, cx - 155.0, y + 2.0, 310.0));
+                            out.push(option_widget(s, opt, list_left, y + 2.0, list_w));
                             y += 25.0;
                         }
                         Row::Pair(a, b) => {
-                            out.push(option_widget(s, a, cx - 155.0, y + 2.0, 150.0));
+                            out.push(option_widget(s, a, list_left, y + 2.0, pair_w));
                             if let Some(b) = b {
-                                out.push(option_widget(s, b, cx + 5.0, y + 2.0, 150.0));
+                                out.push(option_widget(
+                                    s,
+                                    b,
+                                    list_left + pair_w + 10.0,
+                                    y + 2.0,
+                                    pair_w,
+                                ));
                             }
                             y += 25.0;
                         }
                         Row::Buttons(mut a, b) => {
-                            a.x = cx - 155.0;
+                            a.x = list_left;
                             a.y = y + 2.0;
+                            if wardrobe.is_some() {
+                                a.w = if b.is_none() && a.w > 150.0 {
+                                    list_w
+                                } else {
+                                    pair_w
+                                };
+                            }
                             let after = a.x + a.w + 10.0;
                             out.push(a);
                             if let Some(mut b) = b {
                                 b.x = after;
                                 b.y = y + 2.0;
+                                if wardrobe.is_some() {
+                                    b.w = pair_w;
+                                }
                                 out.push(b);
                             }
                             y += 25.0;
                         }
                         Row::Field => {
                             out.push(Widget {
-                                x: cx - 155.0,
+                                x: list_left,
                                 y: y + 8.0,
                                 w: 40.0,
                                 h: 9.0,
@@ -766,8 +861,8 @@ impl OptionsUi {
                             });
                             // Drawn and edited by the page itself (`skin.name`).
                             let field = &mut self.skin.name;
-                            (field.x, field.y) = (cx - 115.0, y + 2.0);
-                            (field.width, field.height) = (270.0, 20.0);
+                            (field.x, field.y) = (list_left + 40.0, y + 2.0);
+                            (field.width, field.height) = (list_w - 40.0, 20.0);
                             y += 25.0;
                         }
                         Row::SendField => {
@@ -815,20 +910,22 @@ impl OptionsUi {
                             y += side * cell + 6.0;
                         }
                         Row::Warning(text) => {
-                            out.push(Widget {
-                                x: 0.0,
-                                y: y + 4.0,
-                                w,
-                                h: 9.0,
-                                kind: WKind::Text {
-                                    text: Text::literal(text),
-                                    color: rgba(255, 85, 85, 255),
-                                    centered: true,
-                                },
-                                list: false,
-                                row: 0,
-                            });
-                            y += 16.0;
+                            for line in wrap_words(&text, ((text_w / 6.0) as usize).max(16)) {
+                                out.push(Widget {
+                                    x: text_left,
+                                    y: y + 4.0,
+                                    w: text_w,
+                                    h: 9.0,
+                                    kind: WKind::Text {
+                                        text: Text::literal(line),
+                                        color: rgba(255, 85, 85, 255),
+                                        centered: true,
+                                    },
+                                    list: false,
+                                    row: 0,
+                                });
+                                y += 16.0;
+                            }
                         }
                     }
                     rows.end(&mut out, y);
@@ -841,10 +938,30 @@ impl OptionsUi {
                     }
                     // Starling's Mods page.
                     Page::NativeGame => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
+                    Page::Skin if self.viewing_wardrobe_capes() => {
+                        Some(("starling.wardrobe.open_folder", Act::OpenWardrobeFolder))
+                    }
                     Page::Skin if self.skin_page => Some(("Open Skin Folder", Act::OpenSkinFolder)),
                     _ => None,
                 };
-                if let Some((label, act)) = folder {
+                let wardrobe_pending = wardrobe.is_some() && self.wardrobe_sync_pending();
+                let done_label = if wardrobe_pending && !self.wardrobe_sync_failed {
+                    "starling.wardrobe.sync_and_done"
+                } else {
+                    "gui.done"
+                };
+                if page == Page::Skin && self.wardrobe_saving() {
+                    out.push(inactive(done(h - 27.0)));
+                } else if wardrobe_pending && self.wardrobe_sync_failed {
+                    out.push(button(
+                        cx - 154.0,
+                        h - 27.0,
+                        150.0,
+                        tr("starling.wardrobe.retry_sync"),
+                        Act::RetryWardrobeSync,
+                    ));
+                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
+                } else if let Some((label, act)) = folder {
                     // Android's way to find mods, resource packs and shader packs.
                     let shelf = catalog_shelf(page).filter(|_| self.catalog_buttons);
                     let (open_w, catalog) =
@@ -864,7 +981,7 @@ impl OptionsUi {
                         label
                     };
                     out.push(button(cx - 154.0, h - 27.0, open_w, tr(label), act));
-                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
+                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr(done_label), Act::Done));
                 } else {
                     out.push(done(h - 27.0));
                 }

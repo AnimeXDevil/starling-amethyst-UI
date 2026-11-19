@@ -8003,7 +8003,14 @@ impl Game<'_> {
                 // the others have no `isInvisible` check.
                 let chest = mob.extra.slot_id(horizon_items::equipment::CHEST);
                 if !layers_only {
-                    self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
+                    self.player_cape_geometry(
+                        mob,
+                        chest,
+                        camera,
+                        alpha as f32,
+                        (self.res.mob_data(), packed),
+                        out,
+                    );
                 }
                 if let Some((_, name)) = self
                     .remote_player_names()

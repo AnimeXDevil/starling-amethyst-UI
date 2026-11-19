@@ -227,6 +227,7 @@ impl Game<'_> {
         let ui = &mut self.ui.options;
         // The game puts the skin on (game/own_skin.rs).
         ui.skin_page = true;
+        ui.wardrobe_enabled = cfg!(target_os = "android");
         ui.profile_name = horizon_client::accounts::player_name();
         ui.profile_key = horizon_client::accounts::player_key();
         ui.skin_cloud = horizon_client::accounts::skin_cloud();
@@ -300,6 +301,8 @@ impl Game<'_> {
         self.ui
             .options
             .draw_contents(&self.settings, batch, &self.gui.atlas, cursor);
+        #[cfg(target_os = "android")]
+        self.draw_wardrobe_preview(batch);
         self.draw_screen_phase(batch, horizon_client::screen_draw::RenderPhase::Foreground);
         self.ui
             .options
@@ -692,10 +695,41 @@ impl Game<'_> {
             match action {
                 SkinAction::Name(name) => self.keep_player_name(&name),
                 SkinAction::Choice(choice) => self.choose_own_skin(choice),
+                SkinAction::Cape(choice) => {
+                    #[cfg(target_os = "android")]
+                    self.choose_own_cape(choice);
+                    #[cfg(not(target_os = "android"))]
+                    let _ = choice;
+                }
+                SkinAction::PickCape => {
+                    #[cfg(target_os = "android")]
+                    self.pick_wardrobe_png(crate::ha_launcher::skins::library::Kind::Cape);
+                }
+                SkinAction::LoadAccountCapes =>
+                {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = self.account_capes(None) {
+                        self.ui.options.skin_warning(error);
+                    }
+                }
+                SkinAction::SaveWardrobe { cape, skin } => {
+                    #[cfg(target_os = "android")]
+                    self.save_wardrobe(cape, skin);
+                    #[cfg(not(target_os = "android"))]
+                    let _ = (cape, skin);
+                }
                 SkinAction::OpenFolder => self.open_game_folder(&Self::skins_dir()),
+                SkinAction::OpenWardrobeFolder => {
+                    #[cfg(target_os = "android")]
+                    self.open_game_folder(&Self::wardrobe_root().join("images"));
+                }
                 SkinAction::PickFile => self.pick_skin_file(),
                 SkinAction::ElyBy(on) => self.keep_elyby(on),
-                SkinAction::Upload(choice) => self.upload_own_skin(choice),
+                SkinAction::Upload(choice) => {
+                    if let Err(error) = self.upload_own_skin(choice) {
+                        self.ui.options.skin_warning(error);
+                    }
+                }
                 SkinAction::ElySite => self.open_ely_skins(),
             }
         }

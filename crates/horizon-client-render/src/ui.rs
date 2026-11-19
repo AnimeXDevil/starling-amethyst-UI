@@ -697,6 +697,7 @@ pub(crate) fn focused_button(
     hover: bool,
     focused: bool,
     action: Option<crate::widgets::Action>,
+    left_padding: f32,
 ) {
     let room = if let Some(action) = action {
         crate::widgets::declare_action(action, rect, active);
@@ -716,7 +717,7 @@ pub(crate) fn focused_button(
         active,
         hover,
         focused,
-        room,
+        room.max(left_padding),
         |rect| crate::widgets::Narratable::button(label.plain(), rect, active),
     );
 }

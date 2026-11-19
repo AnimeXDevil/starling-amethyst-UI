@@ -213,6 +213,17 @@ pub fn profiles() -> starling_account::Accounts {
         .clone()
 }
 
+#[cfg(target_os = "android")]
+pub fn reflect_cape(key: &str, cape: Option<String>) {
+    let mut state = shared();
+    state.profiles = Some(starling_account::Accounts::load(&dir()));
+    if let State::SignedIn(account) = &mut state.state
+        && account.key() == key
+    {
+        account.cape = cape;
+    }
+}
+
 pub fn player_name() -> Option<String> {
     if !in_game() {
         return None;
@@ -282,12 +293,12 @@ pub fn skin_cloud() -> crate::own_skin::Cloud {
 /// Send `png` (checked and written anew: `own_skin::upload_png`) as the skin of the Microsoft
 /// profile `key`, with slim or classic arms, off the window thread; [`skin_cloud`] tells how it
 /// goes. One upload at a time.
-pub fn upload_skin(key: String, png: Vec<u8>, slim: bool) {
+pub fn upload_skin(key: String, png: Vec<u8>, slim: bool) -> bool {
     use crate::own_skin::Upload;
     {
         let mut s = shared();
         if matches!(s.skin_upload, Some((_, Upload::Sending))) {
-            return;
+            return false;
         }
         s.skin_upload = Some((key.clone(), Upload::Sending));
     }
@@ -318,6 +329,7 @@ pub fn upload_skin(key: String, png: Vec<u8>, slim: bool) {
         };
         s.skin_upload = Some((key, upload));
     });
+    true
 }
 
 fn begin(state: State) -> (u64, Arc<AtomicBool>) {

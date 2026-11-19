@@ -6244,7 +6244,7 @@ impl Game<'_> {
     /// texel, built once per (skin, slim) from the decoded image the skin
     /// downloader still holds (`horizon_client::mobs::skin_layers`). `None`
     /// while the option is off or the image is not in memory yet.
-    fn skin_3d_model(
+    pub(in crate::game) fn skin_3d_model(
         &self,
         kind: &std::sync::Arc<horizon_client::mobs::MobType>,
         skin: &str,
@@ -6264,12 +6264,7 @@ impl Game<'_> {
             .cloned()
             .unwrap_or_else(|| kind.model.clone());
         let image = self.skin_downloads.borrow().image(skin)?.to_vec();
-        let model = std::sync::Arc::new(skin_layers::extrude(
-            &base,
-            &image,
-            skin_layers::SIZE,
-            skin_layers::DEPTH,
-        )?);
+        let model = std::sync::Arc::new(skin_layers::extrude(&base, &image, skin_layers::SIZE)?);
         self.skin_3d.borrow_mut().insert(key, model.clone());
         Some(model)
     }
@@ -6450,6 +6445,12 @@ impl Game<'_> {
                 .filter(|_| self.settings.file.bool("modelPart_cape"))
                 .filter(|c| self.again_skin(c))
                 .cloned();
+            #[cfg(target_os = "android")]
+            let cape = if self.settings.file.bool("modelPart_cape") {
+                self.wardrobe_cape(cape)
+            } else {
+                None
+            };
             let kind = self.player_model.as_ref().map(|m| m.kind.clone());
             let skin_3d = kind
                 .as_ref()
