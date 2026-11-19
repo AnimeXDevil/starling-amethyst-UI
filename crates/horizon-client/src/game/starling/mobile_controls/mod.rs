@@ -225,6 +225,7 @@ impl Game<'_> {
     pub(in crate::game) fn mobile_frame(&mut self, events: &dyn super::event_loop::EventLoopCtl) {
         self.mobile_init();
         self.mobile.ui.hub_visible = self.mobile.controls.settings.show_control_hub;
+        self.mobile.ui.pause_in_background = self.settings.file.bool("pauseOnLostFocus");
         self.mobile.ui.utility_offset_y = if self.screen == Screen::Playing
             && horizon_client::accounts::in_game()
             && self
@@ -1380,6 +1381,7 @@ impl Game<'_> {
             self.mobile.ui.utility_offset_y,
         );
         let p = area.local_point([t.location.x as f32, t.location.y as f32], b.scale);
+        let hub_before = self.mobile.ui.hub_state();
         if !self.mobile.ui.owns_relative(t.id)
             && !self.mobile.ui.owns_gesture(t.id)
             && let Some(menu_act) = self.mobile.ui.floating_menu_touch(
@@ -1394,7 +1396,12 @@ impl Game<'_> {
             use horizon_client::android_control_ui::InGameMenuAction;
             self.mobile.controls.clear();
             self.mobile.controls.ignore(t.id);
-            if t.phase == TouchPhase::Started {
+            // The hub answers a finger on an empty part of it with `Close` too, to keep it from the
+            // game: only a tap that did something (an action, or a page, tab or dialog changed)
+            // clicks and buzzes.
+            let did = !matches!(menu_act, InGameMenuAction::Close)
+                || self.mobile.ui.hub_state() != hub_before;
+            if t.phase == TouchPhase::Started && did {
                 self.audio.play_button_click();
                 self.android_touch_haptic(12);
             }
@@ -1424,6 +1431,17 @@ impl Game<'_> {
                         cur_style,
                         &preset_id,
                     );
+                    self.mobile.ui.refresh_presets_cache(cur_style);
+                }
+                InGameMenuAction::DeletePreset(preset_id) => {
+                    let cur_style = self.mobile.controls.settings.control_style;
+                    if let Err(e) = self.mobile.controls.settings.delete_preset(
+                        std::path::Path::new("."),
+                        cur_style,
+                        &preset_id,
+                    ) {
+                        log::warn!("Horizon: control preset {preset_id} was not deleted: {e}");
+                    }
                     self.mobile.ui.refresh_presets_cache(cur_style);
                 }
                 InGameMenuAction::CopyPreset {
@@ -1718,6 +1736,17 @@ impl Game<'_> {
                     if let Some(r) = self.renderer.as_mut() {
                         r.animated_textures = self.settings.horizon.animated_textures && !next;
                     }
+                }
+                InGameMenuAction::TogglePauseInBackground => {
+                    // Vanilla's pauseOnLostFocus (F3+P), which `pause_if_inactive` and the sound
+                    // leaving with the focus (`save_when_focus_leaves`) both read.
+                    let next = !self.settings.file.bool("pauseOnLostFocus");
+                    self.settings.file.set(
+                        "pauseOnLostFocus",
+                        horizon_client::options_file::V::Bool(next),
+                    );
+                    self.settings.save(&Self::options_path());
+                    self.mobile.ui.pause_in_background = next;
                 }
                 InGameMenuAction::SendCustomInput(token) => {
                     self.android_sync_pointer();

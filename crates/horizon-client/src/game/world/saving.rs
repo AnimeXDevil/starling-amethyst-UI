@@ -115,10 +115,19 @@ impl Game<'_> {
             return;
         }
         if let winit::event::WindowEvent::Focused(focused) = event {
+            // Out of focus but still on screen (a floating app over it, the recent apps, the
+            // notification shade), the window keeps its surface and `suspended` never comes: the
+            // sound goes with the focus, as the game pauses with it (Options' "Pause in the
+            // Background", vanilla's pauseOnLostFocus). Turned off, the game plays on, heard.
+            let pauses = self.settings.file.bool("pauseOnLostFocus");
             if *focused {
                 self.saved_for_background = false;
+                self.audio.resume_output();
             } else {
                 self.save_for_background();
+                if pauses {
+                    self.audio.suspend_output();
+                }
             }
         }
     }

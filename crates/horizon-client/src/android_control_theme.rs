@@ -2001,7 +2001,7 @@ fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
         accent,
     );
 
-    ui.text_centered(Face::SemiBold, size, cx, top, BOOT_TEXT, "Horizon");
+    ui.text_centered(Face::SemiBold, size, cx, top, BOOT_TEXT, "Starling");
     let sub_y = top + size * 1.45 + small * 0.6;
     ui.text_centered(
         Face::Mono,
@@ -2009,7 +2009,7 @@ fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
         cx,
         sub_y,
         BOOT_LOG,
-        "Rust based minecraft client",
+        "Minecraft on Android, in Rust",
     );
 
     // Symmetrical centered startup progress bar below the tagline
