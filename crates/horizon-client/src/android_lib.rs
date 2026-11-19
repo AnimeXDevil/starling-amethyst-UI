@@ -55,17 +55,56 @@ fn install_platform() -> Result<(), String> {
     Ok(())
 }
 
-/// The engine's start with the wasm mods of the game folder, loaded as the desktop's mod host loads
-/// them (horizon-mod-host's `load_code`) with no native code beside them: a phone's native mods are
-/// compiled into this library (packaging/android/native_build.sh), not loaded. 32-bit Android runs
-/// them on Pulley, Wasmtime's interpreter, which Wasmtime picks where it has no compiler.
+/// Where the native mod libraries for this game build are, in the app's own storage
+/// (`HORIZON_PRIVATE`): `native-mods.json`, each mod's library, and each mod's package in
+/// `horizon-native-mods/<id>/`, as the desktop keeps them beside its fixed executable.
+const NATIVE_LIBRARIES: &str = "native-libs";
+
+/// The engine's start with the game folder's wasm mods and the native mod libraries of
+/// [`NATIVE_LIBRARIES`], loaded as the desktop's fixed executable loads the ones beside it
+/// (horizon-mod-host's `open`, then `load_code`). 32-bit Android runs the wasm mods on Pulley,
+/// Wasmtime's interpreter, which Wasmtime picks where it has no compiler. A build of this library
+/// with native mods compiled in (packaging/android/native_build.sh) has none in that folder.
 fn start(startup: horizon_client::entry::Startup) {
+    let (entries, slots, native) = native_libraries();
     horizon_client::entry::start(
-        Default::default(),
-        |native, launch| horizon_mod_host::load_code(Vec::new(), &[], native, launch),
+        native,
+        move |native, launch| horizon_mod_host::load_code(entries, &slots, native, launch),
         horizon_mod_host::code_runtime(),
         startup,
     );
+}
+
+/// The native mod libraries of [`NATIVE_LIBRARIES`], checked and opened, with their packages. Each
+/// was built for this exact game build (its `horizon_native_build`). A folder that does not check
+/// out is left out with a line in logcat, and the game starts with its wasm mods only.
+fn native_libraries() -> (
+    Vec<mod_platform::ModEntry>,
+    Vec<horizon_mod_host::SlotListener>,
+    horizon_mod_package::runtime::Runtime,
+) {
+    let Some(private) = std::env::var_os("HORIZON_PRIVATE") else {
+        return Default::default();
+    };
+    let folder = std::path::PathBuf::from(private).join(NATIVE_LIBRARIES);
+    if !folder.join("native-mods.json").is_file() {
+        return Default::default();
+    }
+    let opened = match horizon_mod_host::open(&folder) {
+        Ok(opened) => opened,
+        Err(error) => {
+            horizon_client::android::warn(&format!("native mods left out: {error}"));
+            return Default::default();
+        }
+    };
+    match horizon_mod_host::packages_beside(&folder, opened.built) {
+        Ok(native) => (opened.entries, opened.slots, native),
+        Err(error) => {
+            // Their patch copies are installed already; none of their hooks will be called.
+            horizon_client::android::warn(&format!("native mods left out: {error}"));
+            Default::default()
+        }
+    }
 }
 
 /// `StarlingActivity.onStorage`, called on the UI thread before the game's thread starts.

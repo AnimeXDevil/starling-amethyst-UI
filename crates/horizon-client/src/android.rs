@@ -1246,6 +1246,12 @@ fn command_line(home: &Path) -> (Vec<String>, Vec<(String, String)>) {
     (args, env)
 }
 
+/// A warning in logcat, for the library's entry points (android_lib.rs), which run before the
+/// game's logger.
+pub fn warn(message: &str) {
+    logcat(log::Level::Warn, message);
+}
+
 /// The game's console lines in logcat, under the tag `starling`.
 fn logcat(level: log::Level, message: &str) {
     use std::ffi::CString;

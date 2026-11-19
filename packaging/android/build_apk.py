@@ -136,7 +136,7 @@ def emutls_runtime(ndk, abi):
     return path
 
 
-def build_library(profile, ndk, sdk, abi=ABI):
+def build_library(profile, ndk, sdk, abi=ABI, packages=("horizon-android",)):
     env = dict(os.environ, ANDROID_NDK_HOME=str(ndk), ANDROID_HOME=str(sdk))
     # Preserve source identity in local diagnostic reports, including source builds.
     try:
@@ -159,7 +159,9 @@ def build_library(profile, ndk, sdk, abi=ABI):
                  "rustup component add rust-src")
     run(
         "cargo", "ndk", "-t", abi, "--platform", MIN_SDK,
-        "build", BUILD_STD, "--profile", profile, "-p", "horizon-android",
+        # More packages than the game only for native mod libraries (tools/android_native_sdk.py `mods`), built
+        # beside it with the same features and flags, so the game's crates are the ones the APK ships.
+        "build", BUILD_STD, "--profile", profile, *(flag for p in packages for flag in ("-p", p)),
         cwd=ROOT, env=env,
     )
 
@@ -423,6 +425,30 @@ def sign(build_tools, aligned, apk, out):
     run(apksigner, "verify", apk)
 
 
+def rust_dylibs(ndk, built, out):
+    """The game's Rust libraries the entry library needs, stripped into `out`: none in a usual build, every crate
+    being inside `built`. A build with `-C prefer-dynamic` after tools/android_native_sdk.py's `prepare` keeps the
+    game and the mod API in libraries of their own, which native mod libraries link against (and the std inside
+    the lowest of them): Cargo's deps folder holds them, and each may need more of them."""
+    if "prefer-dynamic" not in os.environ.get("RUSTFLAGS", ""):
+        return {}
+    readelf = ndk_tool(ndk, "llvm-readelf")
+    deps = built.parent / "deps"
+    found, pending = {}, [built]
+    while pending:
+        needs = subprocess.check_output([str(readelf), "-d", str(pending.pop())], text=True)
+        for name in re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", needs):
+            source = deps / name
+            if name in found or not source.is_file():
+                continue
+            target = out / name
+            run(ndk_tool(ndk, "llvm-strip"), "--strip-unneeded", "-o", target, source)
+            found[name] = target
+            pending.append(source)
+    print(f"build_apk: the game's Rust libraries: {', '.join(sorted(found)) or 'none'}")
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -495,6 +521,7 @@ def main():
     # Custom GPU drivers (libadrenotools): arm64-v8a only, beside the launchers.
     libraries.update(build_adrenotools(ndk, out, args.abi))
     libraries[library.name] = library
+    libraries.update(rust_dylibs(ndk, built, out))
     add_code(out / "base.apk", libraries, dex, out / "unsigned.apk", args.abi)
     aligned = out / "aligned.apk"
     run(tool(build_tools, "zipalign"), "-P", "16", "-f", "4", out / "unsigned.apk", aligned)

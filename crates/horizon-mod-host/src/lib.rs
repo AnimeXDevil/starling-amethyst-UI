@@ -4,7 +4,7 @@
 
 #[allow(unsafe_code)]
 mod native_libraries;
-pub use native_libraries::{GAME_BUILD_ID, RUSTC_VERSION, main};
+pub use native_libraries::{GAME_BUILD_ID, Opened, RUSTC_VERSION, main, open, packages_beside};
 
 mod loading;
 pub use loading::{code_runtime, load_code, main_with};
