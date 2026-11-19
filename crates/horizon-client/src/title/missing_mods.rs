@@ -27,7 +27,14 @@ fn entry(m: &MissingMod) -> String {
 
 /// The prompt's text: what opening does, then each missing mod.
 fn message(missing: &[MissingMod]) -> String {
-    let mut message = lang::get("horizon.missing_mods.description");
+    // Code mods that left no blocks and added no content lose no blocks: the warning says what
+    // they may lose instead.
+    let key = if missing.iter().any(|m| m.blocks || m.content) {
+        "horizon.missing_mods.description"
+    } else {
+        "horizon.missing_mods.description_code"
+    };
+    let mut message = lang::get(key);
     for m in missing {
         message.push('\n');
         message.push_str(&entry(m));

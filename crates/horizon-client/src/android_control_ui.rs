@@ -26,6 +26,9 @@ pub struct TouchUi {
     /// GUI-space offset below the title screen account button; zero in game.
     pub utility_offset_y: f32,
     pub hub_visible: bool,
+    /// Options' pauseOnLostFocus, as the game has it: the Recommended tab's "Pause in the
+    /// Background" row.
+    pub pause_in_background: bool,
     pub expanded: bool,
     pub floating_menu: bool,
     pub floating_drag: Option<(u64, [f32; 2], bool)>,
@@ -35,6 +38,8 @@ pub struct TouchUi {
     pub hub_scroll_drag: Option<(u64, f32, f32, bool)>,
     pub presets_modal_open: bool,
     pub preset_dialog: Option<PresetDialogState>,
+    /// The preset whose delete button was tapped once: a second tap on it deletes it.
+    pub preset_delete_armed: Option<String>,
     pub cached_presets: Vec<crate::android_controls::PresetMeta>,
     pub cached_presets_style: Option<crate::android_controls::ControlStyle>,
     slider_gesture: Option<(u64, [f32; 2], InGameMenuAction)>,
@@ -96,6 +101,7 @@ impl Default for TouchUi {
         Self {
             utility_offset_y: 0.,
             hub_visible: true,
+            pause_in_background: true,
             expanded: false,
             floating_menu: false,
             floating_drag: None,
@@ -105,6 +111,7 @@ impl Default for TouchUi {
             hub_scroll_drag: None,
             presets_modal_open: false,
             preset_dialog: None,
+            preset_delete_armed: None,
             cached_presets: Vec::new(),
             cached_presets_style: None,
             slider_gesture: None,
@@ -152,6 +159,8 @@ pub enum InGameMenuAction {
     OpenControlEditor,
     SetControlStyle(crate::android_controls::ControlStyle),
     SelectPreset(String),
+    /// Delete a user-created preset of the active control system (the protected Default stays).
+    DeletePreset(String),
     CopyPreset {
         source_id: String,
         name: String,
@@ -205,6 +214,8 @@ pub enum InGameMenuAction {
     SetResolutionScale(u32),
     /// Toggle in-game animations (animated textures, view bobbing, chunk fade, UI transitions).
     ToggleGameAnimations,
+    /// Pause the game and its sound when the app leaves the screen (Options' pauseOnLostFocus).
+    TogglePauseInBackground,
     /// Send a custom keyboard key, mouse button/scroll, or gameplay action token immediately.
     SendCustomInput(String),
 }
@@ -1706,6 +1717,21 @@ fn hub_metrics(w: f32, h: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32) 
 }
 
 impl TouchUi {
+    /// What a tap on the hub can change: the floating menu, its tab, the presets list and dialog,
+    /// the keyboard. The hub answers a finger on an empty part of it with `Close` as well, and
+    /// the game clicks only when this changed or another action came.
+    pub fn hub_state(&self) -> (bool, bool, u8, bool, bool, bool, bool) {
+        (
+            self.expanded,
+            self.floating_menu,
+            self.hub_tab,
+            self.presets_modal_open,
+            self.preset_dialog.is_some(),
+            self.keyboard.is_some(),
+            self.preset_delete_armed.is_some(),
+        )
+    }
+
     fn step_animations(&self) -> (f32, f32) {
         let open_target = if self.floating_menu { 1.0 } else { 0.0 };
         if crate::android_control_theme::motion::game_animations_disabled()
@@ -2253,6 +2279,8 @@ impl TouchUi {
             let mdh = (h - 18.0).clamp(248.0, 360.0);
             let mdx = (w - mdw) * 0.5;
             let mdy = (h - mdh) * 0.5;
+            // A delete waits for its second tap only until the next tap elsewhere.
+            let armed = self.preset_delete_armed.take();
             if !inside([mdx, mdy, mdw, mdh]) || inside([mdx + mdw - 78.0, mdy + 10.0, 64.0, 28.0]) {
                 self.presets_modal_open = false;
                 return Some(InGameMenuAction::Close);
@@ -2266,6 +2294,14 @@ impl TouchUi {
                 let row_r = [mdx + 14.0, ry, mdw - 28.0, row_h];
                 let copy_r = [row_r[0] + row_r[2] - 68.0, ry + 8.0, 60.0, 30.0];
                 let edit_r = [row_r[0] + row_r[2] - 104.0, ry + 8.0, 30.0, 30.0];
+                let delete_r = [row_r[0] + row_r[2] - 140.0, ry + 8.0, 30.0, 30.0];
+                if !preset.is_default && inside(delete_r) {
+                    if armed.as_deref() == Some(preset.id.as_str()) {
+                        return Some(InGameMenuAction::DeletePreset(preset.id.clone()));
+                    }
+                    self.preset_delete_armed = Some(preset.id.clone());
+                    return Some(InGameMenuAction::Close);
+                }
                 if inside(copy_r) {
                     self.preset_dialog = Some(PresetDialogState {
                         is_copy: true,
@@ -2523,6 +2559,9 @@ impl TouchUi {
                 let anim_y = body_y + 394.0;
                 if inside([cx, anim_y, cw, 46.0]) {
                     return Some(InGameMenuAction::ToggleGameAnimations);
+                }
+                if inside([cx, body_y + 448.0, cw, 46.0]) {
+                    return Some(InGameMenuAction::TogglePauseInBackground);
                 }
             }
             1 => {
@@ -2874,7 +2913,7 @@ impl TouchUi {
             dx + 52.0,
             dy + 8.0,
             text_c,
-            "Horizon Control Hub",
+            "Starling Control Hub",
         );
         // The line under the title gives way to the Launcher button on a narrow hub.
         if hub_launcher_button(dx, dy, dw).is_none_or(|r| r[0] >= dx + HUB_LINE_END) {
@@ -2950,7 +2989,7 @@ impl TouchUi {
         // Scrollable Right Content Panel with scissor clip and tab transition slide
         let tab_slide = (1.0 - tab_ease) * 14.0;
         let content_height = match self.hub_tab {
-            0 => 448.0,
+            0 => 502.0,
             1 => 430.0,
             2 => 470.0,
             3 => 350.0,
@@ -3229,6 +3268,14 @@ impl TouchUi {
                     "In-Game Animations",
                     "Animated block textures, view bobbing, FOV transitions & menu motion",
                     Some(!settings.disable_game_animations),
+                    None,
+                );
+                draw_toggle_row(
+                    &mut ui,
+                    body_y + 448.0,
+                    "Pause in the Background",
+                    "Pause the game and its sound when Starling leaves the screen",
+                    Some(self.pause_in_background),
                     None,
                 );
             }
@@ -4049,6 +4096,33 @@ impl TouchUi {
                         edit_r[1] + 7.0,
                         16.0,
                         accent_hi,
+                    );
+                    // Delete: a first tap turns it red, a second one deletes.
+                    let armed = self.preset_delete_armed.as_deref() == Some(preset.id.as_str());
+                    let delete_r = [row_r[0] + row_r[2] - 140.0, ry + 8.0, 30.0, 30.0];
+                    let danger = rgba(230, 72, 72, 255);
+                    ui.rounded(
+                        delete_r[0],
+                        delete_r[1],
+                        delete_r[2],
+                        delete_r[3],
+                        8.0,
+                        if armed { danger } else { surface_bg },
+                    );
+                    ui.border(
+                        delete_r[0],
+                        delete_r[1],
+                        delete_r[2],
+                        delete_r[3],
+                        8.0,
+                        if armed { danger } else { border_c },
+                    );
+                    ui.icon(
+                        Icon::Trash,
+                        delete_r[0] + 7.0,
+                        delete_r[1] + 7.0,
+                        16.0,
+                        if armed { text_c } else { danger },
                     );
                 }
 

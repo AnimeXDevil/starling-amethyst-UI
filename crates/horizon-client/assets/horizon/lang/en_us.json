@@ -1299,6 +1299,7 @@
   "horizon.missing_mods.backup_failed": "The backup could not be made, so the world was not opened: %s",
   "horizon.missing_mods.backup_open": "Back Up and Open",
   "horizon.missing_mods.description": "This world was saved with mods that are not loaded now. Opening it removes their blocks, and everything those blocks hold, for good. Back it up first, or leave it closed until the mods are back.",
+  "horizon.missing_mods.description_code": "This world was saved with mods that are not loaded now. They left no blocks in it, but what they kept in this world may be lost if you open it. Back it up first, or leave it closed until the mods are back.",
   "horizon.missing_mods.dont_open": "Don't Open",
   "horizon.missing_mods.kind.blocks": "its blocks",
   "horizon.missing_mods.kind.code": "code mod",

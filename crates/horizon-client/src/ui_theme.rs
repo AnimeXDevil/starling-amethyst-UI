@@ -738,14 +738,20 @@ fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
     let small = (size * 0.25).clamp(micro(), 18.0);
     let block = size * 1.45 + small * 0.6 + small * 1.5;
     let top = (ui.h - block) / 2.0;
-    ui.text_centered(Face::Semibold, size, ui.w / 2.0, top, BOOT_TEXT, "Horizon");
+    // Starling's name on its own app (Android), Horizon's everywhere else.
+    let (name, tagline) = if cfg!(target_os = "android") {
+        ("Starling", "Minecraft on Android, in Rust")
+    } else {
+        ("Horizon", "Rust based minecraft client")
+    };
+    ui.text_centered(Face::Semibold, size, ui.w / 2.0, top, BOOT_TEXT, name);
     ui.text_centered(
         Face::Mono,
         small,
         ui.w / 2.0,
         top + size * 1.45 + small * 0.6,
         BOOT_LOG,
-        "Rust based minecraft client",
+        tagline,
     );
     ui.finish();
 }
