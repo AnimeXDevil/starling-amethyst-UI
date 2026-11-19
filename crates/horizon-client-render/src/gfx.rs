@@ -5645,17 +5645,29 @@ impl Renderer {
             capture_result: None,
         })
     }
+    /// Bind the hand's range, rebasing the buffer on GLES without base-vertex draws.
+    fn bind_hand_vertices(&self, pass: &mut wgpu::RenderPass<'_>, first_vertex: i32) -> i32 {
+        if self.base_vertex {
+            pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+            first_vertex
+        } else {
+            let offset = first_vertex as u64 * std::mem::size_of::<Vertex>() as u64;
+            pass.set_vertex_buffer(0, self.entity_buffer.slice(offset..));
+            0
+        }
+    }
+
     /// The first-person hand's quads, which follow `first` quads of the entity buffer.
     fn draw_hand(&self, pass: &mut wgpu::RenderPass<'_>, quads: u32, first: u32) {
         pass.set_pipeline(&self.entity_pipeline);
         pass.set_bind_group(0, &self.hand_group, &[]);
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-        pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-        pass.draw_indexed(0..quads * 6, (first * 4) as i32, 0..1);
+        let base_vertex = self.bind_hand_vertices(pass, (first * 4) as i32);
+        pass.draw_indexed(0..quads * 6, base_vertex, 0..1);
         if light_marks(self.output.frame.format, self.hdr.is_some()) {
             // Drawn into the world: the light sources it holds are marked as the world's are.
             pass.set_pipeline(&self.hdr_entity_mark_pipeline);
-            pass.draw_indexed(0..quads * 6, (first * 4) as i32, 0..1);
+            pass.draw_indexed(0..quads * 6, base_vertex, 0..1);
         }
     }
     /// HDR lighting on the clouds just drawn: the sky's value (`fs_hdr_cloud_mark`).
@@ -12797,8 +12809,8 @@ impl Renderer {
             pass.set_pipeline(self.overlay_hand.as_ref().unwrap_or(&self.entity_pipeline));
             pass.set_bind_group(0, &self.hand_group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-            pass.draw_indexed(0..overlay.hand_quads * 6, overlay.first_hand_vertex, 0..1);
+            let base_vertex = self.bind_hand_vertices(&mut pass, overlay.first_hand_vertex);
+            pass.draw_indexed(0..overlay.hand_quads * 6, base_vertex, 0..1);
             drop(pass);
             if let Some(hdr) = &self.hdr
                 && !no_pack_hdr_gain(layered, self.shader_pack_kind().is_some(), !frame.title)
@@ -12835,12 +12847,12 @@ impl Renderer {
                     });
                     pass.set_bind_group(0, &self.hand_group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    let base_vertex = self.bind_hand_vertices(&mut pass, overlay.first_hand_vertex);
                     let quads = 0..overlay.hand_quads * 6;
                     pass.set_pipeline(&self.hdr_hand_unmark_pipeline);
-                    pass.draw_indexed(quads.clone(), overlay.first_hand_vertex, 0..1);
+                    pass.draw_indexed(quads.clone(), base_vertex, 0..1);
                     pass.set_pipeline(&self.hdr_entity_mark_pipeline);
-                    pass.draw_indexed(quads, overlay.first_hand_vertex, 0..1);
+                    pass.draw_indexed(quads, base_vertex, 0..1);
                 }
             }
         }
