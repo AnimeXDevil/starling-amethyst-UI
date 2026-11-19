@@ -29,7 +29,10 @@ const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 5] =
 
 /// entity.wgsl after the OverlayTexture constants it reads.
 fn entity_shader() -> String {
-    crate::overlay::wgsl_constants() + include_str!("hdr_light.wgsl") + include_str!("entity.wgsl")
+    crate::overlay::wgsl_constants()
+        + include_str!("hdr_light.wgsl")
+        + include_str!("map_tiles.wgsl")
+        + include_str!("entity.wgsl")
 }
 
 fn no_pack_hdr_gain(layered: bool, pack: bool, world: bool) -> bool {
@@ -48,7 +51,7 @@ fn border_shader() -> String {
     include_str!("hdr_light.wgsl").to_owned() + include_str!("border.wgsl")
 }
 
-fn entity_binding_entries() -> [wgpu::BindGroupLayoutEntry; 8] {
+fn entity_binding_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     let vf = wgpu::ShaderStages::VERTEX_FRAGMENT;
     let entry = |binding, visibility, ty| wgpu::BindGroupLayoutEntry {
         binding,
@@ -56,7 +59,7 @@ fn entity_binding_entries() -> [wgpu::BindGroupLayoutEntry; 8] {
         ty,
         count: None,
     };
-    [
+    let mut layout = vec![
         entry(
             0,
             vf,
@@ -117,7 +120,9 @@ fn entity_binding_entries() -> [wgpu::BindGroupLayoutEntry; 8] {
                 multisampled: false,
             },
         ),
-    ]
+    ];
+    layout.extend(map_pages::layouts());
+    layout
 }
 
 const ENTITY_ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Uint32,3=>Unorm8x4,4=>Uint8x4,5=>Snorm8x4,6=>Float32x2];
@@ -419,6 +424,7 @@ mod hdr_start;
 mod hdr_stats;
 pub(crate) mod hud_coverage;
 mod in_flight;
+pub(crate) mod map_pages;
 mod terrain_source;
 pub use hdr::{Calibration as HdrCalibration, Output as HdrOutput};
 pub use output::{DisplayReading, EffectiveOutput, FrameConfiguration, FrameRequest};
@@ -1238,6 +1244,67 @@ impl SolidPipeline {
     }
 }
 
+struct EntityTextures {
+    atlas: wgpu::TextureView,
+    atlas_sampler: wgpu::Sampler,
+    lightmap: wgpu::TextureView,
+    lightmap_sampler: wgpu::Sampler,
+    glint: wgpu::TextureView,
+    glint_sampler: wgpu::Sampler,
+    glint_armor: wgpu::TextureView,
+}
+
+impl EntityTextures {
+    fn group(
+        &self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        globals: &wgpu::Buffer,
+        maps: &map_pages::MapPages,
+    ) -> wgpu::BindGroup {
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&self.atlas),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&self.atlas_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&self.lightmap),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&self.lightmap_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(&self.glint),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::Sampler(&self.glint_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&self.glint_armor),
+            },
+        ];
+        entries.extend(map_pages::bindings(maps.views()));
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Entity resources"),
+            layout,
+            entries: &entries,
+        })
+    }
+}
+
 pub struct Renderer {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
@@ -1442,6 +1509,8 @@ pub struct Renderer {
     screen_buffer: wgpu::Buffer,
     screen_capacity: u64,
     entity_group: wgpu::BindGroup,
+    entity_textures: EntityTextures,
+    map_pages: map_pages::MapPages,
     /// The layout of `entity_group`, for the native shadow pass.
     entity_bindings: wgpu::BindGroupLayout,
     /// Generation-owned prepared model geometry. World block entities instance it
@@ -4094,44 +4163,18 @@ impl Renderer {
             label: Some("Atlas"),
             ..Default::default()
         });
-        let entity_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Entity resources"),
-            layout: &entity_bindings,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: globals.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&atlas_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&lightmap_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&lightmap_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&glint_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::Sampler(&glint_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::TextureView(&glint_armor_view),
-                },
-            ],
-        });
+        let map_pages = map_pages::MapPages::new(&device);
+        let entity_textures = EntityTextures {
+            atlas: atlas_view.clone(),
+            atlas_sampler,
+            lightmap: lightmap_view.clone(),
+            lightmap_sampler: lightmap_sampler.clone(),
+            glint: glint_view.clone(),
+            glint_sampler: glint_sampler.clone(),
+            glint_armor: glint_armor_view.clone(),
+        };
+        let entity_group = entity_textures.group(&device, &entity_bindings, &globals, &map_pages);
+        hud.bind_map_pages(&device, map_pages.views());
         let static_entity_transform =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Static block-entity camera position"),
@@ -4149,44 +4192,8 @@ impl Renderer {
                 resource: static_entity_transform.as_entire_binding(),
             }],
         });
-        let hand_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("First-person hand resources"),
-            layout: &entity_bindings,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: hand_globals.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&atlas_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&lightmap_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&lightmap_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&glint_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::Sampler(&glint_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::TextureView(&glint_armor_view),
-                },
-            ],
-        });
+        let hand_group =
+            entity_textures.group(&device, &entity_bindings, &hand_globals, &map_pages);
         let entity_layout = kept.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Entity layout"),
             bind_group_layouts: &[Some(&entity_bindings)],
@@ -5448,6 +5455,8 @@ impl Renderer {
             screen_buffer,
             screen_capacity,
             entity_group,
+            entity_textures,
+            map_pages,
             entity_bindings,
             prepared_models: None,
             prepared_draws: Vec::new(),
@@ -8234,12 +8243,38 @@ impl Renderer {
             );
         }
     }
+    pub fn map_page_allocation_failed(&self) -> bool {
+        self.map_pages.allocation_failed()
+    }
+
     #[horizon_mod_api_macros::replaceable]
     pub fn render(&mut self, frame: &Frame) -> Result<bool> {
         // A lost device cannot accept uploads either. Leave recovery to the
         // owner instead of submitting atlas patches to the invalid device.
         if self.device_lost() {
             return Err("the graphics device was lost".into());
+        }
+        let map_bindings_changed = if frame.title {
+            self.map_pages.clear()
+        } else {
+            self.map_pages
+                .update(&self.device, &self.queue, &frame.hud.map_tiles)
+        };
+        if map_bindings_changed {
+            self.entity_group = self.entity_textures.group(
+                &self.device,
+                &self.entity_bindings,
+                &self.globals,
+                &self.map_pages,
+            );
+            self.hand_group = self.entity_textures.group(
+                &self.device,
+                &self.entity_bindings,
+                &self.hand_globals,
+                &self.map_pages,
+            );
+            self.hud
+                .bind_map_pages(&self.device, self.map_pages.views());
         }
         if let Some(request) = self.capture.take() {
             let result = self.write_capture(&request, frame);

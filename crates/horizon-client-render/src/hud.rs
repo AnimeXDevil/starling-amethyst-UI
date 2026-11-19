@@ -175,6 +175,40 @@ fn halved((name, w, h, data): &PackedImage) -> PackedImage {
 /// framed maps, so the pool holds a wall; too few slots re-upload every map
 /// every frame. 26.3's `MapTextureManager` keeps a texture per map instead.
 pub const MAP_SLOTS: usize = 256;
+pub const MAP_TILE_SIDE: u32 = 128;
+pub(crate) const MAP_PAGE_SIDE: u32 = 1024;
+const MAPS_PER_ROW: u32 = MAP_PAGE_SIDE / MAP_TILE_SIDE;
+pub(crate) const MAPS_PER_PAGE: usize = (MAPS_PER_ROW * MAPS_PER_ROW) as usize;
+pub(crate) const MAP_PAGE_COUNT: usize = MAP_SLOTS / MAPS_PER_PAGE;
+
+static MAP_PAGE_ALLOCATION_FAILED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Keep using shared map slots if this process could not allocate a dedicated page.
+pub fn fallback_to_shared_map_atlas() -> bool {
+    !MAP_PAGE_ALLOCATION_FAILED.swap(true, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Texel coordinates in a page, plus a negative U tag shared by the HUD and entity shaders.
+pub fn separate_map_rect(slot: usize) -> Option<Rect> {
+    if slot >= MAP_SLOTS {
+        return None;
+    }
+    let page = slot / MAPS_PER_PAGE;
+    let tile = slot as u32 % MAPS_PER_PAGE as u32;
+    let x = (tile % MAPS_PER_ROW) * MAP_TILE_SIDE;
+    let y = (tile / MAPS_PER_ROW) * MAP_TILE_SIDE;
+    let u = x as f32 - 16384.0 + page as f32 * MAP_PAGE_SIDE as f32;
+    Some(Rect {
+        u0: u,
+        v0: y as f32,
+        u1: u + MAP_TILE_SIDE as f32,
+        v1: (y + MAP_TILE_SIDE) as f32,
+        w: MAP_TILE_SIDE,
+        h: MAP_TILE_SIDE,
+    })
+}
+
 /// The atlas sprite of map slot `slot` (`horizon/map{slot}`), named once:
 /// every map shown asks for its slot's each frame.
 pub fn map_slot_sprite(slot: usize) -> Option<&'static str> {
@@ -2041,6 +2075,29 @@ impl HudAtlas {
                 // The cloud renderer reads its pattern directly from the active resources.
                 images.retain(|(name, ..)| name != "environment/clouds");
             }
+            if full
+                && (MAP_PAGE_SIDE..=4096).contains(&limit)
+                && !MAP_PAGE_ALLOCATION_FAILED.load(std::sync::atomic::Ordering::Relaxed)
+                && !crate::sprites::labpbr_maps()
+            {
+                // Preserve the existing path when it fits without reducing sprites.
+                let mut sizes: Vec<PackedImage> = images
+                    .iter()
+                    .map(|(name, w, h, _)| {
+                        let border = if flags.get(name).is_some_and(|f: &TextureFlags| f.blur) {
+                            2
+                        } else {
+                            0
+                        };
+                        (String::new(), w + border, h + border, Vec::new())
+                    })
+                    .collect();
+                sizes.sort_by_key(|(_, w, h, _)| std::cmp::Reverse((*h, *w)));
+                if Self::mobile_layout(&sizes, limit).is_err() {
+                    images.retain(|(name, ..)| !name.starts_with("horizon/map"));
+                    log::info!("GUI atlas: using separate map pages before reducing sprites");
+                }
+            }
             Self::fit_mobile_atlas(&mut images, &mut full_sizes, &gui_sizes, &flags, limit)?;
         }
         // Blurred sprites are sampled linearly in the atlas (screen.wgsl): a
@@ -2305,6 +2362,8 @@ pub struct HudBatch {
     pub height: f32,
     /// Glyph pixels to upload into the atlas before drawing.
     pub patches: Vec<crate::font::Patch>,
+    /// Dirty map tiles, keyed by the existing bounded map slot cache.
+    pub map_tiles: Vec<(usize, Vec<u8>)>,
     /// Vertex ranges with another blend or depth/scissor state, in order.
     pub blends: Vec<(std::ops::Range<u32>, Blend)>,
     /// The textures and time of the `Blend::EndPortal` runs.
@@ -2394,6 +2453,7 @@ impl HudBatch {
             width: gui.size[0] as f32,
             height: gui.size[1] as f32,
             patches: Vec::new(),
+            map_tiles: Vec::new(),
             blends: Vec::new(),
             end_portal: EndPortalFill::default(),
             glint_alpha: 0.75,
@@ -3195,6 +3255,8 @@ impl HudUniform {
 }
 use crate::gfx::hud_coverage::{self, Pipeline};
 
+const HUD_SHADER: &str = concat!(include_str!("map_tiles.wgsl"), include_str!("hud.wgsl"));
+
 pub struct HudRenderer {
     pictures: HashMap<u64, (Arc<pictures::Picture>, wgpu::BindGroup)>,
     pub sprite_animations: Vec<(Rect, crate::sprites::SpriteAnimation, (usize, usize, u32))>,
@@ -3220,6 +3282,11 @@ pub struct HudRenderer {
     format: wgpu::TextureFormat,
     coverage: bool,
     atlas_view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    glint: wgpu::TextureView,
+    glint_armor: wgpu::TextureView,
+    glint_sampler: wgpu::Sampler,
     /// The resource pack's text shader, when it has one that works.
     pack_text: Option<pack_text::PackText>,
     /// Target pixels per window pixel: above 1 for a screenshot drawn larger than the
@@ -3227,6 +3294,76 @@ pub struct HudRenderer {
     pub zoom: f32,
 }
 impl HudRenderer {
+    #[allow(clippy::too_many_arguments)]
+    fn resources(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        uniform: &wgpu::Buffer,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+        glint_view: &wgpu::TextureView,
+        glint_sampler: &wgpu::Sampler,
+        linear_sampler: &wgpu::Sampler,
+        glint_armor_view: &wgpu::TextureView,
+        maps: [&wgpu::TextureView; MAP_PAGE_COUNT],
+    ) -> wgpu::BindGroup {
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(glint_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(glint_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Sampler(linear_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(glint_armor_view),
+            },
+        ];
+        entries.extend(crate::gfx::map_pages::bindings(maps));
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("HUD resources"),
+            layout,
+            entries: &entries,
+        })
+    }
+
+    pub(crate) fn bind_map_pages(
+        &mut self,
+        device: &wgpu::Device,
+        maps: [&wgpu::TextureView; MAP_PAGE_COUNT],
+    ) {
+        self.group = Self::resources(
+            device,
+            &self.layout,
+            &self.uniform,
+            &self.atlas_view,
+            &self.sampler,
+            &self.glint,
+            &self.glint_sampler,
+            &self.linear_sampler,
+            &self.glint_armor,
+            maps,
+        );
+    }
+
     pub fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -3238,7 +3375,7 @@ impl HudRenderer {
     ) -> Result<Self> {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horizon HUD"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("hud.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(HUD_SHADER.into()),
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -3256,103 +3393,83 @@ impl HudRenderer {
             contents: bytemuck::bytes_of(&HudUniform::new([1.0; 4], EndPortalFill::default(), 0)),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let mut layout_entries = vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+        ];
+        layout_entries.extend(crate::gfx::map_pages::layouts());
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("HUD bindings"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-            ],
+            entries: &layout_entries,
         });
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("HUD resources"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(glint_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(glint_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(glint_armor_view),
-                },
-            ],
-        });
+        let group = Self::resources(
+            device,
+            &layout,
+            &uniform,
+            view,
+            &sampler,
+            glint_view,
+            glint_sampler,
+            &linear_sampler,
+            glint_armor_view,
+            [view; MAP_PAGE_COUNT],
+        );
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("HUD layout"),
             bind_group_layouts: &[Some(&layout)],
@@ -3397,7 +3514,7 @@ impl HudRenderer {
                 multiview_mask: None,
                 cache: None,
             };
-            let source = wgpu::ShaderSource::Wgsl(include_str!("hud.wgsl").into());
+            let source = wgpu::ShaderSource::Wgsl(HUD_SHADER.into());
             Pipeline::new(device, &desc, source, coverage).expect("the HUD's coverage")
         };
         let pipeline = create("HUD", wgpu::BlendState::ALPHA_BLENDING, "fs_main", None);
@@ -3504,6 +3621,11 @@ impl HudRenderer {
             format,
             coverage,
             atlas_view: view.clone(),
+            sampler,
+            linear_sampler,
+            glint: glint_view.clone(),
+            glint_armor: glint_armor_view.clone(),
+            glint_sampler: glint_sampler.clone(),
             pack_text: None,
             zoom: 1.0,
         })
@@ -5922,7 +6044,7 @@ texture=wide",
 
     #[test]
     fn hud_shader_validates_both_fragment_entries() {
-        let module = naga::front::wgsl::parse_str(include_str!("hud.wgsl")).unwrap();
+        let module = naga::front::wgsl::parse_str(HUD_SHADER).unwrap();
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
@@ -5999,6 +6121,7 @@ texture=wide",
                 width: width as f32,
                 height: height as f32,
                 patches: Vec::new(),
+                map_tiles: Vec::new(),
                 blends: Vec::new(),
                 end_portal: EndPortalFill::default(),
                 glint_alpha: 0.75,
