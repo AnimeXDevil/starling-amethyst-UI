@@ -160,21 +160,12 @@ fn atlas_limit() -> u32 {
 }
 /// `image` at half its size, by every other texel: no new colors or alpha, so what was cut out
 /// stays cut out.
-fn halved((name, w, h, data): &PackedImage, preserve_outline: bool) -> PackedImage {
+fn halved((name, w, h, data): &PackedImage) -> PackedImage {
     let (half_w, half_h) = (w.div_ceil(2), h.div_ceil(2));
-    // Button backgrounds store their outline on the last row and column as well.
-    let source_coordinate = |index, half, original| {
-        if preserve_outline && index != 0 && index + 1 == half {
-            original - 1
-        } else {
-            2 * index
-        }
-    };
     let mut half = Vec::with_capacity((half_w * half_h * 4) as usize);
     for y in 0..half_h {
-        let row = source_coordinate(y, half_h, *h) * w;
         for x in 0..half_w {
-            let at = ((row + source_coordinate(x, half_w, *w)) * 4) as usize;
+            let at = ((y * 2 * w + x * 2) * 4) as usize;
             half.extend_from_slice(&data[at..at + 4]);
         }
     }
@@ -1630,7 +1621,7 @@ impl HudAtlas {
                     full_sizes
                         .entry(image.0.clone())
                         .or_insert((image.1, image.2));
-                    *image = halved(image, false);
+                    *image = halved(image);
                 }
             }
             images.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
@@ -2046,7 +2037,11 @@ impl HudAtlas {
         let mut full_sizes = HashMap::new();
         #[cfg(target_os = "android")]
         if limit < MAX_ATLAS_SIZE {
-            Self::fit_mobile_atlas(&mut images, &mut full_sizes, &flags, limit)?;
+            if limit <= 4096 {
+                // The cloud renderer reads its pattern directly from the active resources.
+                images.retain(|(name, ..)| name != "environment/clouds");
+            }
+            Self::fit_mobile_atlas(&mut images, &mut full_sizes, &gui_sizes, &flags, limit)?;
         }
         // Blurred sprites are sampled linearly in the atlas (screen.wgsl): a
         // border wrapped from their own edges keeps the filter off their
@@ -5064,7 +5059,7 @@ texture=wide",
     #[test]
     fn half_size_keeps_every_other_texel() {
         let data: Vec<u8> = (0..9u8).flat_map(|i| [i, i, i, 255]).collect();
-        let half = halved(&("a".to_owned(), 3, 3, data), false);
+        let half = halved(&("a".to_owned(), 3, 3, data));
         assert_eq!((half.1, half.2), (2, 2));
         let kept: Vec<u8> = half.3.chunks(4).map(|p| p[0]).collect();
         assert_eq!(kept, [0, 2, 6, 8]);
@@ -6043,7 +6038,14 @@ texture=wide",
             ("entity/wolf/wolf".into(), 64, 32, vec![255; 64 * 32 * 4]),
         ];
         let mut full_sizes = HashMap::new();
-        HudAtlas::fit_mobile_atlas(&mut images, &mut full_sizes, &HashMap::new(), 1024).unwrap();
+        HudAtlas::fit_mobile_atlas(
+            &mut images,
+            &mut full_sizes,
+            &HashMap::new(),
+            &HashMap::new(),
+            1024,
+        )
+        .unwrap();
         let gui = images.iter().find(|i| i.0 == "gui/panel").unwrap();
         assert_eq!((gui.1, gui.2), (512, 256));
         assert!(!full_sizes.contains_key("gui/panel"));
@@ -6064,7 +6066,14 @@ texture=wide",
             ("horizon/map0".to_string(), 128, 128, Vec::new()),
         ];
         let mut full_sizes = HashMap::new();
-        HudAtlas::fit_mobile_atlas(&mut images, &mut full_sizes, &HashMap::new(), 1024).unwrap();
+        HudAtlas::fit_mobile_atlas(
+            &mut images,
+            &mut full_sizes,
+            &HashMap::new(),
+            &HashMap::new(),
+            1024,
+        )
+        .unwrap();
         let of = |name: &str| {
             let i = images.iter().find(|i| i.0 == name).unwrap();
             (i.1, i.2)

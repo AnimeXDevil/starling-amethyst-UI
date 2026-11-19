@@ -338,7 +338,9 @@ impl Panorama {
         });
         Self {
             vertices,
-            maximum_side: if cfg!(target_os = "android") && gl {
+            maximum_side: if cfg!(target_os = "android")
+                && (gl || device.limits().max_texture_dimension_2d <= 4096)
+            {
                 256
             } else {
                 u32::MAX
@@ -381,6 +383,12 @@ impl Panorama {
     fn cube(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::BindGroup {
         let (side, pixels) =
             reduced_texels(self.faces.size, self.faces.texels(), self.maximum_side);
+        if side != self.faces.size {
+            log::info!(
+                "Title panorama: reduced cube faces from {}px to {side}px",
+                self.faces.size
+            );
+        }
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
