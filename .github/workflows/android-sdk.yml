@@ -1,0 +1,78 @@
+name: android-sdk
+# The Android native mod route, step by step (branch android-native-sdk): first a toy (tools/android_dylib_toy)
+# that answers whether the std the APK builds from source (build_apk.py's TLS_FLAGS and BUILD_STD) can be one
+# shared library for the game and every mod. Its artifact goes to a phone by adb (`toyhost libtoymod.so`).
+on:
+  push:
+    branches: [android-native-sdk]
+    paths: ['tools/android_dylib_toy/**', '.github/workflows/android-sdk.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  toy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the NDK build_apk.py pins
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Install Rust for Android and cargo-ndk
+        run: |
+          bash tools/ci/rustup_install.sh --profile minimal --component rust-src --target aarch64-linux-android
+          cargo install cargo-ndk --version 3.5.4 --locked
+      # A: the std from source with the TLS flag, every crate linking it dynamically.
+      - name: Build the toy with the std from source (has-thread-local)
+        id: source
+        continue-on-error: true
+        working-directory: tools/android_dylib_toy
+        run: |
+          builtins=$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/libclang_rt.builtins-aarch64-android.a | tail -1)
+          export RUSTC_BOOTSTRAP=1
+          export RUSTFLAGS="-C prefer-dynamic -Z has-thread-local=yes -C link-arg=$builtins"
+          cargo ndk -t arm64-v8a --platform 26 build --release -Zbuild-std=std,panic_unwind 2>&1 | tail -40
+          test "${PIPESTATUS[0]}" -eq 0
+          mkdir -p "$RUNNER_TEMP/a"
+          find target/aarch64-linux-android/release -maxdepth 2 -name '*.so' -exec cp {} "$RUNNER_TEMP/a/" \;
+          cp target/aarch64-linux-android/release/toyhost "$RUNNER_TEMP/a/"
+          ls -la "$RUNNER_TEMP/a"
+      # B: the toolchain's own std library (no TLS flag), for comparison when A fails.
+      - name: Build the toy with the toolchain's std
+        id: prebuilt
+        continue-on-error: true
+        working-directory: tools/android_dylib_toy
+        run: |
+          rm -rf target
+          export RUSTFLAGS="-C prefer-dynamic"
+          cargo ndk -t arm64-v8a --platform 26 build --release 2>&1 | tail -40
+          test "${PIPESTATUS[0]}" -eq 0
+          mkdir -p "$RUNNER_TEMP/b"
+          find target/aarch64-linux-android/release -maxdepth 2 -name '*.so' -exec cp {} "$RUNNER_TEMP/b/" \;
+          cp target/aarch64-linux-android/release/toyhost "$RUNNER_TEMP/b/"
+          sysroot=$(rustc --print sysroot)
+          cp "$sysroot"/lib/rustlib/aarch64-linux-android/lib/libstd-*.so "$RUNNER_TEMP/b/" || true
+          ls -la "$RUNNER_TEMP/b"
+      - name: What each library needs
+        run: |
+          readelf=$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf)
+          for d in a b; do
+            for f in "$RUNNER_TEMP/$d"/*; do
+              [ -f "$f" ] || continue
+              echo "== $d/$(basename "$f")"
+              "$readelf" -d "$f" | grep -E 'NEEDED|SONAME|RUNPATH' || true
+              "$readelf" --dyn-syms "$f" | grep -cE '__emutls|__tls_get' || true
+            done
+          done
+          echo "A: ${{ steps.source.outcome }}  B: ${{ steps.prebuilt.outcome }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-dylib-toy
+          path: ${{ runner.temp }}/a
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-dylib-toy-prebuilt-std
+          path: ${{ runner.temp }}/b
+          if-no-files-found: ignore
