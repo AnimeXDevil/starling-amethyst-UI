@@ -133,9 +133,13 @@ impl Game<'_> {
         (ox + x0..ox + x1).contains(&x) && (oy + y0..oy + y1).contains(&y)
     }
 
-    /// How far a finger turned the inventory's player, in degrees, on a touch screen (where the
-    /// player does not follow a cursor).
+    /// How far a finger turned the inventory's player, in degrees, while using direct touch.
+    /// Virtual Mouse uses the same cursor-following preview as a physical mouse.
     pub(in crate::game) fn player_spin(&self) -> Option<f32> {
+        #[cfg(target_os = "android")]
+        if self.mobile.ui.virtual_mouse {
+            return None;
+        }
         self.has_touch().then_some(self.touch.slots.spin)
     }
 
