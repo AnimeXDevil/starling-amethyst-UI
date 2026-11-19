@@ -2064,8 +2064,7 @@ impl HudAtlas {
         )
         .or_else(|error| -> Result<_> {
             let models = reducible_model_sprites(root, &images, &bordered);
-            let layout =
-                Self::layout_reducing_models(&mut images, &mut gui_sizes, &models, MAX_ATLAS_SIZE)?;
+            let layout = Self::layout_reducing_models(&mut images, &mut gui_sizes, &models, limit)?;
             log::warn!("reduced HUD model texture resolution to keep the resource pack: {error}");
             Ok(layout)
         })?;
@@ -6086,6 +6085,19 @@ texture=wide",
         assert!(!full_sizes.contains_key("font/ascii"));
         assert!(!full_sizes.contains_key("horizon/map0"));
     }
+    #[test]
+    fn mobile_atlas_counts_separators_and_glyph_rows_at_the_device_limit() {
+        let mut images = [("gui/panel".to_owned(), 4095, 3583, Vec::new())];
+        let (width, _, bottom) = HudAtlas::mobile_layout(&images, 4096).unwrap();
+        assert_eq!((width, bottom + GLYPH_ROWS), (4096, 4096));
+
+        images[0].2 += 12;
+        assert!(HudAtlas::mobile_layout(&images, 4096).is_err());
+        images[0].2 -= 12;
+        images[0].1 += 1;
+        assert!(HudAtlas::mobile_layout(&images, 4096).is_err());
+    }
+
     #[test]
     fn mobile_layout_places_varied_rectangles_without_overlap() {
         let mut seed = 0x5a17u32;
