@@ -1,0 +1,16 @@
+{
+  // The Starling build codespace (C:/workspace/cs-build on the owner's PC). Ubuntu's base image
+  // instead of the default universal one, which takes 19 of the machine's 32 GB: the Android SDK,
+  // Rust and a build cache need the room. The toolchain is installed once by cs-build/setup.sh.
+  "name": "starling-build",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  }
+}
