@@ -29,18 +29,15 @@ use winit::{
     window::{Window, WindowId},
 };
 
-struct PreparedAccount {
-    key: String,
-    file: PathBuf,
-    appearance: crate::ha_launcher::skins::cloud::Cache,
-}
 pub(super) struct Launcher {
     home: PathBuf,
+    app_version: String,
     controller_edges: crate::ha_launcher::client::gamepad::Edges,
     controller_repeat: Option<(crate::ha_launcher::client::gamepad::Button, Instant, bool)>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     gui: Option<game::UiResources>,
+    gui_loader: Option<std::thread::JoinHandle<std::result::Result<game::UiResources, String>>>,
     pub(super) audio: Option<crate::ha_launcher::client::audio::Audio>,
     cursor: (f64, f64),
     mouse_down: bool,
@@ -61,11 +58,9 @@ pub(super) struct Launcher {
     drag: Option<gesture::Drag>,
     chooser: Option<chooser::Chooser>,
     exit_confirmation: bool,
+    setup_destination_open: bool,
     login: login::Login,
     wardrobe: wardrobe::Wardrobe,
-    session_worker: Option<mpsc::Receiver<std::result::Result<PreparedAccount, String>>>,
-    session_ready: bool,
-    prepared_session: Option<PathBuf>,
     pub(super) launching: bool,
     pub(super) launch_pending_tick: bool,
     pub(super) diagnostics_modal_open: bool,
@@ -178,43 +173,6 @@ impl Launcher {
                 log::warn!("Cannot write the factory touch layout: {error}");
             }
         }
-        // Pre-warm Microsoft session in background at startup so pressing Play doesn't stall.
-        let prewarm_session_worker = if crate::ha_launcher::account::Accounts::load()
-            .selected()
-            .is_some()
-        {
-            let id = catalog.config.microsoft_client_id.clone();
-            let game_home = catalog.config.game_home(&home);
-            let wardrobe_home = home.join("wardrobe");
-            let (tx, rx) = mpsc::channel();
-            std::thread::spawn(move || {
-                let res = (|| {
-                    let (account, secrets) = login::Login::session(&id)?
-                        .ok_or("The selected account changed. Choose Play again.")?;
-                    let appearance =
-                        crate::ha_launcher::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
-                            .unwrap_or_default();
-                    let file = crate::ha_launcher::account::write_session_file(
-                        &game_home.join("sessions"),
-                        &account,
-                        &secrets,
-                    )?;
-                    Ok(PreparedAccount {
-                        key: account.key(),
-                        file,
-                        appearance,
-                    })
-                })();
-                if let Err(unsent) = tx.send(res)
-                    && let Ok(prepared) = unsent.0
-                {
-                    let _ = std::fs::remove_file(prepared.file);
-                }
-            });
-            Some(rx)
-        } else {
-            None
-        };
         // Load the selected wardrobe and its last head before the first draw:
         // the account pill must have the real face instantly, not after a page visit.
         let mut wardrobe = wardrobe::Wardrobe::new(&home);
@@ -222,11 +180,14 @@ impl Launcher {
         Self {
             wardrobe,
             home,
+            app_version: crate::android::app_version()
+                .map_or_else(String::new, |(version, _)| version),
             controller_edges: Default::default(),
             controller_repeat: None,
             window: None,
             renderer: None,
             gui: None,
+            gui_loader: None,
             audio: None,
             cursor: (0.0, 0.0),
             mouse_down: false,
@@ -247,10 +208,8 @@ impl Launcher {
             drag: None,
             chooser: None,
             exit_confirmation: false,
+            setup_destination_open: false,
             login: login::Login::new(),
-            session_worker: prewarm_session_worker,
-            session_ready: false,
-            prepared_session: None,
             launching: false,
             launch_pending_tick: false,
             diagnostics_modal_open: false,
@@ -317,30 +276,66 @@ impl Launcher {
                 crate::ha_launcher::client::graphics::GraphicsApi::Auto
             },
         )?;
-        let atlas = source
-            .as_ref()
-            .and_then(|source| match HudAtlas::build(source) {
-                Ok(atlas) => Some(atlas),
-                Err(error) => {
-                    log::warn!("Launcher: the resources' GUI atlas: {error}");
-                    None
-                }
-            })
-            .unwrap_or_else(HudAtlas::boot);
+        let panorama = Arc::new(crate::ha_launcher::client::gfx::panorama::Faces::colour([
+            0, 0, 0, 255,
+        ]));
         let gui = game::UiResources {
-            atlas,
-            panorama: Arc::new(crate::ha_launcher::client::gfx::panorama::Faces::colour([
-                0, 0, 0, 255,
-            ])),
-            sounds: source
-                .as_ref()
-                .map(crate::ha_launcher::client::sound_events::SoundRegistry::load),
+            atlas: HudAtlas::boot(),
+            panorama: panorama.clone(),
+            sounds: None,
         };
+        self.gui_loader = source.and_then(|source| {
+            std::thread::Builder::new()
+                .name("launcher-assets".into())
+                .spawn(move || {
+                    Ok(game::UiResources {
+                        atlas: HudAtlas::build(&source).map_err(|error| error.to_string())?,
+                        panorama,
+                        sounds: Some(
+                            crate::ha_launcher::client::sound_events::SoundRegistry::load(&source),
+                        ),
+                    })
+                })
+                .inspect_err(|error| {
+                    log::warn!("Launcher: could not start UI asset loading: {error}")
+                })
+                .ok()
+        });
         renderer.set_loading_ui(&gui.atlas, gui.panorama.as_ref())?;
         self.renderer = Some(renderer);
         self.window = Some(window);
         self.gui = Some(gui);
         Ok(())
+    }
+
+    fn poll_gui_assets(&mut self) {
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
+        if !renderer.has_presented()
+            || self
+                .gui_loader
+                .as_ref()
+                .is_none_or(|worker| !worker.is_finished())
+        {
+            return;
+        }
+        let Some(worker) = self.gui_loader.take() else {
+            return;
+        };
+        match worker.join() {
+            Ok(Ok(gui)) => match renderer.set_loading_ui(&gui.atlas, gui.panorama.as_ref()) {
+                Ok(()) => {
+                    crate::ha_launcher::client::ui_theme::reset_atlas();
+                    self.gui = Some(gui);
+                }
+                Err(error) => log::warn!("Launcher: could not use the prepared GUI atlas: {error}"),
+            },
+            Ok(Err(error)) => {
+                log::warn!("Launcher: could not load the prepared GUI atlas: {error}")
+            }
+            Err(_) => log::warn!("Launcher: GUI asset loading stopped unexpectedly"),
+        }
     }
 
     fn request_back(&mut self) {
@@ -363,6 +358,8 @@ impl Launcher {
         }
         if self.diagnostics_modal_open {
             self.diagnostics_modal_open = false;
+        } else if self.setup_destination_open {
+            self.setup_destination_open = false;
         } else if self.exit_confirmation {
             self.exit_confirmation = false;
         } else if self.catalog.fm_modal.take().is_some() {
@@ -405,104 +402,53 @@ impl Launcher {
         }
     }
 
-    fn action(&mut self, events: &ActiveEventLoop) -> Result<()> {
+    fn action(&mut self, _events: &ActiveEventLoop) -> Result<()> {
         if self.exit_confirmation
+            || self.setup_destination_open
             || self.chooser.is_some()
             || self.worker.is_some()
-            || self.session_worker.is_some()
-            || self.launch_pending_tick
+            || self.launching
+            || self.login.pending()
         {
             return Ok(());
         }
-        if self.login.pending() {
+        if !crate::ha_launcher::client::official_install::ready(&self.home)
+            && matches!(
+                self.catalog.config.onboarding,
+                crate::ha_launcher::catalog::OnboardingState::Unseen
+                    | crate::ha_launcher::catalog::OnboardingState::Pending
+            )
+        {
+            self.focus = None;
+            self.setup_destination_open = true;
             return Ok(());
         }
         crate::ha_launcher::diagnostics::heartbeat(
             "play_requested",
             || serde_json::json!({"renderer":self.catalog.config.renderer.label(),"resolution_percent":self.catalog.config.game_render_scale(&self.home).percent()}),
         );
-        crate::ha_launcher::client::android_runtime::configure_worker_limit(
-            self.catalog.config.worker_limit,
-        );
-        crate::ha_launcher::client::android_runtime::configure_cache_budget(
-            self.catalog.config.cache_budget_mib,
-        );
+        self.launching = true;
+        self.error = None;
+        self.launch_pending_tick = true;
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+        Ok(())
+    }
+
+    fn launch_game(&mut self) -> Result<()> {
+        let installed = crate::ha_launcher::client::official_install::ready(&self.home);
         crate::ha_launcher::configure_input_mode(self.catalog.config.input_host);
         crate::ha_launcher::device_runtime::configure(self.catalog.config.device);
-        if crate::ha_launcher::client::official_install::ready(&self.home) {
-            if !self.launching {
-                self.launching = true;
-                self.error = None;
-                self.catalog.status = "Launching Minecraft 26.3...".into();
-                let game_home = self.catalog.config.game_home(&self.home);
-                if !self.session_ready
-                    && crate::ha_launcher::account::Accounts::load()
-                        .selected()
-                        .is_some()
-                {
-                    let id = self.catalog.config.microsoft_client_id.clone();
-                    let wardrobe_home = self.home.join("wardrobe");
-                    let (sender, receiver) = mpsc::channel();
-                    self.session_worker = Some(receiver);
-                    self.catalog.status = "Preparing account session and appearance...".into();
-                    std::thread::spawn(move || {
-                        let result = (|| {
-                            let (account, secrets) = login::Login::session(&id)?
-                                .ok_or("The selected account changed. Choose Play again.")?;
-                            let appearance = crate::ha_launcher::skins::cloud::fetch(
-                                &account,
-                                &secrets,
-                                &wardrobe_home,
-                            )
-                            .unwrap_or_default();
-                            let file = crate::ha_launcher::account::write_session_file(
-                                &game_home.join("sessions"),
-                                &account,
-                                &secrets,
-                            )?;
-                            Ok(PreparedAccount {
-                                key: account.key(),
-                                file,
-                                appearance,
-                            })
-                        })();
-                        if let Err(unsent) = sender.send(result)
-                            && let Ok(prepared) = unsent.0
-                        {
-                            let _ = std::fs::remove_file(prepared.file);
-                        }
-                    });
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
-                    return Ok(());
-                }
-                self.launch_pending_tick = true;
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
-                return Ok(());
-            }
-            crate::ha_launcher::client::android_resources::repair_structure_transforms(
-                &self.home.join("engine-data.zip"),
-                &self
-                    .home
-                    .join(".local/horizon-client")
-                    .join(horizon_core::VANILLA_VERSION),
-            )?;
-            crate::ha_launcher::platform::hide();
-            self.catalog.config.save(&self.home)?;
+        crate::ha_launcher::platform::hide();
+        self.catalog.config.save(&self.home)?;
+        if installed {
             self.catalog.config.apply_experimental_to_game(&self.home);
+            let game_home = self.catalog.config.game_home(&self.home);
+            std::fs::create_dir_all(&game_home)?;
             // Migrate the earlier launcher preset once; subsequent edits belong to Key Binds.
-            let keypad_path = self
-                .catalog
-                .config
-                .game_home(&self.home)
-                .join("horizon-keypad.json");
+            let keypad_path = game_home.join("horizon-keypad.json");
             if self.catalog.config.keypad_controls && !keypad_path.exists() {
-                if let Some(dir) = keypad_path.parent() {
-                    std::fs::create_dir_all(dir)?;
-                }
                 crate::ha_launcher::client::keypad::Settings {
                     enabled: true,
                     ..Default::default()
@@ -510,72 +456,25 @@ impl Launcher {
                 .save(&keypad_path)?;
             }
             self.catalog.config.keypad_controls = false;
-            let game_home = self.catalog.config.game_home(&self.home);
-            if !self.session_ready
-                && crate::ha_launcher::account::Accounts::load()
-                    .selected()
-                    .is_some()
-            {
-                let id = self.catalog.config.microsoft_client_id.clone();
-                let wardrobe_home = self.home.join("wardrobe");
-                let (sender, receiver) = mpsc::channel();
-                self.session_worker = Some(receiver);
-                self.catalog.status = "Preparing account session and appearance...".into();
-                std::thread::spawn(move || {
-                    let result = (|| {
-                        let (account, secrets) = login::Login::session(&id)?
-                            .ok_or("The selected account changed. Choose Play again.")?;
-                        let appearance = crate::ha_launcher::skins::cloud::fetch(
-                            &account,
-                            &secrets,
-                            &wardrobe_home,
-                        )
-                        .unwrap_or_default();
-                        let file = crate::ha_launcher::account::write_session_file(
-                            &game_home.join("sessions"),
-                            &account,
-                            &secrets,
-                        )?;
-                        Ok(PreparedAccount {
-                            key: account.key(),
-                            file,
-                            appearance,
-                        })
-                    })();
-                    if let Err(unsent) = sender.send(result)
-                        && let Ok(prepared) = unsent.0
-                    {
-                        let _ = std::fs::remove_file(prepared.file);
-                    }
-                });
-                return Ok(());
-            }
-            self.session_ready = false;
-            std::fs::create_dir_all(&game_home)?;
             if crate::ha_launcher::account::Accounts::load()
                 .selected()
                 .is_none()
             {
                 crate::ha_launcher::appearance::play_offline(&self.catalog.config.name);
-                self.wardrobe
-                    .prepare_game(&self.catalog.config.name, &game_home)?;
             }
-            self.error = None;
-            let _ = std::fs::remove_file(self.home.join("android-error.txt"));
-            // The A press that launches the game must not accept its first menu too.
-            crate::ha_launcher::client::android_runtime::clear_gamepads();
+            // Use local choices and any appearance already in memory. The game renews the
+            // selected account itself, so a background wardrobe request never blocks Play.
+            if let Err(error) = self
+                .wardrobe
+                .prepare_game(&self.catalog.config.name, &game_home)
+            {
+                log::warn!("Launcher: could not apply wardrobe choice: {error}");
+            }
             self.controller_edges = Default::default();
             self.controller_repeat = None;
-            // Starling runs the game in a process of its own: the app starts again into it, in
-            // the instance just saved (ha_launcher::play).
-            crate::ha_launcher::play();
-        } else {
-            // Starling's game fetches the official files and prepares them itself, on its setup
-            // screen: Play starts it there.
-            crate::ha_launcher::platform::hide();
-            self.catalog.config.save(&self.home)?;
-            crate::ha_launcher::play();
         }
+        crate::ha_launcher::play(installed)?;
+        let _ = std::fs::remove_file(self.home.join("android-error.txt"));
         Ok(())
     }
 }
@@ -588,14 +487,14 @@ impl ApplicationHandler for Launcher {
             events.exit();
         }
     }
-    fn suspended(&mut self, events: &ActiveEventLoop) {
+    fn suspended(&mut self, _events: &ActiveEventLoop) {
         crate::ha_launcher::diagnostics::heartbeat("suspended", || serde_json::json!({}));
         self.drag = None;
         if let Some(renderer) = &mut self.renderer {
             renderer.suspend_surface();
         }
     }
-    fn window_event(&mut self, events: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, events: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         if crate::ha_launcher::documents::handle_event(&event) {
             return;
         }
@@ -705,6 +604,7 @@ impl ApplicationHandler for Launcher {
     }
     fn about_to_wait(&mut self, events: &ActiveEventLoop) {
         crate::ha_launcher::diagnostics::heartbeat("launcher", || serde_json::json!({}));
+        self.poll_gui_assets();
         if let Some(result) = self
             .diagnostic_export
             .as_ref()
@@ -780,76 +680,12 @@ impl ApplicationHandler for Launcher {
             self.catalog.status = result.unwrap_or_else(|e| format!("File export failed: {e}"));
         }
         if self.login.poll() {
-            self.session_worker = None;
-            self.prepared_session = None;
-            self.session_ready = false;
             self.refresh_wardrobe_account();
-        }
-        if let Some(result) = self.session_worker.as_ref().and_then(|w| w.try_recv().ok()) {
-            let launch_pending = self.launching
-                || self.catalog.status == "Preparing account session and appearance...";
-            self.session_worker = None;
-            match result {
-                Ok(prepared) => {
-                    // Only the current selection may publish the game handoff.
-                    if crate::ha_launcher::account::Accounts::load()
-                        .selected()
-                        .is_none_or(|a| a.key() != prepared.key)
-                    {
-                        self.launching = false;
-                        self.launch_pending_tick = false;
-                        let _ = std::fs::remove_file(prepared.file);
-                        self.catalog.status =
-                            "The selected account changed. Choose Play again.".into();
-                    } else {
-                        let root = self.home.join("wardrobe");
-                        let cloud = prepared.appearance.skin.as_deref().map(|p| {
-                            (
-                                p,
-                                prepared.appearance.slim,
-                                prepared.appearance.cape.as_deref(),
-                            )
-                        });
-                        let appearance = crate::ha_launcher::skins::library::Library::load(&root)
-                            .and_then(|library| {
-                                library.prepare_game(
-                                    &root,
-                                    &prepared.key,
-                                    &self.catalog.config.game_home(&self.home),
-                                    cloud,
-                                )
-                            });
-                        match appearance {
-                            Ok(()) => {
-                                self.prepared_session = Some(prepared.file);
-                                self.session_ready = true;
-                                if launch_pending {
-                                    self.catalog.status.clear();
-                                    if let Err(e) = self.action(events) {
-                                        self.fail(e);
-                                    }
-                                }
-                            }
-                            Err(error) => {
-                                let _ = std::fs::remove_file(prepared.file);
-                                self.fail(error);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    if launch_pending {
-                        self.fail(e);
-                    } else {
-                        log::warn!("Background session pre-warm notice: {e}");
-                    }
-                }
-            }
         }
 
         if self.launch_pending_tick {
             self.launch_pending_tick = false;
-            if let Err(error) = self.action(events) {
+            if let Err(error) = self.launch_game() {
                 self.fail(error);
             }
         }
@@ -858,7 +694,6 @@ impl ApplicationHandler for Launcher {
         }
         let frame_ms = if self.worker.is_some()
             || self.launching
-            || self.session_worker.is_some()
             || self.catalog.busy()
             || self.drag.is_some()
             || self.login.pending()

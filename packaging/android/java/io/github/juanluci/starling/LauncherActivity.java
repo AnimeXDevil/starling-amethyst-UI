@@ -247,18 +247,19 @@ public final class LauncherActivity extends Activity {
                     (cy - size * 0.065f) * u, paint);
 
             float titleY = cy + size * 0.68f;
-            text("HORIZON", cx * u, titleY * u, 24f * u,
+            text("STARLING", cx * u, titleY * u, 24f * u,
                     Typeface.create("sans-serif-medium", Typeface.BOLD), textColor);
             float subY = titleY + 32f;
             text("RUST EDITION  •  ANDROID LAUNCHER", cx * u, subY * u, 11.5f * u,
                     Typeface.create("sans-serif-medium", Typeface.NORMAL), alpha(muted, 0.9f));
-            // The bar fills towards its end while the game comes back (a few seconds).
+            // Android is switching processes, so there is no percentage to report.
             float t = (SystemClock.uptimeMillis() - start) / 1000f;
-            float progress = 1f - (float) Math.exp(-t / 1.6f);
             float bw = Math.max(180f, Math.min(w * 0.34f, 260f)), bh = 6f;
             float bx = cx - bw / 2, by = subY + 28f;
             rounded(bx * u, by * u, bw * u, bh * u, 3f * u, track);
-            rounded(bx * u, by * u, Math.max(bw * Math.max(progress, 0.05f), bh) * u, bh * u,
+            float segment = bw * 0.30f;
+            float phase = 0.5f - 0.5f * (float) Math.cos(t * Math.PI);
+            rounded((bx + (bw - segment) * phase) * u, by * u, segment * u, bh * u,
                     3f * u, accent);
             text(message, cx * u, (by + 12f) * u, 11f * u, Typeface.DEFAULT, alpha(muted, 0.88f));
             postInvalidateOnAnimation();

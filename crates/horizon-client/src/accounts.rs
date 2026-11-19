@@ -4,7 +4,8 @@
 //! [`crate::auth`] for online-mode servers, renewed in the background before it runs out. The
 //! game's official files are fetched from Mojang's servers here too. Without a
 //! keystore (a desktop build, `STARLING_ACCOUNTS=1`) the secrets stay in memory for the run.
-use starling_account::files::{Pins, Progress, Sources, Wanted};
+pub use starling_account::files::Progress;
+use starling_account::files::{Pins, Sources, Wanted};
 pub use starling_account::skins::ELY_SKINS;
 pub use starling_account::{Account, Provider, SignInStage};
 use starling_account::{Endpoints, MemoryStore, SecretStore, SignIn, SignInState};
@@ -546,10 +547,18 @@ pub fn download_files() {
     let working = KeepWorking::new("files", "Downloading the game files");
     std::thread::spawn(move || {
         let _working = working;
+        let started = std::time::Instant::now();
         let result = (|| {
             let root = files_root();
             let _ = std::fs::remove_file(root.join(FILES_DONE));
             let progress = |p: Progress| {
+                if p.files == 0 && p.transfer_started.is_none() {
+                    log::info!(
+                        "Starling: verifying and fetching {} game files ({} MB)",
+                        p.files_total,
+                        p.bytes_total / 1_000_000
+                    );
+                }
                 let mut s = shared();
                 if matches!(s.files, Files::Checking | Files::Downloading(_)) {
                     s.files = Files::Downloading(p);
@@ -579,7 +588,13 @@ pub fn download_files() {
         let mut s = shared();
         s.files_cancel = None;
         s.files = match result {
-            Ok(()) => Files::Ready,
+            Ok(()) => {
+                log::info!(
+                    "Starling: game files verified in {:.1} s",
+                    started.elapsed().as_secs_f64()
+                );
+                Files::Ready
+            }
             Err(_) if cancel.load(Ordering::Relaxed) => Files::Missing,
             Err(e) => {
                 log::warn!("Horizon: the game files were not fetched: {e}");

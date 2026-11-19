@@ -64,6 +64,8 @@ pub struct Config {
     /// button of the title screen and the pause menu comes back here.
     #[serde(default)]
     pub open_directly: bool,
+    #[serde(skip_serializing_if = "OnboardingState::is_unseen")]
+    pub onboarding: OnboardingState,
     pub proxy: Option<String>,
     pub name: String,
     pub server: String,
@@ -112,6 +114,21 @@ pub struct Config {
     pub preset_edit_mode: String,
     #[serde(default)]
     pub theme: crate::ha_launcher::client::ui_theme::LauncherThemeConfig,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OnboardingState {
+    #[default]
+    Unseen,
+    Pending,
+    Chosen,
+    Complete,
+}
+impl OnboardingState {
+    fn is_unseen(&self) -> bool {
+        *self == Self::Unseen
+    }
 }
 
 fn default_true() -> bool {
