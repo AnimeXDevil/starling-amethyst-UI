@@ -30,6 +30,11 @@ RENAMED = {
     "horizon_client::game::native_hooks::Game<'_>::native_client_packet": (
         "horizon_client::game::native_hooks::Game<'_>::native_client_packet_old"
     ),
+    # A block entity's type and data, asked on the game: the level asks now, for the data only
+    # (the declaration owns the type), and keeps the old question beside it.
+    "horizon_client::game::native_hooks::Game<'_>::native_block_entity": (
+        "horizon_client::game::native_hooks::GameLevel<'_>::native_block_entity_old"
+    ),
 }
 MODULE = re.compile(r"^\s*(?:pub(?:\(crate\))? )?mod (\w+)\s*(?:;|\{)", re.M)
 # Calls with the arguments they took (a call, how many, what the new ones are).

@@ -389,6 +389,17 @@ impl GameLevel<'_> {
     ) {
         let _ = (dimension, piston, direction, push, destroy, canceled);
     }
+    /// A block entity's first saved data, as Horizon's `native_block_entity` asked for it before
+    /// the block's declaration owned the type: a mod answers the type and the data, and the data
+    /// is kept (`native_block_entity` calls this when no mod of the new hook answered).
+    /// ProjectE's projecte_core answers here.
+    pub(in crate::game) fn native_block_entity_old(
+        &self,
+        block: &str,
+        entity: &mut Option<(String, horizon_world::nbt::Compound)>,
+    ) {
+        let _ = (block, entity);
+    }
 }
 
 /// Where the old hooks are called from.

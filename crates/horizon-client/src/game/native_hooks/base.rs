@@ -14,6 +14,12 @@ impl GameLevel<'_> {
         entity: &mut Option<Compound>,
     ) {
         self.fire_block_entity(block, state, entity);
+        // Starling: a mod made for the old hook (game/starling/native_compat.rs) answers there.
+        if entity.is_none() {
+            let mut old = None;
+            self.native_block_entity_old(block, &mut old);
+            *entity = old.map(|(_, data)| data);
+        }
     }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
