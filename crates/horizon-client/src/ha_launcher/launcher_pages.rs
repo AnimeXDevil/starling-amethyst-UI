@@ -1828,7 +1828,7 @@ impl Launcher {
 
                 let text_max = (content_w - 190.0).max(80.0);
                 let title = ui.fit_text(Face::SemiBold, 15.0, &p.title, text_max);
-                let rich_summary = if crate::ha_launcher::catalog::source_only_mod(p) {
+                let rich_summary = if crate::ha_launcher::catalog::native_unsupported(p) {
                     "Native .hnmod temporarily unsupported on Android; built-in mods are available."
                 } else {
                     self.catalog
@@ -3274,7 +3274,7 @@ impl Launcher {
                 } else {
                     format!("Enable Built-in ({version})")
                 }
-            } else if crate::ha_launcher::catalog::source_only_mod(&modal.project) {
+            } else if crate::ha_launcher::catalog::native_unsupported(&modal.project) {
                 "Native .hnmod temporarily unsupported on Android".to_owned()
             } else if let Some(state) = self.catalog.download_label(&modal.project) {
                 state
