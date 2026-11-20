@@ -7,11 +7,12 @@
 //!   the repository (`repo`) whose releases hold the answer, `<job>.json` or `<job>.failed.json` in
 //!   `results-<job's first digit>`, and then `<job>.so`. The phone waits there ([`wait`]) and asks the
 //!   service only every [`ASK_SERVICE_EVERY`], for a build that is long in coming.
-//! - The store (v2), a library per mod: `store/builds.json` lists the game builds (Nightlies), each
-//!   with the game's own runtime per ABI, and `mods-<build>/index.json` that build's mod libraries
-//!   by the `.hmod`'s SHA-256. A mod the index doesn't have is asked of the service
-//!   (`POST /v2/mod`), and its answer waited for in `mods-<build>`.
-use serde::Deserialize;
+//! - The store (v2), a library per mod: `store/builds.json` lists the game builds (each the commit
+//!   a Nightly's APK is built from), and `mods-<build>/index.json` that build's mod libraries by
+//!   the `.hmod`'s SHA-256. A mod the index doesn't have is asked of the service
+//!   (`POST /v2/mod`), and its answer waited for in `mods-<build>`. A library loads only in the
+//!   game build it was made for.
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -119,7 +120,7 @@ pub fn mods_tag(build: &str) -> String {
     format!("mods-{build}")
 }
 
-/// One game build the store serves (`store/builds.json`).
+/// One game build the store serves (`store/builds.json`): the commit an APK is built from.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Build {
     pub build: String,
@@ -127,28 +128,23 @@ pub struct Build {
     pub nightly: Option<String>,
     #[serde(default)]
     pub date: Option<String>,
+    /// The Cargo profile its APK is built with, and its mods.
     #[serde(default)]
-    pub rust: Option<String>,
-    /// The release download folder of the build's SDK, with its `sdk.json`.
+    pub profile: Option<String>,
+    /// The ABIs the store builds its mods for.
     #[serde(default)]
-    pub sdk: Option<String>,
-    /// The game's own runtime, by ABI: what a phone downloads to play this build.
-    #[serde(default)]
-    pub abis: BTreeMap<String, Runtime>,
+    pub abis: BTreeMap<String, Abi>,
 }
 
-/// The game's runtime of a build for one ABI: an archive of its libraries (the SDK's runtime
-/// slice).
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct Runtime {
-    pub file: String,
-    pub url: String,
-    pub sha256: String,
-    pub size: u64,
+/// One ABI of a build in the store.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct Abi {
+    /// The Nightly's APK the store's build of the game was checked against.
+    #[serde(default)]
+    pub apk: Option<String>,
 }
 
-/// The builds of `store/builds.json`, newest first, without any row a phone shouldn't follow: one
-/// whose build isn't a commit, or whose runtime isn't a GitHub download with a SHA-256.
+/// The builds of `store/builds.json`, newest first, without a row whose build isn't a commit.
 pub fn builds(text: &str) -> Result<Vec<Build>, String> {
     #[derive(Deserialize)]
     struct File {
@@ -168,23 +164,11 @@ pub fn builds(text: &str) -> Result<Vec<Build>, String> {
         .into_iter()
         .filter_map(|row| serde_json::from_value::<Build>(row).ok())
         .filter(|b| hex(&b.build, 40))
-        .map(|mut b| {
-            b.sdk = b
-                .sdk
-                .filter(|s| s.starts_with("https://github.com/") && s.ends_with('/'));
-            b.abis.retain(|_, r| {
-                hex(&r.sha256, 64)
-                    && r.size > 0
-                    && r.url.starts_with("https://github.com/")
-                    && plain_file(&r.file)
-            });
-            b
-        })
         .collect())
 }
 
 /// A mod's library in a build's index, or in its own answer file (`<job>.json`).
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Library {
     pub job: String,
     pub id: String,
@@ -383,22 +367,6 @@ pub fn record(libraries: &[Library]) -> String {
     serde_json::json!({ "libraries": rows }).to_string()
 }
 
-/// The folder on the phone for build `build` with `libraries`: one per set of mods, so turning a
-/// set back on, on the same build, is a choice, not a download.
-pub fn set_folder(build: &str, libraries: &[Library]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut jobs: Vec<&str> = libraries.iter().map(|l| l.job.as_str()).collect();
-    jobs.sort_unstable();
-    let digest = Sha256::digest(jobs.join(" ").as_bytes());
-    let set: String = digest[..6].iter().map(|b| format!("{b:02x}")).collect();
-    format!("store-{}-{set}", &build[..build.len().min(12)])
-}
-
-/// The folder of build `build`'s game runtime on the phone, which every set of its mods shares.
-pub fn game_folder(build: &str) -> String {
-    format!("game-{build}")
-}
-
 /// A plain file name: no folder, nothing hidden.
 pub fn plain_file(name: &str) -> bool {
     !name.is_empty()
@@ -421,18 +389,8 @@ mod tests {
             build: commit.into(),
             nightly: None,
             date: None,
-            rust: None,
-            sdk: None,
-            abis: [(
-                "arm64-v8a".to_owned(),
-                Runtime {
-                    file: "runtime-aarch64-linux-android.tar.xz".into(),
-                    url: "https://github.com/x/y/releases/download/sdk/runtime.tar.xz".into(),
-                    sha256: "f".repeat(64),
-                    size: 1,
-                },
-            )]
-            .into(),
+            profile: None,
+            abis: [("arm64-v8a".to_owned(), Abi::default())].into(),
         }
     }
 
@@ -535,17 +493,19 @@ mod tests {
     }
 
     #[test]
-    fn builds_a_phone_should_not_follow_are_left_out() {
+    fn builds_read_as_the_store_writes_them_and_others_are_left_out() {
+        let apk = "https://github.com/a/b/releases/download/nightly/starling-arm64-v8a.apk";
         let text = serde_json::json!({"schema": 1, "builds": [
-            {"build": BUILD, "abis": {"arm64-v8a": {"file": "runtime.tar.xz", "url": "https://github.com/a/b/releases/download/t/runtime.tar.xz", "sha256": "f".repeat(64), "size": 3}}},
-            {"build": NEWER, "abis": {"arm64-v8a": {"file": "runtime.tar.xz", "url": "https://example.com/runtime.tar.xz", "sha256": "f".repeat(64), "size": 3}}},
+            {"build": BUILD, "nightly": "nightly-1", "profile": "quick",
+             "abis": {"arm64-v8a": {"target": "aarch64-linux-android", "apk": apk}}},
+            {"build": NEWER, "abis": {}},
             {"build": "main", "abis": {}},
         ]})
         .to_string();
         let listed = builds(&text).unwrap();
         assert_eq!(listed.len(), 2);
-        assert!(listed[0].abis.contains_key("arm64-v8a"));
-        assert!(listed[1].abis.is_empty(), "not a GitHub download");
+        assert_eq!(listed[0].profile.as_deref(), Some("quick"));
+        assert_eq!(listed[0].abis["arm64-v8a"].apk.as_deref(), Some(apk));
         assert!(builds(r#"{"schema": 2, "builds": []}"#).is_err());
     }
 
@@ -674,9 +634,8 @@ mod tests {
             record,
             serde_json::json!({"libraries": [{"file": "libveinminer.so", "sha256": a.sha256, "mod": "veinminer", "identity": a.identity}]})
         );
-        let folder = set_folder(BUILD, &[a.clone()]);
-        assert!(folder.starts_with("store-5e1f0c2d3a4b-") && plain_file(&folder));
-        assert_eq!(folder, set_folder(BUILD, &[a]));
+        let kept: Library = serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
+        assert_eq!(kept, a, "a library kept on the phone reads back as it was");
     }
 
     #[test]

@@ -121,9 +121,6 @@ starling-account = { path = "../starling-account" }
 horizon-port-pack = { path = "../horizon-port-pack" }
 url = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
-# Compile v2's store (game/native_builds.rs): a Nightly's game runtime, checked against its SDK's
-# sdk.json and unpacked by the SDK's own reader.
-horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["prebuilt"] }
 
 [target.'cfg(windows)'.dependencies]
 # DirectX 12, where Vulkan has no adapter or device, or by choice (`graphicsApi`, graphics.rs).

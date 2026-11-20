@@ -10,8 +10,9 @@
 //! which game runs and which the next start runs (`native_game`).
 //!
 //! Compile waits for the service's answer on GitHub, not by asking the service
-//! (`starling_store`: its free plan counts every request), and with an APK that plays them takes
-//! a library per mod from the store (Compile v2, below).
+//! (`starling_store`: its free plan counts every request), and with an APK whose game is a set of
+//! Rust libraries takes a library per mod from the store into the folder the game opens at its
+//! start (Compile v2, below).
 use super::Game;
 use horizon_client::{
     hud::HudBatch,
@@ -218,9 +219,6 @@ fn stamp_build(folder: &std::path::Path) -> Result<(), String> {
 /// Whether the build `name` loads at the next start, as NativeMods.chosen decides: its library
 /// is there, made for `version` and under this very install of the APK.
 fn loads(name: &str, version: &str) -> bool {
-    if name.starts_with(STORE_SET) {
-        return store_set_loads(name);
-    }
     let folder = dir().join(name);
     let read = |file: &str| {
         std::fs::read_to_string(folder.join(file))
@@ -618,53 +616,53 @@ fn fetch_library(
 
 // ---- Compile v2: a library per mod, from the store ---------------------------------------------
 //
-// With the game as a library of its own (a Nightly, with its SDK), each native mod is a small
-// library built once per game build (starling-client/mod-builds, scripts/store.py). Compile then
-// reads the store on GitHub, asks the service only for a mod the store doesn't have, and leaves on
-// the phone:
+// With the game as a set of Rust libraries (an APK built with -C prefer-dynamic), each native mod
+// is a small library of its own, built once per game build (starling-client/mod-builds,
+// scripts/store.py). Compile reads the store on GitHub, asks the service only for a mod the store
+// doesn't have, and leaves in the app's own files:
 //
-//   files/native/game-<build>/          the game's runtime for this ABI, unpacked, once per build
-//   files/native/store-<build>-<set>/   native-mods.json and the mods' libraries, `game` (the
-//                                       runtime folder's name), build.json, sent.sha256, apk
-//   files/native/current                the set to play from the next start
+//   HORIZON_PRIVATE/native-libs/          what the game opens at its start (android_lib.rs):
+//                                         native-mods.json, each lib<id>.so, each mod's package in
+//                                         horizon-native-mods/<id>/, and build.json and sent.sha256
+//                                         for the Mods page
+//   HORIZON_PRIVATE/native/store-libs/    every library downloaded, <job>.so beside its <job>.json,
+//                                         so turning a mod back on is no download
 //
-// Playing a set is the activity's (the game side of Compile v2): it says so with
-// STARLING_STORE_LOADER=1, and until it does Compile builds the whole game as before.
+// A library is for one game build, and the game refuses one of another (its identity), so only
+// this APK's own build is taken from the store.
 
-/// A folder of a set of mods' libraries from the store starts with this (`store::set_folder`).
-const STORE_SET: &str = "store-";
-/// In a set's folder: the folder of the game's runtime it plays with (`store::game_folder`).
-const GAME: &str = "game";
-/// In a game runtime's folder, once every file of it unpacked and checked.
-const READY: &str = "ready";
-/// What a game runtime may unpack to, at most.
-const RUNTIME_LIMIT: u64 = 2 << 30;
+/// What the game opens at its start, in the app's own files (android_lib.rs `NATIVE_LIBRARIES`).
+const NATIVE_LIBS: &str = "native-libs";
+/// The libraries downloaded, in files/native/.
+const STORE_LIBS: &str = "store-libs";
+/// Each mod's package beside the libraries (horizon-mod-host's `packages_beside`).
+const PACKAGES: &str = "horizon-native-mods";
 /// What the store says of a mod the per-mod route can't build (scripts/mod_lib.py).
 const WHOLE_GAME: &str = "whole-game Compile";
 
-/// Whether this APK plays a set from the store: the activity says so once it loads the game's
-/// runtime from a set's `game` folder and the mods' libraries beside the set's native-mods.json.
+fn native_libs() -> PathBuf {
+    horizon_client::logging::private_home().join(NATIVE_LIBS)
+}
+
+/// Whether this APK plays mods as libraries of their own: its game is a set of Rust libraries
+/// (built with -C prefer-dynamic), the mod host one of them, which a usual build folds into its one
+/// library. STARLING_STORE_LOADER=1 or 0 says so in place of the look.
 fn loads_store_builds() -> bool {
-    std::env::var("STARLING_STORE_LOADER").as_deref() == Ok("1")
+    match std::env::var("STARLING_STORE_LOADER").as_deref() {
+        Ok("1") => return true,
+        Ok("0") => return false,
+        _ => {}
+    }
+    std::fs::read_to_string("/proc/self/maps")
+        .is_ok_and(|maps| maps.contains("/libhorizon_mod_host.so"))
 }
 
-/// This game's own build, the commit its libraries come from, when the APK says it.
+/// This game's own build, the commit its libraries come from, when the APK says it: a mod's
+/// library is for that build alone.
 fn own_build() -> Option<&'static str> {
-    option_env!("HORIZON_GAME_BUILD_ID")
-        .or(option_env!("HORIZON_ANDROID_BUILD_COMMIT"))
+    option_env!("HORIZON_ANDROID_BUILD_COMMIT")
+        .or(option_env!("HORIZON_GAME_BUILD_ID"))
         .filter(|commit| commit.len() == 40)
-}
-
-/// Whether the store set `name` plays at the next start: its record is there, and its game's
-/// runtime unpacked whole.
-fn store_set_loads(name: &str) -> bool {
-    let folder = dir().join(name);
-    let game = std::fs::read_to_string(folder.join(GAME)).unwrap_or_default();
-    let game = game.trim();
-    loads_store_builds()
-        && store::plain_file(game)
-        && folder.join(store::RECORD).is_file()
-        && dir().join(game).join(READY).is_file()
 }
 
 /// The native mods on, as the store knows them: each one's `.hmod` and its SHA-256, once each as
@@ -690,11 +688,8 @@ fn store_wanted() -> Result<Option<Vec<(PathBuf, store::Wanted)>>, String> {
         if !matches!(bundle, horizon_mod_package::index::native::Any::Flat(_)) {
             return Ok(None);
         }
-        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let source: String = Sha256::digest(&bytes)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let source =
+            file_sha256(&path).ok_or_else(|| format!("{}: can't be read", path.display()))?;
         wanted.push((
             path,
             store::Wanted {
@@ -702,9 +697,6 @@ fn store_wanted() -> Result<Option<Vec<(PathBuf, store::Wanted)>>, String> {
                 source,
             },
         ));
-    }
-    if wanted.is_empty() {
-        return Err("There is no native mod to compile.".into());
     }
     Ok(Some(wanted))
 }
@@ -720,19 +712,17 @@ fn github_text(agent: &ureq::Agent, url: &str) -> Result<Option<String>, String>
 
 /// What the store did with the mods on.
 enum FromStore {
-    /// The set's folder, chosen for the next start.
-    Built(String),
+    /// They play from the next start, from [`NATIVE_LIBS`].
+    Built,
     /// The store can't play them (why): the whole-game Compile can.
     NotHere(String),
 }
 
-/// Compile v2: the mods on, from the store, on this game's own build or the Nightly the store has
-/// them all for (`store::plan`), the ones it lacks built by the service, with that build's game
-/// runtime when the phone doesn't have it: the set's folder, chosen for the next start. The store
-/// is read from GitHub; the service is asked once for each mod the store lacks.
+/// Compile v2: the mods on, as libraries of this game's own build from the store, the ones it
+/// lacks built by the service, into [`NATIVE_LIBS`] for the next start. The store is read from
+/// GitHub; the service is asked once for each mod the store lacks.
 fn compile_from_store(
     server: &str,
-    version: &str,
     agent: &ureq::Agent,
     shared: &Mutex<Shared>,
     asked: &mut u32,
@@ -742,9 +732,15 @@ fn compile_from_store(
         s.status = text;
         s.building_since = None;
     };
+    let Some(own) = own_build() else {
+        return Ok(FromStore::NotHere("this APK doesn't say its build".into()));
+    };
     let Some(wanted) = store_wanted()? else {
         return Ok(FromStore::NotHere("a mod is Starling's old bundle".into()));
     };
+    if wanted.is_empty() {
+        return Err("There is no native mod to compile.".into());
+    }
     let abi = releases::process_abi();
     say("Looking for your mods in the store...".into());
     let repo = store::STORE_REPO;
@@ -755,7 +751,11 @@ fn compile_from_store(
     else {
         return Ok(FromStore::NotHere("the store has no builds yet".into()));
     };
-    let builds = store::builds(&text)?;
+    // Only this game's build: a library of another one doesn't load here.
+    let builds: Vec<store::Build> = store::builds(&text)?
+        .into_iter()
+        .filter(|b| b.build == own)
+        .collect();
     let list: Vec<store::Wanted> = wanted.iter().map(|(_, w)| w.clone()).collect();
     let plan = store::plan(
         &builds,
@@ -766,7 +766,7 @@ fn compile_from_store(
         },
         &list,
         abi,
-        own_build(),
+        Some(own),
     );
     let (build, libraries) = match plan {
         store::Plan::Ready { build, libraries } => (build, libraries),
@@ -786,71 +786,159 @@ fn compile_from_store(
         store::Plan::Fails { id, error } => return Err(format!("{id}: {error}")),
         store::Plan::NoBuild => {
             return Ok(FromStore::NotHere(format!(
-                "the store has no build for {abi}"
+                "the store has no build {own} for {abi}"
             )));
         }
     };
-    let runtime = build
-        .abis
-        .get(abi)
-        .cloned()
-        .ok_or_else(|| format!("The store has no game for {abi}."))?;
-    let game = store::game_folder(&build.build);
-    if !dir().join(&game).join(READY).is_file() {
-        say(format!(
-            "Downloading the game ({})...",
-            build.nightly.as_deref().unwrap_or(&build.build[..12])
-        ));
-        fetch_runtime(agent, &build, &runtime, &game, shared)?;
-    }
-    let set = store::set_folder(&build.build, &libraries);
-    let folder = dir().join(&set);
-    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let cache = dir().join(STORE_LIBS);
+    std::fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", cache.display()))?;
     let tag = store::mods_tag(&build.build);
     for library in &libraries {
-        let path = folder.join(&library.library);
-        if file_sha256(&path).as_deref() == Some(library.sha256.as_str()) {
-            continue;
+        let path = cache.join(&library.file);
+        if file_sha256(&path).as_deref() != Some(library.sha256.as_str()) {
+            say(format!(
+                "Downloading {}...",
+                mods_label(std::slice::from_ref(&library.id))
+            ));
+            let part = cache.join(format!("{}.part", library.file));
+            let url = store::download(repo, &tag, &library.file);
+            fetch_library(agent, &url, &part, library.size, &library.sha256, shared)?;
+            std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
         }
-        say(format!(
-            "Downloading {}...",
-            mods_label(&[library.id.clone()])
-        ));
-        let part = folder.join(format!("{}.part", library.library));
-        let url = store::download(repo, &tag, &library.file);
-        fetch_library(agent, &url, &part, library.size, &library.sha256, shared)?;
-        std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
+        let row = serde_json::to_string(library).map_err(|e| e.to_string())?;
+        std::fs::write(cache.join(format!("{}.json", library.job)), row)
+            .map_err(|e| e.to_string())?;
     }
-    let write = |name: &str, text: &str| {
-        std::fs::write(folder.join(name), text).map_err(|e| format!("{name}: {e}"))
+    put_native_libs(&libraries, &wanted)?;
+    let _ = std::fs::remove_file(dir().join("current"));
+    let _ = std::fs::remove_file(dir().join("starts"));
+    log::info!(
+        "Horizon: {} native mods from the store, for build {}, with {asked} requests to the \
+         build service",
+        libraries.len(),
+        build.build
+    );
+    Ok(FromStore::Built)
+}
+
+/// [`NATIVE_LIBS`] made again with `libraries` (each in [`STORE_LIBS`]) and the packages of the
+/// mods `wanted`, whole or not at all: made beside it, then put in its place. The game opens it
+/// at its next start; one that runs now keeps the libraries it opened.
+fn put_native_libs(
+    libraries: &[store::Library],
+    wanted: &[(PathBuf, store::Wanted)],
+) -> Result<(), String> {
+    let io = |path: &std::path::Path| {
+        let path = path.display().to_string();
+        move |e: std::io::Error| format!("{path}: {e}")
     };
-    write(store::RECORD, &store::record(&libraries))?;
-    write(GAME, &game)?;
-    write("for", version)?;
+    let folder = native_libs();
+    let next = folder.with_extension("next");
+    let _ = std::fs::remove_dir_all(&next);
+    std::fs::create_dir_all(next.join(PACKAGES)).map_err(io(&next))?;
+    let cache = dir().join(STORE_LIBS);
+    for library in libraries {
+        let to = next.join(&library.library);
+        // A real file, never a link: the loader refuses links.
+        if std::fs::hard_link(cache.join(&library.file), &to).is_err() {
+            std::fs::copy(cache.join(&library.file), &to).map_err(io(&to))?;
+        }
+        let Some((path, _)) = wanted.iter().find(|(_, w)| w.id == library.id) else {
+            return Err(format!("{} went from the folder.", library.id));
+        };
+        let Ok(horizon_mod_package::index::native::Any::Flat(bundle)) =
+            horizon_mod_package::index::native::Any::read(path)
+        else {
+            return Err(format!("{}: can't be read", path.display()));
+        };
+        let package = next.join(PACKAGES).join(&library.id);
+        std::fs::create_dir_all(&package).map_err(io(&package))?;
+        for name in ["horizon-mod.toml", "icon.png"] {
+            if let Some(bytes) = bundle.files.get(name) {
+                std::fs::write(package.join(name), bytes).map_err(io(&package))?;
+            }
+        }
+    }
+    std::fs::write(next.join(store::RECORD), store::record(libraries)).map_err(io(&next))?;
     let mods: Vec<serde_json::Value> = libraries
         .iter()
         .map(|l| serde_json::json!({"id": l.id, "version": l.version}))
         .collect();
-    write(
-        "build.json",
-        &serde_json::json!({"mods": mods, "build": build.build, "nightly": build.nightly, "abi": abi})
-            .to_string(),
-    )?;
+    let about = serde_json::json!({"mods": mods, "build": own_build()});
+    std::fs::write(next.join("build.json"), about.to_string()).map_err(io(&next))?;
     // What it was made from: a mod replaced under the same id makes it out of date.
     if let Some(sent) = request_digest() {
-        write(SENT, &sent)?;
+        std::fs::write(next.join(SENT), sent).map_err(io(&next))?;
     }
-    stamp_build(&folder)?;
-    std::fs::write(dir().join("current"), &set).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(dir().join("starts"));
-    prune_store(&set);
-    log::info!(
-        "Horizon: {} native mods from the store, on build {}, with {asked} requests to the build \
-         service",
-        libraries.len(),
-        build.build
-    );
-    Ok(FromStore::Built(set))
+    let old = folder.with_extension("old");
+    let _ = std::fs::remove_dir_all(&old);
+    if folder.exists() {
+        std::fs::rename(&folder, &old).map_err(io(&folder))?;
+    }
+    std::fs::rename(&next, &folder).map_err(io(&folder))?;
+    let _ = std::fs::remove_dir_all(&old);
+    Ok(())
+}
+
+/// The libraries the next start opens are the native mods on now (`wanted`, sent as `request`).
+fn native_libs_current(wanted: &BTreeSet<String>, request: Option<&str>) -> bool {
+    let folder = native_libs();
+    if !loads_store_builds() || !folder.join(store::RECORD).is_file() {
+        return false;
+    }
+    let about = std::fs::read_to_string(folder.join("build.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .unwrap_or_default();
+    if about["build"].as_str() != own_build() {
+        return false;
+    }
+    let mods: BTreeSet<String> = about["mods"]
+        .as_array()
+        .map(|mods| {
+            mods.iter()
+                .filter_map(|m| m["id"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let sent = std::fs::read_to_string(folder.join(SENT))
+        .ok()
+        .map(|text| text.trim().to_owned());
+    horizon_client::mod_list::native_build_current(sent.as_deref(), &mods, wanted, request)
+}
+
+/// The native mods on changed: [`NATIVE_LIBS`] made again from the libraries already downloaded,
+/// when every mod on has one; with none on, an empty record, so none opens. Else the Mods page
+/// offers Compile.
+fn native_libs_follow() {
+    if !loads_store_builds() || own_build().is_none() || !native_libs().exists() {
+        return;
+    }
+    let Ok(Some(wanted)) = store_wanted() else {
+        return;
+    };
+    let abi = releases::process_abi();
+    let cache = dir().join(STORE_LIBS);
+    let mut libraries = Vec::new();
+    for (_, w) in &wanted {
+        let job = store::job_of(&w.source, abi);
+        let row = std::fs::read_to_string(cache.join(format!("{job}.json")))
+            .ok()
+            .and_then(|text| serde_json::from_str::<store::Library>(&text).ok());
+        match row {
+            Some(library)
+                if file_sha256(&cache.join(&library.file)).as_deref()
+                    == Some(library.sha256.as_str()) =>
+            {
+                libraries.push(library)
+            }
+            // One the phone doesn't have: Compile fetches it.
+            _ => return,
+        }
+    }
+    if let Err(e) = put_native_libs(&libraries, &wanted) {
+        log::warn!("Horizon: the native mod libraries were not made again: {e}");
+    }
 }
 
 /// The SHA-256 of the file at `path`, if it is there.
@@ -983,73 +1071,6 @@ fn build_in_store(
         looks += 1;
     }
     Ok(built)
-}
-
-/// Build `build`'s game runtime for this ABI into files/native/`game`: the archive checked against
-/// the store and the build's own sdk.json, then unpacked by the SDK's reader (nothing but plain
-/// files and folders inside it, within [`RUNTIME_LIMIT`]).
-fn fetch_runtime(
-    agent: &ureq::Agent,
-    build: &store::Build,
-    runtime: &store::Runtime,
-    game: &str,
-    shared: &Mutex<Shared>,
-) -> Result<(), String> {
-    use horizon_mod_package::sdk;
-    let base = build
-        .sdk
-        .as_deref()
-        .ok_or("The store names no SDK for this build of the game.")?;
-    let text = github_text(agent, &format!("{base}{}", sdk::INDEX))?
-        .ok_or("This build of the game has no sdk.json.")?;
-    let index = sdk::Index::read(text.as_bytes(), &build.build).map_err(|e| e.to_string())?;
-    let asset = index.asset(&runtime.file).map_err(|e| e.to_string())?;
-    if asset.sha256 != runtime.sha256 || asset.size != runtime.size {
-        return Err("The store and the game's SDK disagree about the game.".into());
-    }
-    let part = dir().join(format!("{game}.part"));
-    fetch_library(
-        agent,
-        &runtime.url,
-        &part,
-        runtime.size,
-        &runtime.sha256,
-        shared,
-    )?;
-    let into = dir().join(game);
-    // A runtime half unpacked before, which `unpack` takes for one there.
-    let _ = std::fs::remove_dir_all(&into);
-    sdk::unpack(&index, &runtime.file, &part, &into, RUNTIME_LIMIT).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&part);
-    std::fs::write(into.join(READY), &runtime.sha256).map_err(|e| e.to_string())
-}
-
-/// The store's sets of other builds, and the game runtimes no set left plays, go: `keep`'s build
-/// and the one this game runs stay. A set of the same build stays, so turning mods back on is a
-/// choice, not a download.
-fn prune_store(keep: &str) {
-    let build_of = |set: &str| set.splitn(3, '-').nth(1).map(str::to_owned);
-    let keep_build = build_of(keep);
-    let now = running();
-    let names: Vec<String> = std::fs::read_dir(dir())
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    let mut games = BTreeSet::new();
-    for name in names.iter().filter(|n| n.starts_with(STORE_SET)) {
-        if build_of(name.as_str()) != keep_build && now.as_deref() != Some(name.as_str()) {
-            let _ = std::fs::remove_dir_all(dir().join(name));
-        } else if let Ok(game) = std::fs::read_to_string(dir().join(name).join(GAME)) {
-            games.insert(game.trim().to_owned());
-        }
-    }
-    for name in names.iter().filter(|n| n.starts_with("game-")) {
-        if !games.contains(name.as_str()) && !name.ends_with(".part") {
-            let _ = std::fs::remove_dir_all(dir().join(name));
-        }
-    }
 }
 
 /// What the service says of a job on its way, on the card: Ok(Some) once done, Ok(None) while it
@@ -1293,8 +1314,8 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
     // Compile v2: a library per mod from the store, when this APK plays one; else (or when the
     // store can't play these mods) the whole game with them, as before.
     if own_service && loads_store_builds() {
-        match compile_from_store(&server, version, &agent, shared, &mut asked)? {
-            FromStore::Built(name) => return Ok(name),
+        match compile_from_store(&server, &agent, shared, &mut asked)? {
+            FromStore::Built => return Ok(NATIVE_LIBS.to_owned()),
             FromStore::NotHere(why) => log::info!(
                 "Horizon: the store can't play these native mods ({why}): compiling the game \
                  with them"
@@ -1475,9 +1496,11 @@ impl Game<'_> {
         // The next start's build is current only for the mods as they are now: one replaced under
         // the same id needs a new Compile (`mod_list::native_build_current`).
         let request = (!wanted.is_empty()).then(request_digest).flatten();
+        // Or, with no build chosen, the libraries the next start opens (Compile v2).
         let next_current = next_build
             .as_ref()
-            .is_some_and(|b| b.current_for(&wanted, request.as_deref()));
+            .is_some_and(|b| b.current_for(&wanted, request.as_deref()))
+            || (next.is_none() && native_libs_current(&wanted, request.as_deref()));
         if compiling {
             game.lines
                 .push((tr("starling.mods.native.compiling", &[]), false));
@@ -1533,6 +1556,8 @@ impl Game<'_> {
             .iter()
             .enumerate()
             .any(|(j, m)| m.native.is_some() && !m.id.is_empty() && mods.is_on(j));
+        // The libraries the next start opens follow the mods on, from those already here.
+        native_libs_follow();
         if !any_on {
             let _ = std::fs::remove_file(dir().join("current"));
             let _ = std::fs::remove_file(dir().join("starts"));
@@ -1755,7 +1780,7 @@ impl Game<'_> {
                     format!("This build came from {host}, not from Starling's server.")
                 });
                 (
-                    if name.starts_with(COMPILED) {
+                    if name.starts_with(COMPILED) || name == NATIVE_LIBS {
                         "Your native mods are ready".to_owned()
                     } else {
                         format!("{} is ready", label(name))
