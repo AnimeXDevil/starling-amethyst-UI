@@ -823,8 +823,7 @@ fn compile_from_store(
 
 /// [`NATIVE_LIBS`] made again with `libraries` (each in [`STORE_LIBS`]) and the packages of the
 /// mods `wanted` (each `.hmod` unpacked), whole or not at all: made beside it, then put in its
-/// place. The game opens it
-/// at its next start; one that runs now keeps the libraries it opened.
+/// place. The game opens it at its next start; one that runs now keeps the libraries it opened.
 fn put_native_libs(
     libraries: &[store::Library],
     wanted: &[(PathBuf, store::Wanted)],
