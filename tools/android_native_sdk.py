@@ -83,7 +83,7 @@ def prepare() -> None:
         if text.count("members = [\n") != 1:
             sys.exit("prepare: Cargo.toml has no single `members = [` to add the mods' folder to")
         root.write_text(text.replace("members = [\n", f'members = [\n    "{MODS_DIR}/*",\n', 1))
-    (ROOT / MODS_DIR).mkdir(exist_ok=True)
+    placeholder()
     # horizon-world's build script hashes Cargo.lock into its snapshot key and reruns when it changes: the mods'
     # packages change it, and the whole game above horizon-world would build again, unlike the APK's. Here it
     # watches its own sources and manifests only.
@@ -96,6 +96,15 @@ def prepare() -> None:
     text = text.replace(lock_line, "").replace(watched, watched.replace(", lock]", "]"))
     script.write_text(text)
     print("prepare: horizon-world's build script leaves Cargo.lock out")
+
+
+def placeholder() -> None:
+    """An empty package in the mods' folder: Cargo takes a members glob that matches nothing for a path."""
+    folder = ROOT / MODS_DIR / "_placeholder"
+    (folder / "src").mkdir(parents=True, exist_ok=True)
+    (folder / "Cargo.toml").write_text('[package]\nname = "starling-native-mods-placeholder"\nversion = "0.0.0"\n'
+                                       'edition = "2024"\npublish = false\n')
+    (folder / "src" / "lib.rs").write_text("//! Keeps the workspace's native-mods-build/* glob matching a package.\n")
 
 
 def game_build() -> tuple[str, str]:
@@ -157,9 +166,10 @@ def mods(out: Path, packages: list[Path], profile: str, abi: str) -> None:
     folder = ROOT / MODS_DIR
     if f'"{MODS_DIR}/*"' not in (ROOT / "Cargo.toml").read_text():
         sys.exit("mods: run `prepare` first, before the APK's build")
-    if folder.exists():
-        shutil.rmtree(folder)
-    folder.mkdir()
+    for old in folder.iterdir() if folder.exists() else ():
+        if old.name != "_placeholder":
+            shutil.rmtree(old)
+    placeholder()
     built = []
     for path in packages:
         work = folder / path.stem
