@@ -1811,7 +1811,11 @@ impl Game<'_> {
     /// (docs/design/mod-hotload.md), through the resource reload and then the
     /// server's data reload (`mods_reloaded`); those that add blocks, items or
     /// worldgen wait for a restart, and the Mods page says so.
-    pub(super) fn switch_mods(&mut self) {
+    ///
+    /// Starling: with `apply` false only the Mods page's note follows the switches. Options apply
+    /// them as they close, in one reload: a reload for every switch put the loading screen up
+    /// between two taps, and the switches made under it were lost.
+    pub(super) fn switch_mods(&mut self, apply: bool) {
         let Some(applied) = self.mods.applied.clone() else {
             return;
         };
@@ -1840,6 +1844,9 @@ impl Game<'_> {
         }
         self.ui.options.mods_note = (!waiting.is_empty())
             .then(|| lang::tr("horizon.mods.switch.restart", &[&waiting.join(", ")]));
+        if !apply {
+            return;
+        }
         let changed = applied
             .symmetric_difference(&next)
             .any(|id| content.contains(id));
@@ -1901,7 +1908,12 @@ impl Game<'_> {
         if let Some(server) = &self.integrated {
             server.post(reload);
         } else if self.remote.is_none() {
+            // Starling: with no server yet (the title screen) the reload runs on this game, where
+            // the switches are the player's: they keep what the player chose, a mod waiting for a
+            // restart or a switch made during the reload too, not only what loaded.
+            let wanted = self.settings.mods.enabled.clone();
             reload(self);
+            self.settings.mods.enabled = wanted;
         }
     }
     /// Apply the player's switches at the canonical native and wasm dispatch boundary.

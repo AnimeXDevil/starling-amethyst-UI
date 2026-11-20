@@ -498,7 +498,7 @@ impl Game<'_> {
                     self.settings.save(&Self::options_path());
                     self.settings.keys.sync_action_bindings();
                     self.apply_settings();
-                    self.switch_mods();
+                    self.switch_mods(false);
                     self.sync_native_switches();
                     self.sync_pregen_option();
                     self.sync_agent_control();
@@ -535,6 +535,8 @@ impl Game<'_> {
                     #[cfg(target_os = "android")]
                     self.mobile_options_apply(true);
                     self.settings.save(&Self::options_path());
+                    // The mods switched on the Mods page, in one reload (`switch_mods`).
+                    self.switch_mods(true);
                     let to_game = self.options_from_title;
                     let back = if let Some(screen) = self.panel.recipes_settings_return.take() {
                         screen

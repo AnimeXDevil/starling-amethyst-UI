@@ -420,6 +420,11 @@ impl<'de> Deserialize<'de> for BlockShapes {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Shapes {
+            // Starling: one property by name, as light and the other state values take it.
+            // Horizon's catalog mods (voltz, factory_blocks, additional_lights, simplylight)
+            // write their shapes so, and were refused whole for it.
+            #[serde(default)]
+            property: String,
             #[serde(default)]
             properties: Vec<String>,
             #[serde(default)]
@@ -428,7 +433,7 @@ impl<'de> Deserialize<'de> for BlockShapes {
         }
         let shapes = Shapes::deserialize(deserializer)?;
         Ok(Self(StateValues {
-            property: String::new(),
+            property: shapes.property,
             properties: shapes.properties,
             values: shapes.values,
             default: shapes.default,
@@ -2262,9 +2267,9 @@ capabilities = ["registries"]
             block.collision_shapes.as_ref().unwrap().default,
             Some(vec![])
         );
-        assert!(
-            serde_json::from_str::<BlockShapes>(r#"{"property":"axis","default":[]}"#).is_err()
-        );
+        // Starling: one property by name, as Horizon's catalog mods write their shapes.
+        let one: BlockShapes = serde_json::from_str(r#"{"property":"axis","default":[]}"#).unwrap();
+        assert_eq!(one.property, "axis");
         for value in [
             r#"{"properties":["axis","axis"],"default":[]}"#,
             r#"{"properties":["Axis"],"default":[]}"#,

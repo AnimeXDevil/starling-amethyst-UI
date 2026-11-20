@@ -718,6 +718,37 @@ pub struct LocalItem {
     pub size_bytes: u64,
     pub badge: &'static str,
     pub subtitle: String,
+    /// A mod's id as `horizon-mods.txt` keys its switch (`package_mod_id`); empty for packs and shaders.
+    pub mod_id: String,
+}
+
+/// The id the game knows a mod package by, `horizon-mod.toml`'s `id`, which `horizon-mods.txt` keys
+/// its switch by; the file's name without its extension when there is no manifest to read (a .jar,
+/// an old .hnmod). A catalog download is named `<id>-<version>.hmod`, so its name alone never
+/// matched the switch, and Installed showed every such mod off whatever the game ran.
+fn package_mod_id(path: &Path, file_name: &str) -> String {
+    let stem = file_name
+        .strip_suffix(".hmod")
+        .or_else(|| file_name.strip_suffix(".hnmod"))
+        .or_else(|| file_name.strip_suffix(".jar"))
+        .unwrap_or(file_name);
+    let manifest = || -> Option<String> {
+        let text = if path.is_dir() {
+            std::fs::read_to_string(path.join("horizon-mod.toml")).ok()?
+        } else {
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(path).ok()?).ok()?;
+            let mut text = String::new();
+            std::io::Read::read_to_string(
+                &mut archive.by_name("horizon-mod.toml").ok()?,
+                &mut text,
+            )
+            .ok()?;
+            text
+        };
+        let table: toml::Table = toml::from_str(&text).ok()?;
+        table.get("id")?.as_str().map(str::to_owned)
+    };
+    manifest().unwrap_or_else(|| stem.to_owned())
 }
 impl Catalog {
     pub fn new(home: &Path) -> Self {
@@ -828,6 +859,11 @@ impl Catalog {
                 if !valid {
                     continue;
                 }
+                let mod_id = if kind == crate::ha_launcher::client::content_files::Kind::Mods {
+                    package_mod_id(&entry.path(), &name)
+                } else {
+                    String::new()
+                };
                 let enabled = match kind {
                     crate::ha_launcher::client::content_files::Kind::Packs => {
                         settings.resource_packs.contains(&format!("file/{name}"))
@@ -835,10 +871,9 @@ impl Catalog {
                     crate::ha_launcher::client::content_files::Kind::Shaders => {
                         settings.horizon.shader_pack == name
                     }
-                    crate::ha_launcher::client::content_files::Kind::Mods => name
-                        .strip_suffix(".hmod")
-                        .or_else(|| name.strip_suffix(".jar"))
-                        .is_some_and(|id| on.enabled.contains(id)),
+                    crate::ha_launcher::client::content_files::Kind::Mods => {
+                        on.enabled.contains(&mod_id) && !on.disabled.contains(&mod_id)
+                    }
                 };
                 let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 let badge = match kind {
@@ -873,6 +908,7 @@ impl Catalog {
                     size_bytes,
                     badge,
                     subtitle,
+                    mod_id,
                 });
             }
         }
@@ -893,14 +929,13 @@ impl Catalog {
             {
                 continue;
             }
-            let mod_id = file_name
-                .strip_prefix("horizon-native-mods/")
-                .unwrap_or(&file_name)
-                .strip_suffix(".hnmod")
-                .or_else(|| file_name.strip_suffix(".hmod"))
-                .or_else(|| file_name.strip_suffix(".jar"))
-                .unwrap_or(&file_name);
             let full_path = game.join(&e.file);
+            let mod_id = package_mod_id(
+                &full_path,
+                file_name
+                    .strip_prefix("horizon-native-mods/")
+                    .unwrap_or(&file_name),
+            );
             let size_bytes = std::fs::metadata(&full_path).map(|m| m.len()).unwrap_or(0);
             let subtitle = format!(
                 "Mod Package ({})  •  {}  •  {}",
@@ -912,10 +947,11 @@ impl Catalog {
                 kind: crate::ha_launcher::client::content_files::Kind::Mods,
                 file: e.file.clone(),
                 title: format!("{} ({})", e.title, e.version),
-                enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
+                enabled: on.enabled.contains(&mod_id) && !on.disabled.contains(&mod_id),
                 size_bytes,
                 badge: "MOD",
                 subtitle,
+                mod_id,
             });
         }
         // Also scan horizon-native-mods/ for any .hnmod or .hmod files on disk.
@@ -945,23 +981,22 @@ impl Catalog {
                 {
                     continue;
                 }
-                let mod_id = name
-                    .strip_suffix(".hnmod")
-                    .or_else(|| name.strip_suffix(".hmod"))
-                    .or_else(|| name.strip_suffix(".jar"))
-                    .unwrap_or(&name);
+                let mod_id = package_mod_id(&entry.path(), &name);
                 let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let format = if name.ends_with(".hnmod") {
+                    "Horizon Native Mod (.hnmod)"
+                } else {
+                    "Horizon Native Mod (.hmod)"
+                };
                 self.local.push(LocalItem {
                     kind: crate::ha_launcher::client::content_files::Kind::Mods,
                     file: rel,
-                    title: mod_id.to_owned(),
-                    enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
+                    title: mod_id.clone(),
+                    enabled: on.enabled.contains(&mod_id) && !on.disabled.contains(&mod_id),
                     size_bytes,
                     badge: "MOD",
-                    subtitle: format!(
-                        "Horizon Native Mod (.hnmod)  •  {}  •  {name}",
-                        format_file_size(size_bytes)
-                    ),
+                    subtitle: format!("{format}  •  {}  •  {name}", format_file_size(size_bytes)),
+                    mod_id,
                 });
             }
         }
@@ -978,6 +1013,7 @@ impl Catalog {
                         size_bytes: 0,
                         badge: "MOD",
                         subtitle: format!("Built-in Horizon Mod  •  {b_desc}  •  {b_id}"),
+                        mod_id: b_id.to_owned(),
                     });
                 }
             }
@@ -1904,19 +1940,13 @@ impl Catalog {
                     self.refresh(home);
                     return;
                 }
-                let id = item
-                    .file
-                    .strip_prefix("horizon-native-mods/")
-                    .or_else(|| item.file.strip_prefix("horizon-mods/"))
-                    .unwrap_or(&item.file);
-                let id = id
-                    .strip_suffix(".hmod")
-                    .or_else(|| id.strip_suffix(".hnmod"))
-                    .or_else(|| id.strip_suffix(".jar"))
-                    .unwrap_or(id);
+                // The id the game keys the switch by, read from the package (`package_mod_id`).
+                let id = item.mod_id.as_str();
                 if item.enabled {
                     on.enabled.remove(id);
+                    on.disabled.insert(id.to_owned());
                 } else {
+                    on.disabled.remove(id);
                     on.enabled.insert(id.to_owned());
                 }
                 on.save(&game);
@@ -2331,4 +2361,33 @@ fn clean_markdown_body(raw: &str) -> String {
         }
     }
     out.join("\n")
+}
+
+#[cfg(test)]
+mod package_id_tests {
+    use super::package_mod_id;
+    use std::io::Write;
+
+    /// A catalog download is named with its version: the switch is keyed by the manifest's id.
+    #[test]
+    fn a_mod_is_known_by_its_manifest_id_not_its_file_name() {
+        let dir = std::env::temp_dir().join(format!("starling-mod-id-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hmod = dir.join("accelerateddecay-0.2.1.hmod");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&hmod).unwrap());
+        zip.start_file("horizon-mod.toml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"id = \"accelerateddecay\"\nversion = \"0.2.1\"\n")
+            .unwrap();
+        zip.finish().unwrap();
+        assert_eq!(
+            package_mod_id(&hmod, "accelerateddecay-0.2.1.hmod"),
+            "accelerateddecay"
+        );
+        // No manifest to read (a .jar): the name without its extension.
+        let jar = dir.join("sodium.jar");
+        std::fs::write(&jar, b"not a zip").unwrap();
+        assert_eq!(package_mod_id(&jar, "sodium.jar"), "sodium");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

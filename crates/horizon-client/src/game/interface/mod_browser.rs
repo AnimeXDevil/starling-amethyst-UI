@@ -184,7 +184,8 @@ impl Game<'_> {
         if installed {
             self.settings.save(&Self::options_path());
             self.start_mods();
-            self.switch_mods();
+            // Applied as Options close, with the page's other switches.
+            self.switch_mods(false);
             // A mod with blocks, items or worldgen waits for a restart: the
             // project page says so instead of "installed and on".
             if let (Some(note), Some((message, _))) = (
