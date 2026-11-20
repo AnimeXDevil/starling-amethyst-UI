@@ -724,7 +724,8 @@ fn github_text(agent: &ureq::Agent, url: &str) -> Result<Option<String>, String>
 enum FromStore {
     /// They play from the next start, from [`NATIVE_LIBS`].
     Built,
-    /// The store can't play them (why): the whole-game Compile can.
+    /// The store can't play them: why, said to the player. A game made of libraries has no
+    /// whole-game Compile to send them to (`compile`).
     NotHere(String),
 }
 
@@ -743,14 +744,21 @@ fn compile_from_store(
         s.building_since = None;
     };
     let Some(own) = own_build() else {
-        return Ok(FromStore::NotHere("this APK doesn't say its build".into()));
+        return Ok(FromStore::NotHere(
+            "This Starling doesn't say its build, so the mod store can't serve it.".into(),
+        ));
     };
     let StoreWanted { mods: wanted, old } = store_wanted()?;
     // Starling's old bundles alone go to the whole-game Compile, as before. Beside mods the store
     // plays they are left out of this game: one sent the whole set there, which builds no Preview
     // and no game made of libraries, and the store's mods failed with it (2026-11-20).
     if wanted.is_empty() && !old.is_empty() {
-        return Ok(FromStore::NotHere("a mod is Starling's old bundle".into()));
+        return Ok(FromStore::NotHere(format!(
+            "{} {} Starling's old native mod format, which no longer compiles: install the \
+             Horizon version from the catalog.",
+            old.join(", "),
+            if old.len() == 1 { "is in" } else { "are in" }
+        )));
     }
     if wanted.is_empty() {
         return Err("There is no native mod to compile.".into());
@@ -770,7 +778,9 @@ fn compile_from_store(
         &store::download(repo, store::STORE_TAG, store::BUILDS),
     )?
     else {
-        return Ok(FromStore::NotHere("the store has no builds yet".into()));
+        return Ok(FromStore::NotHere(
+            "The mod store has no builds yet. Try again later.".into(),
+        ));
     };
     // Only this game's build: a library of another one doesn't load here.
     let builds: Vec<store::Build> = store::builds(&text)?
@@ -802,12 +812,18 @@ fn compile_from_store(
             (build, have)
         }
         store::Plan::Fails { id, error } if error.contains(WHOLE_GAME) => {
-            return Ok(FromStore::NotHere(format!("{id}: {error}")));
+            log::warn!("Horizon: {id} needs the whole-game Compile: {error}");
+            return Ok(FromStore::NotHere(format!(
+                "{id} can't be compiled on this Starling yet (it needs the whole-game Compile). \
+                 Turn it off on the Mods page to compile the others."
+            )));
         }
         store::Plan::Fails { id, error } => return Err(format!("{id}: {error}")),
         store::Plan::NoBuild => {
             return Ok(FromStore::NotHere(format!(
-                "the store has no build {own} for {abi}"
+                "The mod store has no libraries for this Starling ({}, {abi}) yet. Try again in \
+                 a while.",
+                &own[..own.len().min(10)]
             )));
         }
     };
@@ -1372,10 +1388,10 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
     if own_service && loads_store_builds() {
         match compile_from_store(&server, &agent, shared, &mut asked)? {
             FromStore::Built => return Ok(NATIVE_LIBS.to_owned()),
-            FromStore::NotHere(why) => log::info!(
-                "Horizon: the store can't play these native mods ({why}): compiling the game \
-                 with them"
-            ),
+            // The whole-game Compile builds no game made of libraries: sent there, one mod the
+            // store can't play failed every mod with "That is not a version of the game"
+            // (2026-11-20). The player turns that one off instead.
+            FromStore::NotHere(why) => return Err(why),
         }
     }
     // The machine that builds sleeps until it is asked: the gateway says so while it wakes.
