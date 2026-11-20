@@ -39,6 +39,8 @@ pub struct NativeClientHooks {
         BlockSoundCause,
         &mut BlockSoundType,
     ),
+    pub can_grindstone_repair: fn(&LoopContext, &crate::items::ItemStack, &mut bool),
+    pub can_fit_inside_container_items: fn(&LoopContext, &crate::items::ItemStack, &mut bool),
 }
 
 static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
@@ -284,5 +286,25 @@ pub(crate) fn sound_type(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.sound_type)(context, pos, state, entity, cause, sound);
+    }
+}
+
+pub(crate) fn can_grindstone_repair(
+    context: &LoopContext,
+    stack: &crate::items::ItemStack,
+    can_repair: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.can_grindstone_repair)(context, stack, can_repair);
+    }
+}
+
+pub(crate) fn can_fit_inside_container_items(
+    context: &LoopContext,
+    stack: &crate::items::ItemStack,
+    fits: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.can_fit_inside_container_items)(context, stack, fits);
     }
 }

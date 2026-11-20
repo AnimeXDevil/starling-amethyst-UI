@@ -44,7 +44,7 @@ pub fn native_menu_slot_rules(
 use std::sync::Arc;
 
 mod bundle;
-pub use bundle::fits_inside_container_items;
+pub use bundle::{fits_inside_container_items, shulker_box_slot_takes};
 mod click;
 mod storage;
 pub use storage::{MutationStamp, Snapshot};
@@ -1221,6 +1221,7 @@ impl Menu {
             // GrindstoneMenu.createResult.
             Kind::Grindstone => {
                 self.state.containers[RESULT][0] = crate::stations::grindstone_result(
+                    env.loop_context,
                     env.enchantments,
                     env.items,
                     self.state.containers[MAIN][0].as_ref(),
@@ -1675,7 +1676,7 @@ impl Menu {
             Role::Plain | Role::CreativeDisplay => true,
             Role::Armor(eq) => Self::armor_may_place(env, eq, stack),
             Role::MountEquip(slot) => self.mount_may_place(env, slot, stack),
-            Role::Shulker => fits_inside_container_items(stack),
+            Role::Shulker => shulker_box_slot_takes(env.loop_context, stack),
             Role::Mod | Role::ModResult => self.state.slots[s].role == Role::Mod,
             Role::Hidden => false,
             Role::Fuel => Self::is_fuel(env, stack) || Self::is_bucket(stack),
@@ -1694,7 +1695,9 @@ impl Menu {
             Role::LoomBanner => Self::is_banner(stack),
             Role::LoomDye => env.banners.loom_dye(env.items, stack).is_some(),
             Role::LoomPattern => env.banners.is_pattern_item(env.items, stack),
-            Role::GrindInput => crate::stations::grindstone_accepts(env.items, stack),
+            Role::GrindInput => {
+                crate::stations::grindstone_accepts(env.loop_context, env.items, stack)
+            }
             Role::SmithInput(i) => env
                 .station_recipes
                 .smithing_accepts(env.loop_context, i, stack),
@@ -4313,6 +4316,14 @@ pub(crate) mod tests {
                         sound.volume = 2.0;
                     }
                 },
+                can_grindstone_repair: |context, stack, can_repair| {
+                    *can_repair |= context.setting("rules_mod", "stack").is_some()
+                        && &*stack.item == "minecraft:stone";
+                },
+                can_fit_inside_container_items: |context, stack, fits| {
+                    *fits |= context.setting("rules_mod", "stack").is_some()
+                        && &*stack.item == "minecraft:shulker_box";
+                },
             });
         assert!(installed);
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
@@ -4440,6 +4451,19 @@ pub(crate) mod tests {
         };
         assert_eq!(values(&before), (0.5, 0.1, 0.02));
         assert_eq!(values(&after), (1.5, 2.1, 3.02));
+        // The grindstone's repair rule and a shulker box's slot ask the item's parts too, and
+        // keep vanilla's answer without them: stone is no repairable item, and a shulker box
+        // stays out of a shulker box.
+        let item_rules = |context: &LoopContext| {
+            let mut repairs = None;
+            bare_env_in(context, |env| {
+                repairs = Some(crate::stations::grindstone_accepts(context, env.items, &stack));
+            });
+            let shulker = ItemStack::new("minecraft:shulker_box", 1);
+            (repairs.unwrap(), shulker_box_slot_takes(context, &shulker))
+        };
+        assert_eq!(item_rules(&before), (false, false));
+        assert_eq!(item_rules(&after), (true, true));
         // The block factors a part edits read it too, and are as the block's own without it.
         let factors = |context: &LoopContext| {
             use horizon_world::movement_properties::BlockFactorEdits;

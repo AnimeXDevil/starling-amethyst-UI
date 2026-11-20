@@ -153,10 +153,11 @@ impl Game<'_> {
             .play("minecraft:block.chest.locked", Some(at), 1.0, 1.0);
         true
     }
-    /// ShulkerBoxSlot.mayPlace: no shulker box inside a shulker box.
+    /// ShulkerBoxSlot.mayPlace: no shulker box inside a shulker box, unless the parts of its
+    /// item let it in (`can_fit_inside_container_items`).
     pub(super) fn refuses(&self, slot: usize, stack: &ItemStack) -> bool {
         (300..400).contains(&slot)
-            && is_shulker_box(&stack.item)
+            && !horizon_client::menu::shulker_box_slot_takes(&self.loop_context, stack)
             && self.container.is_some_and(|k| {
                 is_shulker_box(&self.res.facts().get(self.world.block(k.0, k.1, k.2)).name)
             })

@@ -285,6 +285,44 @@ impl PartStateDeclaration {
     }
 }
 
+mod sealed {
+    use crate::{AttachmentHolder, Host, PartStateError};
+
+    /// What the game's Part state holders answer: kept out of mods' reach, so only the game
+    /// decides which holders keep Part state.
+    pub trait Sealed {
+        /// Checks the handle against `host`, then where its values are read.
+        fn attachment_holder(self, host: &dyn Host) -> Result<AttachmentHolder, PartStateError>;
+    }
+}
+
+/// A holder Part state is kept on: a handle a call checks against the host before it reaches
+/// the holder's attachment map. Sealed: the game decides which holders keep it, a block entity
+/// or an entity.
+pub trait PartStateHolder: Copy + PartialEq + sealed::Sealed + 'static {}
+
+impl sealed::Sealed for BlockEntityRef {
+    fn attachment_holder(self, host: &dyn Host) -> Result<AttachmentHolder, PartStateError> {
+        holder(host, self)?;
+        Ok(AttachmentHolder::BlockEntity(self))
+    }
+}
+
+impl PartStateHolder for BlockEntityRef {}
+
+impl sealed::Sealed for EntityRef {
+    /// An entity of the level this host is in; a handle that no longer resolves is stale.
+    fn attachment_holder(self, host: &dyn Host) -> Result<AttachmentHolder, PartStateError> {
+        let level = self.level(host).ok_or(PartStateError::Stale)?;
+        if host.level(host.dimension()) != Some(level) {
+            return Err(PartStateError::OtherLevel);
+        }
+        Ok(AttachmentHolder::Entity(self))
+    }
+}
+
+impl PartStateHolder for EntityRef {}
+
 /// Checks `entity` against this host's level and its current block entity, and gives the
 /// level-relative holder its value is stored under.
 fn holder(host: &dyn Host, entity: BlockEntityRef) -> Result<Holder, PartStateError> {
@@ -309,15 +347,15 @@ fn attachment<T>(key: &AttachmentType<T>, error: AttachmentError) -> PartStateEr
 }
 
 /// [`BlockEntityPartState::state_existing`] for any key.
-pub fn read_state<T: Clone + Send + Sync + 'static>(
+pub fn read_state<H: PartStateHolder, T: Clone + Send + Sync + 'static>(
     host: &dyn Host,
-    entity: BlockEntityRef,
+    holder: H,
     key: &AttachmentType<T>,
 ) -> Result<Option<T>, PartStateError> {
-    holder(host, entity)?;
+    let at = holder.attachment_holder(host)?;
     host.query(key)
         .map_err(|error| attachment(key, error))?
-        .get(AttachmentHolder::BlockEntity(entity))
+        .get(at)
         .map_err(|error| match error {
             AttachmentRowError::Value(error) => attachment(key, error),
             _ => PartStateError::Stale,

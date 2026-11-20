@@ -21,14 +21,18 @@ as Parts, not a separate manifest channel list.
 
 ```rust,ignore
 use mod_api::{
-    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar,
-    RegistrationContext, horizon_mod,
+    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadHandleError, PayloadId,
+    Registrar, RegistrationContext, horizon_mod,
 };
 use std::sync::Arc;
 
 struct Update;
 impl IPayloadHandler for Update {
-    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+    fn handle(
+        &self,
+        bytes: PayloadBytes,
+        context: &mut dyn IPayloadContext,
+    ) -> Result<(), PayloadHandleError> {
         // Decode this application's bytes here. Network handlers must enqueue
         // main-thread work before requesting a world Host.
         let _ = (bytes, context);
@@ -148,19 +152,24 @@ same registrar as typed payloads; no Part and no manifest entry are needed:
 
 ```rust,ignore
 use mod_api::{
-    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadId, Registrar,
-    RegistrationContext,
+    Hooks, IPayloadContext, IPayloadHandler, PayloadBytes, PayloadHandleError, PayloadId,
+    Registrar, RegistrationContext,
 };
 use std::sync::Arc;
 
 struct VoiceSecret;
 impl IPayloadHandler for VoiceSecret {
-    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
-        let player = context.player().map_err(|e| format!("{e:?}"))?;
-        let host = context.server_host().map_err(|e| format!("{e:?}"))?;
+    fn handle(
+        &self,
+        bytes: PayloadBytes,
+        context: &mut dyn IPayloadContext,
+    ) -> Result<(), PayloadHandleError> {
+        let failed = |e: &dyn std::fmt::Debug| PayloadHandleError::Failed(format!("{e:?}"));
+        let player = context.player().map_err(|e| failed(&e))?;
+        let host = context.server_host().map_err(|e| failed(&e))?;
         // Answer on the same channel; above 1,048,576 bytes this is PayloadTooLarge.
         let id = PayloadId("voicechat:secret".into());
-        player.send_payload(host, &id, bytes).map_err(|e| format!("{e:?}"))?;
+        player.send_payload(host, &id, bytes).map_err(|e| failed(&e))?;
         Ok(())
     }
 }

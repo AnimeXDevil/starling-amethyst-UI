@@ -94,6 +94,18 @@ pub trait ClientSession {
             crate::world::phase::LoadAccess::ClientSetup,
         )
     }
+    /// Side: client.
+    /// The player list as the Tab overlay draws it, whether or not it is shown: each listed
+    /// player's drawn name, profile name, UUID, game mode and latency in the order drawn, at
+    /// most the 80 it draws, with the header and footer. What this client has been sent; None
+    /// outside a logged-in client world. Sends nothing.
+    fn client_tab_list(&self) -> Option<ClientTabList> {
+        crate::world::phase::unprovided(
+            "ClientSession::client_tab_list",
+            "client_tab_list",
+            crate::world::phase::LoadAccess::ClientSetup,
+        )
+    }
 }
 /// The commands service, reached through its host.
 pub trait Commands {

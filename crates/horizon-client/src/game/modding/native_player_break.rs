@@ -2,12 +2,38 @@
 //! blocks around the one its player broke as that player breaks them
 //! (docs/native-mods.md, "Breaking as a player").
 use super::Game;
+use std::cell::Cell;
 
-#[allow(
-    dead_code,
-    reason = "public API exposure deferred under the component-model hold"
-)]
+/// The most mod breaks running inside one another (a break heard in `break_block` that breaks
+/// again): the next one is refused, so two mods answering each other's breaks end.
+const NESTED_BREAKS: u8 = 8;
+
+thread_local! {
+    /// The mod breaks running on this thread.
+    static BREAKING: Cell<u8> = const { Cell::new(0) };
+}
+
 impl Game<'_> {
+    /// `player.destroy_block`: [`Self::native_player_break_block`] for the player a handle names,
+    /// refused for a stale handle and past [`NESTED_BREAKS`] breaks inside one another.
+    pub(super) fn player_destroy_block(
+        &mut self,
+        player: mod_api::PlayerRef,
+        pos: [i32; 3],
+        into_inventory: bool,
+    ) -> bool {
+        if self.player_handle_read(player).is_none() {
+            return false;
+        }
+        let depth = BREAKING.get();
+        if depth >= NESTED_BREAKS {
+            return false;
+        }
+        BREAKING.set(depth + 1);
+        let broke = self.native_player_break_block(player.uuid(), pos, into_inventory);
+        BREAKING.set(depth);
+        broke
+    }
     /// Breaks the block at `pos` as the player `uuid` breaks it, through the
     /// game's own `ServerPlayerGameMode.destroyBlock`, as FTB Ultimine does:
     /// a spectator, an adventure player whose tool can't break it, a held item

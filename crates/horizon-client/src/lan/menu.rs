@@ -572,7 +572,7 @@ impl View<'_> {
         }
         !(self.shulker
             && self.container.as_ref().is_some_and(|c| i < c.len())
-            && !crate::menu::fits_inside_container_items(stack))
+            && !crate::menu::shulker_box_slot_takes(self.loop_context, stack))
     }
     fn slot_rules(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> (bool, u32) {
         let own = self.vanilla_may_place(i, stack, rules);

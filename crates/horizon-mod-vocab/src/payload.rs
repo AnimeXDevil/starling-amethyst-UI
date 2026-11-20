@@ -155,6 +155,11 @@ pub enum PayloadSendError {
         /// Inclusive vanilla limit.
         limit: u64,
     },
+    /// A typed payload's send token is not one this load handed out for the channel,
+    /// direction and value type it names. Sends here go through registered ids, which hold no
+    /// token, so this build's own sends never refuse with it; it belongs to the closed set
+    /// mods match on.
+    StaleToken(PayloadId),
 }
 
 impl crate::NoBackend for PayloadSendError {
@@ -189,19 +194,74 @@ pub enum PayloadWorkStatus {
     Queued,
 }
 
+/// Who held the receiving group a payload's handler needed, when it answered
+/// [`PayloadHandleError::Busy`]: a snapshot of names it already had, formatted only when shown.
+#[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: a snapshot record; a handler builds one with every field it reports.
+pub struct PayloadBusy {
+    /// The id of the mod holding the group.
+    pub owner: Arc<str>,
+    /// What of that mod holds it: the export or callback running.
+    pub export: Arc<str>,
+    /// The thread it runs on, for diagnostics.
+    pub thread: Arc<str>,
+    /// How long it had held the group, in milliseconds, when this was seen.
+    pub held_millis: u64,
+}
+
+impl PayloadBusy {
+    /// A snapshot with every field given.
+    pub fn new(owner: Arc<str>, export: Arc<str>, thread: Arc<str>, held_millis: u64) -> Self {
+        Self {
+            owner,
+            export,
+            thread,
+            held_millis,
+        }
+    }
+}
+
+impl std::fmt::Display for PayloadBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "held by {} ({}) on thread {} for {} ms",
+            self.owner, self.export, self.thread, self.held_millis
+        )
+    }
+}
+
+/// Why a receiving handler did not handle a payload.
+#[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+// exhaustive: the transport handles every outcome of a handler's call.
+pub enum PayloadHandleError {
+    /// Decoding the application bytes, running the callback, or reaching its owner failed.
+    Failed(String),
+    /// The callback did not start: what it needed was held elsewhere, and `payload` is the
+    /// bytes it was given, untouched.
+    Busy {
+        /// The bytes, as they came.
+        payload: PayloadBytes,
+        /// Who held what the callback needed.
+        holder: PayloadBusy,
+    },
+}
+
 crate::wire::wire_handlers::handler!(dyn IPayloadHandler, "IPayloadHandler");
 crate::wire::wire_handlers::handler!(dyn PayloadWork, "PayloadWork");
 
 /// One receiving owner for a registered id and direction, never an all-mod broadcast.
-/// Return an error when application decoding fails; the session names the channel
-/// and fails instead of silently dropping the malformed application message.
+/// Return `Failed` when application decoding fails: the session names the channel and fails
+/// instead of silently dropping the malformed application message. `Busy` gives the bytes back
+/// unhandled; no receiving group of this build is held across calls, so nothing waits to take
+/// them again, and the session fails as for `Failed`, naming the holder.
 pub trait IPayloadHandler: Send + Sync + 'static {
     /// Handle exact application bytes using connection-derived context.
     fn handle(
         &self,
         payload: PayloadBytes,
         context: &mut dyn IPayloadContext,
-    ) -> Result<(), String>;
+    ) -> Result<(), PayloadHandleError>;
 }
 
 /// Work scheduled on the logical receiving main thread.

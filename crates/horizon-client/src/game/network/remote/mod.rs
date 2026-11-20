@@ -11702,6 +11702,14 @@ impl Remote {
     pub(super) fn listed_player_count(&self) -> usize {
         self.listed.len()
     }
+    /// The listed player-list entries (`getListedOnlinePlayers`), in no order.
+    pub(super) fn listed_tab_players(
+        &self,
+    ) -> impl Iterator<Item = &horizon_client::tab_list::TabPlayer> {
+        self.listed
+            .iter()
+            .filter_map(|uuid| self.tab_players.get(uuid))
+    }
     /// The local player's profile UUID.
     pub(super) fn profile(&self) -> u128 {
         self.profile
