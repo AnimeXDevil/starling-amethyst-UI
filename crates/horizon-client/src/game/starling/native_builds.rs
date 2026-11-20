@@ -1039,7 +1039,7 @@ fn prune_store(keep: &str) {
         .collect();
     let mut games = BTreeSet::new();
     for name in names.iter().filter(|n| n.starts_with(STORE_SET)) {
-        if build_of(name) != keep_build && now.as_deref() != Some(name.as_str()) {
+        if build_of(name.as_str()) != keep_build && now.as_deref() != Some(name.as_str()) {
             let _ = std::fs::remove_dir_all(dir().join(name));
         } else if let Ok(game) = std::fs::read_to_string(dir().join(name).join(GAME)) {
             games.insert(game.trim().to_owned());
