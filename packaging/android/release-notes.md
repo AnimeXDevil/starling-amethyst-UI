@@ -1,11 +1,11 @@
-**Starling 0.8.1: a launcher before the game, Horizon's newest mod API, and the game built for your phone.**
+**Starling 0.9.0: a launcher before the game, Horizon's newest mod API, and the game built for your phone.**
 
 ## Install
 
 - **Already have Starling:** tap **Update** inside the game.
-- **New here, or coming from Horizon Android:** download the APK for your phone below and open it. Almost every phone takes **`starling-0.8.1-arm64-v8a.apk`**. Older 32-bit phones take `armeabi-v7a`, and x86 tablets and emulators take `x86_64` or `x86`.
+- **New here, or coming from Horizon Android:** download the APK for your phone below and open it. Almost every phone takes **`starling-0.9.0-arm64-v8a.apk`**. Older 32-bit phones take `armeabi-v7a`, and x86 tablets and emulators take `x86_64` or `x86`.
 
-## What's new in 0.8.1
+## What's new in 0.9.0
 
 ### New
 
