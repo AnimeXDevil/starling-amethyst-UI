@@ -1486,10 +1486,26 @@ impl ResolvedSources {
     ) -> Result<Self> {
         // Every consumer keeps vanilla's resource-file registration order.
         sources.sort_by_cached_key(|(name, _)| registration_key(name));
-        for (name, file) in &sources {
-            if let Some(serializer) = file["type"].as_str() {
-                mod_kinds::recipe_type(name, serializer)?;
-            }
+        // A file whose serializer no mod registered is left out and the rest load, as vanilla's
+        // RecipeManager does with a file it cannot parse: a content mod without its code half
+        // (ProjectE's assets without projecte_core) then loses those recipes, not the world.
+        // One line per serializer, with the first file and how many went.
+        let mut unregistered = std::collections::BTreeMap::<String, (usize, String)>::new();
+        sources.retain(|(name, file)| {
+            let Some(serializer) = file["type"].as_str() else {
+                return true;
+            };
+            let Err(error) = mod_kinds::recipe_type(name, serializer) else {
+                return true;
+            };
+            unregistered
+                .entry(serializer.to_owned())
+                .or_insert((0, error))
+                .0 += 1;
+            false
+        });
+        for (count, first) in unregistered.into_values() {
+            log::error!("Horizon: {first}; {count} recipe file(s) with it left out");
         }
         let listened = mod_api::__private::listened(mod_api::HookId::Ingredient);
         let recipes = sources
@@ -1617,7 +1633,8 @@ impl Recipes {
         )
     }
     /// The tables from the condition-selected recipes of one owning load. Unknown serializers
-    /// refuse the generation; malformed known recipes keep the skip-one-file policy.
+    /// were left out by [`ResolvedSources::resolve`]; malformed known recipes keep the
+    /// skip-one-file policy.
     /// root and overlay give the enchantment tags the tables keep.
     pub fn from_resolved(
         root: &Path,
