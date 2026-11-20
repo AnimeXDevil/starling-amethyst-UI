@@ -8,17 +8,22 @@
 //! (NativeMods.java). It also stops using one, asks GitHub for another set (an issue the player
 //! submits), and says when the activity set a build aside. The Mods page says, above the mods,
 //! which game runs and which the next start runs (`native_game`).
+//!
+//! Compile waits for the service's answer on GitHub, not by asking the service
+//! (`starling_store`: its free plan counts every request), and with an APK that plays them takes
+//! a library per mod from the store (Compile v2, below).
 use super::Game;
 use horizon_client::{
     hud::HudBatch,
     lang::tr,
     mod_list::{NativeGame, NativeGameAct},
     starling_releases::{self as releases, NativeBuild as Build},
+    starling_store as store,
     ui_theme::{Face, Ui, color},
 };
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -213,6 +218,9 @@ fn stamp_build(folder: &std::path::Path) -> Result<(), String> {
 /// Whether the build `name` loads at the next start, as NativeMods.chosen decides: its library
 /// is there, made for `version` and under this very install of the APK.
 fn loads(name: &str, version: &str) -> bool {
+    if name.starts_with(STORE_SET) {
+        return store_set_loads(name);
+    }
     let folder = dir().join(name);
     let read = |file: &str| {
         std::fs::read_to_string(folder.join(file))
@@ -524,7 +532,9 @@ fn service_error(e: ureq::Error) -> String {
     }
 }
 
-/// The library of job `job` into `part`, going on from what is there, checked by `want`.
+/// The library of job `job` into `part`, going on from what is there, checked by `want`. A
+/// download from the start asks for no range: GitHub answers `bytes=0-` with a 206, which is not
+/// more of a file already there. One that goes on takes a 206 only for the bytes it asked for.
 fn fetch_library(
     agent: &ureq::Agent,
     url: &str,
@@ -538,12 +548,20 @@ fn fetch_library(
     while on_disk(part) < size {
         let have = on_disk(part);
         let tried = (|| -> Result<(), String> {
-            let response = agent
-                .get(url)
-                .set("Range", &format!("bytes={have}-"))
-                .call()
-                .map_err(service_error)?;
-            let resumed = response.status() == 206;
+            let mut request = agent.get(url);
+            if have > 0 {
+                request = request.set("Range", &format!("bytes={have}-"));
+            }
+            let response = request.call().map_err(service_error)?;
+            let from = response
+                .header("Content-Range")
+                .and_then(|r| r.strip_prefix("bytes "))
+                .and_then(|r| r.split('-').next())
+                .and_then(|n| n.parse::<u64>().ok());
+            let resumed = response.status() == 206 && have > 0 && from == Some(have);
+            if response.status() == 206 && !resumed && from != Some(0) {
+                return Err(format!("the download went on from {from:?}, not {have}"));
+            }
             let mut file = if resumed {
                 std::fs::OpenOptions::new().append(true).open(part)
             } else {
@@ -598,6 +616,647 @@ fn fetch_library(
     Ok(())
 }
 
+// ---- Compile v2: a library per mod, from the store ---------------------------------------------
+//
+// With the game as a library of its own (a Nightly, with its SDK), each native mod is a small
+// library built once per game build (starling-client/mod-builds, scripts/store.py). Compile then
+// reads the store on GitHub, asks the service only for a mod the store doesn't have, and leaves on
+// the phone:
+//
+//   files/native/game-<build>/          the game's runtime for this ABI, unpacked, once per build
+//   files/native/store-<build>-<set>/   native-mods.json and the mods' libraries, `game` (the
+//                                       runtime folder's name), build.json, sent.sha256, apk
+//   files/native/current                the set to play from the next start
+//
+// Playing a set is the activity's (the game side of Compile v2): it says so with
+// STARLING_STORE_LOADER=1, and until it does Compile builds the whole game as before.
+
+/// A folder of a set of mods' libraries from the store starts with this (`store::set_folder`).
+const STORE_SET: &str = "store-";
+/// In a set's folder: the folder of the game's runtime it plays with (`store::game_folder`).
+const GAME: &str = "game";
+/// In a game runtime's folder, once every file of it unpacked and checked.
+const READY: &str = "ready";
+/// What a game runtime may unpack to, at most.
+const RUNTIME_LIMIT: u64 = 2 << 30;
+/// What the store says of a mod the per-mod route can't build (scripts/mod_lib.py).
+const WHOLE_GAME: &str = "whole-game Compile";
+
+/// Whether this APK plays a set from the store: the activity says so once it loads the game's
+/// runtime from a set's `game` folder and the mods' libraries beside the set's native-mods.json.
+fn loads_store_builds() -> bool {
+    std::env::var("STARLING_STORE_LOADER").as_deref() == Ok("1")
+}
+
+/// This game's own build, the commit its libraries come from, when the APK says it.
+fn own_build() -> Option<&'static str> {
+    option_env!("HORIZON_GAME_BUILD_ID")
+        .or(option_env!("HORIZON_ANDROID_BUILD_COMMIT"))
+        .filter(|commit| commit.len() == 40)
+}
+
+/// Whether the store set `name` plays at the next start: its record is there, and its game's
+/// runtime unpacked whole.
+fn store_set_loads(name: &str) -> bool {
+    let folder = dir().join(name);
+    let game = std::fs::read_to_string(folder.join(GAME)).unwrap_or_default();
+    let game = game.trim();
+    loads_store_builds()
+        && store::plain_file(game)
+        && folder.join(store::RECORD).is_file()
+        && dir().join(game).join(READY).is_file()
+}
+
+/// The native mods on, as the store knows them: each one's `.hmod` and its SHA-256, once each as
+/// `bundles_body` takes them. None when one is Starling's old bundle (`.hnmod`, or a `.hmod` in
+/// its format), which only the whole-game Compile builds.
+fn store_wanted() -> Result<Option<Vec<(PathBuf, store::Wanted)>>, String> {
+    let off = horizon_client::mod_list::ModList::load(&Game::game_dir()).disabled;
+    let folder = Game::game_dir().join(horizon_client::mod_list::NATIVE_DIR);
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&folder)
+        .map(|d| d.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    paths.retain(|p| native_file(p));
+    paths.sort_by_key(|p| (p.extension().is_some_and(|e| e == "hmod"), p.clone()));
+    let mut seen = BTreeSet::new();
+    let mut wanted = Vec::new();
+    for path in paths {
+        let Ok(bundle) = horizon_mod_package::index::native::Any::read(&path) else {
+            continue;
+        };
+        if off.contains(bundle.id()) || !seen.insert(bundle.id().to_owned()) {
+            continue;
+        }
+        if !matches!(bundle, horizon_mod_package::index::native::Any::Flat(_)) {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let source: String = Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        wanted.push((
+            path,
+            store::Wanted {
+                id: bundle.id().to_owned(),
+                source,
+            },
+        ));
+    }
+    if wanted.is_empty() {
+        return Err("There is no native mod to compile.".into());
+    }
+    Ok(Some(wanted))
+}
+
+/// A text file on GitHub, or None when it isn't there.
+fn github_text(agent: &ureq::Agent, url: &str) -> Result<Option<String>, String> {
+    match agent.get(url).call() {
+        Ok(response) => response.into_string().map(Some).map_err(|e| e.to_string()),
+        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(e) => Err(service_error(e)),
+    }
+}
+
+/// What the store did with the mods on.
+enum FromStore {
+    /// The set's folder, chosen for the next start.
+    Built(String),
+    /// The store can't play them (why): the whole-game Compile can.
+    NotHere(String),
+}
+
+/// Compile v2: the mods on, from the store, on this game's own build or the Nightly the store has
+/// them all for (`store::plan`), the ones it lacks built by the service, with that build's game
+/// runtime when the phone doesn't have it: the set's folder, chosen for the next start. The store
+/// is read from GitHub; the service is asked once for each mod the store lacks.
+fn compile_from_store(
+    server: &str,
+    version: &str,
+    agent: &ureq::Agent,
+    shared: &Mutex<Shared>,
+    asked: &mut u32,
+) -> Result<FromStore, String> {
+    let say = |text: String| {
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        s.status = text;
+        s.building_since = None;
+    };
+    let Some(wanted) = store_wanted()? else {
+        return Ok(FromStore::NotHere("a mod is Starling's old bundle".into()));
+    };
+    let abi = releases::process_abi();
+    say("Looking for your mods in the store...".into());
+    let repo = store::STORE_REPO;
+    let Some(text) = github_text(
+        agent,
+        &store::download(repo, store::STORE_TAG, store::BUILDS),
+    )?
+    else {
+        return Ok(FromStore::NotHere("the store has no builds yet".into()));
+    };
+    let builds = store::builds(&text)?;
+    let list: Vec<store::Wanted> = wanted.iter().map(|(_, w)| w.clone()).collect();
+    let plan = store::plan(
+        &builds,
+        |b| {
+            let url = store::download(repo, &store::mods_tag(&b.build), store::INDEX);
+            let text = github_text(agent, &url).ok().flatten()?;
+            store::index(&text, &b.build).ok()
+        },
+        &list,
+        abi,
+        own_build(),
+    );
+    let (build, libraries) = match plan {
+        store::Plan::Ready { build, libraries } => (build, libraries),
+        store::Plan::Ask {
+            build,
+            mut have,
+            missing,
+        } => {
+            have.extend(build_in_store(
+                agent, server, &build, &missing, &wanted, shared, asked,
+            )?);
+            (build, have)
+        }
+        store::Plan::Fails { id, error } if error.contains(WHOLE_GAME) => {
+            return Ok(FromStore::NotHere(format!("{id}: {error}")));
+        }
+        store::Plan::Fails { id, error } => return Err(format!("{id}: {error}")),
+        store::Plan::NoBuild => {
+            return Ok(FromStore::NotHere(format!(
+                "the store has no build for {abi}"
+            )));
+        }
+    };
+    let runtime = build
+        .abis
+        .get(abi)
+        .cloned()
+        .ok_or_else(|| format!("The store has no game for {abi}."))?;
+    let game = store::game_folder(&build.build);
+    if !dir().join(&game).join(READY).is_file() {
+        say(format!(
+            "Downloading the game ({})...",
+            build.nightly.as_deref().unwrap_or(&build.build[..12])
+        ));
+        fetch_runtime(agent, &build, &runtime, &game, shared)?;
+    }
+    let set = store::set_folder(&build.build, &libraries);
+    let folder = dir().join(&set);
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let tag = store::mods_tag(&build.build);
+    for library in &libraries {
+        let path = folder.join(&library.library);
+        if file_sha256(&path).as_deref() == Some(library.sha256.as_str()) {
+            continue;
+        }
+        say(format!(
+            "Downloading {}...",
+            mods_label(&[library.id.clone()])
+        ));
+        let part = folder.join(format!("{}.part", library.library));
+        let url = store::download(repo, &tag, &library.file);
+        fetch_library(agent, &url, &part, library.size, &library.sha256, shared)?;
+        std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
+    }
+    let write = |name: &str, text: &str| {
+        std::fs::write(folder.join(name), text).map_err(|e| format!("{name}: {e}"))
+    };
+    write(store::RECORD, &store::record(&libraries))?;
+    write(GAME, &game)?;
+    write("for", version)?;
+    let mods: Vec<serde_json::Value> = libraries
+        .iter()
+        .map(|l| serde_json::json!({"id": l.id, "version": l.version}))
+        .collect();
+    write(
+        "build.json",
+        &serde_json::json!({"mods": mods, "build": build.build, "nightly": build.nightly, "abi": abi})
+            .to_string(),
+    )?;
+    // What it was made from: a mod replaced under the same id makes it out of date.
+    if let Some(sent) = request_digest() {
+        write(SENT, &sent)?;
+    }
+    stamp_build(&folder)?;
+    std::fs::write(dir().join("current"), &set).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(dir().join("starts"));
+    prune_store(&set);
+    log::info!(
+        "Horizon: {} native mods from the store, on build {}, with {asked} requests to the build \
+         service",
+        libraries.len(),
+        build.build
+    );
+    Ok(FromStore::Built(set))
+}
+
+/// The SHA-256 of the file at `path`, if it is there.
+fn file_sha256(path: &std::path::Path) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hash = Sha256::new();
+    std::io::copy(&mut file, &mut hash).ok()?;
+    Some(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The mods `missing` built by the service for `build`: each asked once (all at once, so GitHub
+/// builds them side by side), then their answers waited for in the store, as Compile's are
+/// (`wait_on_github`).
+#[allow(clippy::too_many_arguments)]
+fn build_in_store(
+    agent: &ureq::Agent,
+    server: &str,
+    build: &store::Build,
+    missing: &[store::Wanted],
+    wanted: &[(PathBuf, store::Wanted)],
+    shared: &Mutex<Shared>,
+    asked: &mut u32,
+) -> Result<Vec<store::Library>, String> {
+    let abi = releases::process_abi();
+    let repo = store::STORE_REPO;
+    let tag = store::mods_tag(&build.build);
+    let mut pending = Vec::new();
+    for w in missing {
+        let path = wanted
+            .iter()
+            .find(|(_, x)| x == w)
+            .map(|(p, _)| p)
+            .ok_or("A mod went from the folder.")?;
+        let body = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if body.len() > LARGEST_REQUEST {
+            return Err(format!("{} is too big to compile.", w.id));
+        }
+        {
+            let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            s.status = format!("Sending {} to GitHub...", mods_label(&[w.id.clone()]));
+            s.building_since = None;
+        }
+        *asked += 1;
+        let answer: serde_json::Value = agent
+            .post(&format!("{server}/v2/mod?build={}&abi={abi}", build.build))
+            .set("Content-Type", "application/octet-stream")
+            .send_bytes(&body)
+            .map_err(service_error)?
+            .into_json()
+            .map_err(|e| e.to_string())?;
+        let job = store::job_of(&w.source, abi);
+        if answer["job"].as_str() != Some(job.as_str()) {
+            return Err("The build server gave another job.".into());
+        }
+        pending.push((w.clone(), job));
+    }
+    {
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        s.status = "Compiling...".into();
+        s.building_since = Some(Instant::now());
+    }
+    let started = Instant::now();
+    let mut stale = BTreeMap::new();
+    let mut built = Vec::new();
+    let mut looks = 0u32;
+    let mut quiet = 0;
+    let mut service_asked = Instant::now();
+    while !pending.is_empty() {
+        if started.elapsed() > LONGEST_ON_GITHUB {
+            return Err("The build took too long. Try again later.".into());
+        }
+        let mut still = Vec::new();
+        for (w, job) in pending {
+            match answer_in(agent, repo, &tag, &job) {
+                Ok(Some((store::Answer::Done { .. }, json))) => {
+                    quiet = 0;
+                    let library =
+                        store::Library::from_answer(&json, &build.build).ok_or_else(|| {
+                            format!("{}: the store's answer is not one to load.", w.id)
+                        })?;
+                    built.push(library);
+                    continue;
+                }
+                Ok(Some((store::Answer::Failed { error, settled, at }, _))) => {
+                    quiet = 0;
+                    if looks == 0 && !settled {
+                        stale.insert(job.clone(), at);
+                    } else if settled || stale.get(&job) != Some(&at) {
+                        return Err(format!("{}: {error}", mods_label(&[w.id.clone()])));
+                    }
+                }
+                Ok(None) => quiet = 0,
+                Err(e) => {
+                    quiet += 1;
+                    if quiet >= QUIET_TRIES {
+                        return Err(e);
+                    }
+                }
+            }
+            still.push((w, job));
+        }
+        pending = still;
+        if pending.is_empty() {
+            break;
+        }
+        let mut wait = store::wait(looks);
+        if service_asked.elapsed() >= store::ASK_SERVICE_EVERY {
+            service_asked = Instant::now();
+            for (w, job) in &pending {
+                *asked += 1;
+                let url = format!("{server}/v2/mod/{}/{job}", build.build);
+                match agent.get(&url).call() {
+                    Ok(response) => {
+                        if let Ok(status) = response.into_json::<serde_json::Value>()
+                            && told(status, true, shared)
+                                .map_err(|e| format!("{}: {e}", w.id))?
+                                .is_some()
+                        {
+                            wait = Duration::ZERO;
+                        }
+                    }
+                    Err(ureq::Error::Status(404, _)) => {
+                        return Err("The build server lost the job. Try again.".into());
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        std::thread::sleep(wait);
+        looks += 1;
+    }
+    Ok(built)
+}
+
+/// Build `build`'s game runtime for this ABI into files/native/`game`: the archive checked against
+/// the store and the build's own sdk.json, then unpacked by the SDK's reader (nothing but plain
+/// files and folders inside it, within [`RUNTIME_LIMIT`]).
+fn fetch_runtime(
+    agent: &ureq::Agent,
+    build: &store::Build,
+    runtime: &store::Runtime,
+    game: &str,
+    shared: &Mutex<Shared>,
+) -> Result<(), String> {
+    use horizon_mod_package::sdk;
+    let base = build
+        .sdk
+        .as_deref()
+        .ok_or("The store names no SDK for this build of the game.")?;
+    let text = github_text(agent, &format!("{base}{}", sdk::INDEX))?
+        .ok_or("This build of the game has no sdk.json.")?;
+    let index = sdk::Index::read(text.as_bytes(), &build.build).map_err(|e| e.to_string())?;
+    let asset = index.asset(&runtime.file).map_err(|e| e.to_string())?;
+    if asset.sha256 != runtime.sha256 || asset.size != runtime.size {
+        return Err("The store and the game's SDK disagree about the game.".into());
+    }
+    let part = dir().join(format!("{game}.part"));
+    fetch_library(
+        agent,
+        &runtime.url,
+        &part,
+        runtime.size,
+        &runtime.sha256,
+        shared,
+    )?;
+    let into = dir().join(game);
+    // A runtime half unpacked before, which `unpack` takes for one there.
+    let _ = std::fs::remove_dir_all(&into);
+    sdk::unpack(&index, &runtime.file, &part, &into, RUNTIME_LIMIT).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&part);
+    std::fs::write(into.join(READY), &runtime.sha256).map_err(|e| e.to_string())
+}
+
+/// The store's sets of other builds, and the game runtimes no set left plays, go: `keep`'s build
+/// and the one this game runs stay. A set of the same build stays, so turning mods back on is a
+/// choice, not a download.
+fn prune_store(keep: &str) {
+    let build_of = |set: &str| set.splitn(3, '-').nth(1).map(str::to_owned);
+    let keep_build = build_of(keep);
+    let now = running();
+    let names: Vec<String> = std::fs::read_dir(dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let mut games = BTreeSet::new();
+    for name in names.iter().filter(|n| n.starts_with(STORE_SET)) {
+        if build_of(name) != keep_build && now.as_deref() != Some(name.as_str()) {
+            let _ = std::fs::remove_dir_all(dir().join(name));
+        } else if let Ok(game) = std::fs::read_to_string(dir().join(name).join(GAME)) {
+            games.insert(game.trim().to_owned());
+        }
+    }
+    for name in names.iter().filter(|n| n.starts_with("game-")) {
+        if !games.contains(name.as_str()) && !name.ends_with(".part") {
+            let _ = std::fs::remove_dir_all(dir().join(name));
+        }
+    }
+}
+
+/// What the service says of a job on its way, on the card: Ok(Some) once done, Ok(None) while it
+/// waits or builds, Err when it failed or is lost.
+fn told(
+    status: serde_json::Value,
+    github: bool,
+    shared: &Mutex<Shared>,
+) -> Result<Option<serde_json::Value>, String> {
+    let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+    match status["state"].as_str() {
+        Some("starting") => {
+            s.status = "Waking the build server up: about a minute...".into();
+            s.building_since = None;
+        }
+        Some("queued") => {
+            let ahead = status["ahead"].as_u64().unwrap_or(0);
+            s.status = match (github, ahead) {
+                (true, 0) => "Waiting for a machine on GitHub...".to_owned(),
+                _ => format!("In line: {ahead} before yours"),
+            };
+            s.building_since = None;
+        }
+        Some("building") => {
+            let seconds = status["seconds"].as_u64().unwrap_or(0);
+            if s.building_since.is_none() {
+                s.building_since = Instant::now().checked_sub(Duration::from_secs(seconds));
+            }
+        }
+        Some("done") => return Ok(Some(status)),
+        Some("failed") => {
+            return Err(status["error"]
+                .as_str()
+                .unwrap_or("The build failed.")
+                .to_owned());
+        }
+        _ => return Err("The build server lost the job. Try again.".into()),
+    }
+    Ok(None)
+}
+
+/// A job's answer from a service that doesn't say where its answer is (a player's own server, an
+/// older one): asked again [`POLL`] after each answer, as before.
+#[allow(clippy::too_many_arguments)]
+fn wait_on_service(
+    agent: &ureq::Agent,
+    server: &str,
+    job: &str,
+    github: bool,
+    started: Instant,
+    longest: Duration,
+    shared: &Mutex<Shared>,
+    asked: &mut u32,
+) -> Result<serde_json::Value, String> {
+    let mut quiet = 0;
+    loop {
+        if started.elapsed() > longest {
+            return Err("The build took too long. Try again later.".into());
+        }
+        std::thread::sleep(POLL);
+        *asked += 1;
+        let looked = agent
+            .get(&format!("{server}/v1/job/{job}"))
+            .call()
+            .map_err(service_error)
+            .and_then(|r| {
+                r.into_json::<serde_json::Value>()
+                    .map_err(|e| e.to_string())
+            });
+        match looked {
+            Ok(status) => {
+                quiet = 0;
+                if let Some(done) = told(status, github, shared)? {
+                    return Ok(done);
+                }
+            }
+            Err(e) => {
+                quiet += 1;
+                if quiet >= QUIET_TRIES {
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
+/// What release `tag` of `repo` has of job `job` (`<job>.json`, else `<job>.failed.json`), from
+/// GitHub's downloads: no request to the service, and none GitHub counts against a limit.
+fn answer_in(
+    agent: &ureq::Agent,
+    repo: &str,
+    tag: &str,
+    job: &str,
+) -> Result<Option<(store::Answer, serde_json::Value)>, String> {
+    for name in [format!("{job}.json"), format!("{job}.failed.json")] {
+        match agent.get(&store::download(repo, tag, &name)).call() {
+            Ok(response) => {
+                let json: serde_json::Value = response.into_json().map_err(|e| e.to_string())?;
+                let answer = store::Answer::read(&json)
+                    .ok_or_else(|| format!("{name} says no state the game knows"))?;
+                return Ok(Some((answer, json)));
+            }
+            Err(ureq::Error::Status(404, _)) => {}
+            Err(e) => return Err(service_error(e)),
+        }
+    }
+    Ok(None)
+}
+
+/// A job's answer, waited for where the service puts it (`repo`'s results releases), 15 s and
+/// then longer between looks ([`store::wait`]), and the release it is in. The service itself is
+/// asked every [`store::ASK_SERVICE_EVERY`] (where a job waits in line, whether its run ended
+/// without an answer): a build of four minutes asks it nothing after the build is asked for,
+/// where the game asked every 27 s before.
+#[allow(clippy::too_many_arguments)]
+fn wait_on_github(
+    agent: &ureq::Agent,
+    server: &str,
+    repo: &str,
+    job: &str,
+    github: bool,
+    started: Instant,
+    longest: Duration,
+    shared: &Mutex<Shared>,
+    asked: &mut u32,
+) -> Result<(serde_json::Value, String), String> {
+    let tags = store::results_tags(job);
+    {
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        s.status = "Compiling...".into();
+        s.building_since = Some(Instant::now());
+    }
+    // A failure there at the first look that may pass is the last build's, and the service builds
+    // the job again (a failure for good it answers as it is): only a failure since is this one's.
+    let mut stale = None;
+    let mut looks = 0u32;
+    let mut quiet = 0;
+    let mut service_asked = Instant::now();
+    loop {
+        if started.elapsed() > longest {
+            return Err("The build took too long. Try again later.".into());
+        }
+        // The first look also asks the release of the first evening's builds; a new one goes to
+        // its shard.
+        let mut found = None;
+        let mut failed_look = None;
+        for tag in &tags[..if looks == 0 { 2 } else { 1 }] {
+            match answer_in(agent, repo, tag, job) {
+                Ok(Some(answer)) => {
+                    found = Some((answer, tag.clone()));
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => failed_look = Some(e),
+            }
+        }
+        match (found, failed_look) {
+            (Some(((store::Answer::Done { .. }, json), tag)), _) => return Ok((json, tag)),
+            (Some(((store::Answer::Failed { error, settled, at }, _), _)), _) => {
+                if looks == 0 && !settled {
+                    stale = Some(at);
+                } else if settled || Some(at) != stale {
+                    return Err(error);
+                }
+                quiet = 0;
+            }
+            (None, Some(e)) => {
+                quiet += 1;
+                log::warn!("Horizon: no look at the build's answer on GitHub ({e})");
+                if quiet >= QUIET_TRIES {
+                    return Err(e);
+                }
+            }
+            (None, None) => quiet = 0,
+        }
+        let mut wait = store::wait(looks);
+        if service_asked.elapsed() >= store::ASK_SERVICE_EVERY {
+            service_asked = Instant::now();
+            *asked += 1;
+            let status = agent
+                .get(&format!("{server}/v1/job/{job}"))
+                .call()
+                .map_err(|e| match e {
+                    ureq::Error::Status(404, _) => {
+                        Some("The build server lost the job. Try again.".to_owned())
+                    }
+                    // Can't tell now: GitHub is looked at again, and the service later.
+                    _ => None,
+                });
+            match status {
+                Ok(response) => {
+                    if let Ok(status) = response.into_json::<serde_json::Value>()
+                        && told(status, github, shared)?.is_some()
+                    {
+                        // Done: its answer is on GitHub, looked at at once.
+                        wait = Duration::ZERO;
+                    }
+                }
+                Err(Some(lost)) => return Err(lost),
+                Err(None) => {}
+            }
+        }
+        std::thread::sleep(wait);
+        looks += 1;
+    }
+}
+
 /// This version's game compiled with the folder's mods on the build service, or on GitHub's machines
 /// through it, downloaded and chosen for the next start: the folder's name.
 fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String, String> {
@@ -611,6 +1270,8 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
     };
     let for_development = std::env::var("HORIZON_BUILD_SERVER").ok();
     let custom = for_development.is_none().then(custom_server).flatten();
+    // Starling's own service builds in Starling's own repository, also before its answer says so.
+    let own_service = for_development.is_none() && custom.is_none();
     let server = for_development
         .or_else(|| custom.clone())
         .unwrap_or_else(|| published_server(version));
@@ -627,8 +1288,22 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
     let via = if github { "&via=github" } else { "" };
     let longest = if github { LONGEST_ON_GITHUB } else { LONGEST };
     let started = Instant::now();
+    // Every request to the service, for the log: its free plan counts them.
+    let mut asked = 0u32;
+    // Compile v2: a library per mod from the store, when this APK plays one; else (or when the
+    // store can't play these mods) the whole game with them, as before.
+    if own_service && loads_store_builds() {
+        match compile_from_store(&server, version, &agent, shared, &mut asked)? {
+            FromStore::Built(name) => return Ok(name),
+            FromStore::NotHere(why) => log::info!(
+                "Horizon: the store can't play these native mods ({why}): compiling the game \
+                 with them"
+            ),
+        }
+    }
     // The machine that builds sleeps until it is asked: the gateway says so while it wakes.
-    let job = loop {
+    let (job, repo) = loop {
+        asked += 1;
         let answer: serde_json::Value = agent
             .post(&format!("{server}/v1/build?version={version}{via}"))
             .set("Content-Type", "application/octet-stream")
@@ -637,7 +1312,12 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
             .into_json()
             .map_err(|e| e.to_string())?;
         if answer["starting"].as_bool() != Some(true) {
-            break answer["job"].as_str().unwrap_or_default().to_owned();
+            let repo = answer["repo"]
+                .as_str()
+                .and_then(store::plain_repo)
+                .map(str::to_owned)
+                .or_else(|| own_service.then(|| store::STORE_REPO.to_owned()));
+            break (answer["job"].as_str().unwrap_or_default().to_owned(), repo);
         }
         if started.elapsed() > WAKING {
             return Err("The build server did not wake up. Try again later.".into());
@@ -648,55 +1328,20 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
     if !plain(&job) {
         return Err("The build server gave no job.".into());
     }
-    let mut quiet = 0;
-    let finished = loop {
-        if started.elapsed() > longest {
-            return Err("The build took too long. Try again later.".into());
+    let (finished, url) = match &repo {
+        // The answer on GitHub, where the service puts it: the service is asked only now and then.
+        Some(repo) => {
+            let (finished, tag) = wait_on_github(
+                &agent, &server, repo, &job, github, started, longest, shared, &mut asked,
+            )?;
+            (finished, store::download(repo, &tag, &format!("{job}.so")))
         }
-        std::thread::sleep(POLL);
-        let looked = agent
-            .get(&format!("{server}/v1/job/{job}"))
-            .call()
-            .map_err(service_error)
-            .and_then(|r| {
-                r.into_json::<serde_json::Value>()
-                    .map_err(|e| e.to_string())
-            });
-        let status = match looked {
-            Ok(status) => status,
-            Err(e) => {
-                quiet += 1;
-                if quiet >= QUIET_TRIES {
-                    return Err(e);
-                }
-                continue;
-            }
-        };
-        quiet = 0;
-        match status["state"].as_str() {
-            Some("starting") => say("Waking the build server up: about a minute...".into()),
-            Some("queued") => {
-                let ahead = status["ahead"].as_u64().unwrap_or(0);
-                say(match (github, ahead) {
-                    (true, 0) => "Waiting for a machine on GitHub...".to_owned(),
-                    _ => format!("In line: {ahead} before yours"),
-                });
-            }
-            Some("building") => {
-                let seconds = status["seconds"].as_u64().unwrap_or(0);
-                let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
-                if s.building_since.is_none() {
-                    s.building_since = Instant::now().checked_sub(Duration::from_secs(seconds));
-                }
-            }
-            Some("done") => break status,
-            Some("failed") => {
-                return Err(status["error"]
-                    .as_str()
-                    .unwrap_or("The build failed.")
-                    .to_owned());
-            }
-            _ => return Err("The build server lost the job. Try again.".into()),
+        None => {
+            let finished = wait_on_service(
+                &agent, &server, &job, github, started, longest, shared, &mut asked,
+            )?;
+            asked += 1;
+            (finished, format!("{server}/v1/job/{job}/lib"))
         }
     };
     let want = finished["sha256"].as_str().unwrap_or_default().to_owned();
@@ -715,7 +1360,11 @@ fn compile(version: &str, github: bool, shared: &Mutex<Shared>) -> Result<String
     let folder = dir().join(&name);
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let part = folder.join(format!("{LIBRARY}.part"));
-    let url = format!("{server}/v1/job/{job}/lib");
+    log::info!(
+        "Horizon: compiled job {job} answered after {} s, with {asked} requests to the build \
+         service",
+        started.elapsed().as_secs()
+    );
     fetch_library(&agent, &url, &part, size, &want, shared)?;
     // A rename: a library this game runs stays mapped as it was.
     std::fs::rename(&part, folder.join(LIBRARY)).map_err(|e| e.to_string())?;
