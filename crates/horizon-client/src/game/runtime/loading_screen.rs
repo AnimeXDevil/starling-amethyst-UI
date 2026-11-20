@@ -960,6 +960,15 @@ impl Loading {
         if self.menu.reload_packs || self.suspended || !self.ready_for_handoff() {
             return None;
         }
+        // Keep the boot menu responsive while the world tables load. Client
+        // model publication needs them even for a start without mods.
+        if self.options.as_ref().is_some_and(Options::is_client_start)
+            && let Some(Ok(loaded)) = &self.loaded
+            && let Some(loader) = &loaded.rest_loader
+            && !loader.handle.is_finished()
+        {
+            return None;
+        }
         let renderer = match self.world_renderer.take() {
             Some(WorldRenderer::Built(renderer)) => Some(*renderer),
             building => {
