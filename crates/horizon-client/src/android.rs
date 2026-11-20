@@ -1648,8 +1648,7 @@ pub fn main(
     if let Err(error) = platform() {
         panic!("Horizon: {error}");
     }
-    // From the APK's assets, before `start` loads the wasm mods that link against it.
-    crate::preparer::put_wasm_std();
+    crate::preparer::remove_wasm_std();
     start(crate::entry::prepare());
     finish_and_exit()
 }

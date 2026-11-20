@@ -1,6 +1,10 @@
-//! Installed native and wasm code loading.
+//! Installed native code loading. Starling runs no WebAssembly mods (2026-11-20, as Sunrise): a
+//! package with wasm code is left out, and the Mods page says why (`code_runtime`).
 use mod_api::__private::game::Fields;
-/// Load installed native and wasm code, register its dependency-ordered entries,
+/// The packages left out because their code is WebAssembly, by id (`load_code`).
+static WASM_REFUSED: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+    std::sync::OnceLock::new();
+/// Load installed native code, register its dependency-ordered entries,
 /// and start the engine. Keep the validated startup lease alive for the whole run.
 pub fn main_with(
     mods: Vec<mod_api::ModEntry>,
@@ -52,24 +56,19 @@ pub fn main_with(
 }
 
 /// The installed code in one dependency order, installed for dispatch: `mods` (the native entries
-/// built in) with the game folder's wasm mods, and `slots`, their typed listeners. What
-/// `entry::start` loads, from `main_with` and from Starling's Android start (android_lib.rs),
-/// which has no native code to give it.
+/// built in, or the native libraries Starling's Android start opened, android_lib.rs) and
+/// `slots`, their typed listeners. What `entry::start` loads, from `main_with` and from that start.
 pub fn load_code(
     mods: Vec<mod_api::ModEntry>,
     slots: &[crate::SlotListener],
     native: &horizon_mod_package::runtime::Runtime,
     launch: &horizon_mod_package::selection::LaunchArguments,
-) -> (Vec<&'static str>, horizon_mod_wasm::Loaded) {
-    let mut wasm = horizon_mod_wasm::load_installed(launch, &horizon_client::logging::player_dir());
-    let mut mods = mods;
-    mods.extend(std::mem::take(&mut wasm.mods));
-    // One installed dispatch order for both targets; ties retain bundle order.
+) -> (Vec<&'static str>, ()) {
+    // One installed dispatch order; ties retain bundle order.
     let code_manifests: Vec<_> = native
         .packages()
         .iter()
         .map(|p| &p.manifest)
-        .chain(wasm.manifests.iter())
         .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
         .collect();
     assert_eq!(
@@ -102,6 +101,18 @@ pub fn load_code(
         &launch.context.dev_mods,
     )
     .collect();
+    // A package whose code is WebAssembly loads neither its code nor its content: its content
+    // leans on that code (its recipe types, its block entities).
+    let wasm: std::collections::BTreeSet<String> = content
+        .iter()
+        .map(|source| &source.package.manifest)
+        .filter(|manifest| manifest.wasm.is_some() && manifest.native.is_none())
+        .map(|manifest| manifest.id.clone())
+        .collect();
+    for id in &wasm {
+        log::warn!("Horizon: {id} is a WebAssembly mod, which Starling no longer runs; left out");
+    }
+    let _ = WASM_REFUSED.set(wasm);
     let manifests: Vec<_> = code_manifests
         .iter()
         .copied()
@@ -111,7 +122,8 @@ pub fn load_code(
                 .filter(|source| {
                     let manifest = &source.package.manifest;
                     let code = manifest.native.is_some() || manifest.wasm.is_some();
-                    !code || !code_ids.contains(manifest.id.as_str())
+                    (!code || !code_ids.contains(manifest.id.as_str()))
+                        && !wasm_refused(&manifest.id)
                 })
                 .map(|source| &source.package.manifest),
         )
@@ -171,59 +183,28 @@ pub fn load_code(
             }
         }
     }
-    (ids, wasm)
+    (ids, ())
 }
 
-/// The wasm runtime's services for `entry::start`: initialization and the Mods page's refusals.
+/// The code runtime's services for `entry::start`: no WebAssembly runtime to start, and the Mods
+/// page's reason for a package `load_code` left out for its wasm code.
 pub fn code_runtime() -> horizon_client::entry::CodeRuntime {
     horizon_client::entry::CodeRuntime {
-        initialize: horizon_mod_wasm::initialize,
+        initialize: |_| {},
         refusal: |id| {
-            horizon_mod_wasm::refusal(id).map(|reason| {
-                use horizon_client::text::Text;
-                match reason {
-                    horizon_mod_wasm::Refusal::CompileTimeout { member, budget } => {
-                        let source = match budget.threads {
-                            Some(threads) => Text::translate_with_fallback("horizon.wasm.compile_default", "default for %s threads", &[Text::literal(threads.to_string())]),
-                            None => Text::translate_with_fallback("horizon.wasm.compile_setting", "setting %s", &[Text::literal(horizon_mod_wasm::compile_budget::SETTING)]),
-                        };
-                        Text::translate_with_fallback("horizon.wasm.compile_timeout", "%s: compilation exceeded %s seconds (%s). Increase %s to allow more compile time.", &[
-                            Text::literal(member),
-                            Text::literal(budget.limit.as_secs_f64().to_string()),
-                            source,
-                            Text::literal(horizon_mod_wasm::compile_budget::SETTING),
-                        ]).plain()
-                    }
-                    horizon_mod_wasm::Refusal::CompileSetting(error) => {
-                        use horizon_mod_wasm::compile_budget::{SETTING, SettingError};
-                        match error {
-                            SettingError::InvalidValue(value) => Text::translate_with_fallback(
-                                "horizon.wasm.compile_setting_invalid",
-                                "Invalid %s=%s: expected positive finite seconds.",
-                                &[Text::literal(SETTING), Text::literal(format!("{value:?}"))],
-                            ).plain(),
-                            SettingError::File { path, why } => Text::translate_with_fallback(
-                                "horizon.wasm.compile_setting_file",
-                                "Cannot read %s from %s: %s",
-                                &[Text::literal(SETTING), Text::literal(path.display().to_string()), Text::literal(why)],
-                            ).plain(),
-                        }
-                    }
-                    horizon_mod_wasm::Refusal::CompileUnavailable { member, budget, why } => {
-                        Text::translate_with_fallback(
-                            "horizon.wasm.compile_unavailable",
-                            "%s: cannot enforce the %s second compilation budget: %s. Restore a private writable .horizon-cache/wasm directory and a working compiler executable.",
-                            &[Text::literal(member), Text::literal(budget.limit.as_secs_f64().to_string()), Text::literal(why)],
-                        ).plain()
-                    }
-                    other => other.to_string(),
-                }
+            wasm_refused(id).then(|| {
+                horizon_client::text::Text::translate_with_fallback(
+                    "starling.mods.wasm_removed",
+                    "WebAssembly mods no longer run in Starling: this one needs a native or content-only version.",
+                    &[],
+                )
+                .plain()
             })
         },
-        startup_refused: |id| {
-            horizon_mod_wasm::refused()
-                .iter()
-                .any(|(owner, _)| owner == id)
-        },
+        startup_refused: wasm_refused,
     }
+}
+
+fn wasm_refused(id: &str) -> bool {
+    WASM_REFUSED.get().is_some_and(|ids| ids.contains(id))
 }

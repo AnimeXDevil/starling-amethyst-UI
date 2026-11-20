@@ -318,23 +318,10 @@ pub fn put_shader_pack(game_folder: &Path) {
     }
 }
 
-/// horizon-wasm-std.wasm, the std every wasm mod links against at load (the APK's assets, built by
-/// build_apk.py for 64-bit), in the app's own files, where horizon-mod-wasm looks for it on a phone:
-/// again only when the app carries other bytes than are there. Before the mods load.
-pub fn put_wasm_std() {
-    let Some(bytes) = crate::platform::asset("horizon-wasm-std.wasm") else {
-        return;
-    };
-    let path = crate::logging::private_home().join("horizon-wasm-std.wasm");
-    if std::fs::read(&path).ok().as_deref() == Some(&bytes[..]) {
-        return;
-    }
-    if let Err(e) = std::fs::write(&path, &bytes) {
-        log::warn!(
-            "Horizon: the wasm mods' std could not be put in {}: {e}",
-            path.display()
-        );
-    }
+/// The std the wasm mods linked against, which earlier versions put in the app's own files: gone
+/// with the wasm mods (Starling runs none since 2026-11-20).
+pub fn remove_wasm_std() {
+    let _ = std::fs::remove_file(crate::logging::private_home().join("horizon-wasm-std.wasm"));
 }
 
 /// CRC-32 (IEEE), to tell one skin from the next.

@@ -9,16 +9,14 @@ pub use native_libraries::{GAME_BUILD_ID, Opened, RUSTC_VERSION, main, open, pac
 mod loading;
 pub use loading::{code_runtime, load_code, main_with};
 
-/// Establish main-thread stack capacity before compiler-child handling.
+/// Establish main-thread stack capacity before any game startup work.
 pub use horizon_guest_stack::prepare_main as prepare_main_stack;
-pub use horizon_mod_wasm::compile_child;
 
-/// Handles the private compiler invocation before any game startup work.
+/// Prepares the main thread's stack before any game startup work. It also ran the WebAssembly
+/// compiler's child process here, before Starling stopped running wasm mods; the name stays for
+/// the starts that call it.
 pub fn exit_if_compile_child() {
     horizon_guest_stack::prepare_main();
-    if let Some(code) = compile_child(std::env::args_os().skip(1)) {
-        std::process::exit(code);
-    }
 }
 
 /// A typed API-point listener supplied by generated native startup.

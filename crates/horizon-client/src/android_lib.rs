@@ -60,11 +60,10 @@ fn install_platform() -> Result<(), String> {
 /// `horizon-native-mods/<id>/`, as the desktop keeps them beside its fixed executable.
 const NATIVE_LIBRARIES: &str = "native-libs";
 
-/// The engine's start with the game folder's wasm mods and the native mod libraries of
-/// [`NATIVE_LIBRARIES`], loaded as the desktop's fixed executable loads the ones beside it
-/// (horizon-mod-host's `open`, then `load_code`). 32-bit Android runs the wasm mods on Pulley,
-/// Wasmtime's interpreter, which Wasmtime picks where it has no compiler. A build of this library
-/// with native mods compiled in (packaging/android/native_build.sh) has none in that folder.
+/// The engine's start with the native mod libraries of [`NATIVE_LIBRARIES`], loaded as the
+/// desktop's fixed executable loads the ones beside it (horizon-mod-host's `open`, then
+/// `load_code`). A build of this library with native mods compiled in
+/// (packaging/android/native_build.sh) has none in that folder.
 fn start(startup: horizon_client::entry::Startup) {
     let (entries, slots, native) = native_libraries();
     horizon_client::entry::start(
@@ -77,7 +76,7 @@ fn start(startup: horizon_client::entry::Startup) {
 
 /// The native mod libraries of [`NATIVE_LIBRARIES`], checked and opened, with their packages. Each
 /// was built for this exact game build (its `horizon_native_build`). A folder that does not check
-/// out is left out with a line in logcat, and the game starts with its wasm mods only.
+/// out is left out with a line in logcat, and the game starts without those mods.
 fn native_libraries() -> (
     Vec<mod_platform::ModEntry>,
     Vec<horizon_mod_host::SlotListener>,

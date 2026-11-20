@@ -290,24 +290,12 @@ def zip_folder(folder, archive):
             z.writestr(info, file.read_bytes())
 
 
-def wasm_std(out_file):
-    """horizon-wasm-std.wasm, the std every wasm mod links against when the game loads it, built as
-    Horizon ships it beside its executable (crates/cargo-horizon-mod `wasm-std`): by the Rust wasm
-    mods are built with (tools/ci/rust-version), with its std's source and the wasm target."""
-    toolchain = (ROOT / "tools/ci/rust-version").read_text(encoding="utf-8").strip()
-    if shutil.which("rustup"):
-        run("rustup", "toolchain", "install", toolchain, "--profile", "minimal")
-        run("rustup", "component", "add", "rust-src", "--toolchain", toolchain)
-        run("rustup", "target", "add", "wasm32-unknown-unknown", "--toolchain", toolchain)
-    run("cargo", "run", "--locked", "-p", "cargo-horizon-mod", "--", "wasm-std", out_file, cwd=ROOT)
-
-
 def assets(out, abi=None):
     """The APK's assets/: prepare-kit.zip (PREPARE_KIT, with the paths horizon-prepare reads),
     lowbudget.zip, the skin the setup draws the menus with (packaging/lowbudget/pack, made by its
-    make.py), StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
-    `out` for the release page), and with an `abi` horizon-wasm-std.wasm (`wasm_std`), which the game
-    puts in its own files to load wasm mods: the same for every ABI, as a mod's wasm is."""
+    make.py), and StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
+    `out` for the release page). The same for every ABI: `abi` is kept for the callers, from when
+    the wasm mods' std went in too (Starling runs no wasm mods since 2026-11-20)."""
     run(sys.executable, ROOT / "tools/build_android_exporters.py")
     folder = out / "assets"
     shutil.rmtree(folder, ignore_errors=True)
@@ -329,8 +317,6 @@ def assets(out, abi=None):
     zip_folder(HERE.parent / "lowbudget" / "pack", folder / "lowbudget.zip")
     zip_folder(HERE.parent / "shaderpacks" / "starling-visuals", folder / "StarlingVisuals.zip")
     shutil.copyfile(folder / "StarlingVisuals.zip", out / "StarlingVisuals.zip")
-    if abi is not None:
-        wasm_std(folder / "horizon-wasm-std.wasm")
     return folder
 
 
