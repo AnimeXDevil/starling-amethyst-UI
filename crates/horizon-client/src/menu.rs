@@ -4457,7 +4457,9 @@ pub(crate) mod tests {
         let item_rules = |context: &LoopContext| {
             let mut repairs = None;
             bare_env_in(context, |env| {
-                repairs = Some(crate::stations::grindstone_accepts(context, env.items, &stack));
+                repairs = Some(crate::stations::grindstone_accepts(
+                    context, env.items, &stack,
+                ));
             });
             let shulker = ItemStack::new("minecraft:shulker_box", 1);
             (repairs.unwrap(), shulker_box_slot_takes(context, &shulker))
