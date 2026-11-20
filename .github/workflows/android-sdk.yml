@@ -123,7 +123,10 @@ jobs:
         env:
           RUSTFLAGS: -C prefer-dynamic
           HORIZON_ANDROID_KEY_ALIAS: horizon-debug
-        run: python packaging/android/build_apk.py --abi arm64-v8a --profile quick --preview
+        run: |
+          python packaging/android/build_apk.py --abi arm64-v8a --profile quick --preview
+          # The game's libraries as the APK has them, to check the mods' build leaves them as they are.
+          (cd target/aarch64-linux-android/quick && sha256sum libhorizon_android.so deps/lib*.so) > "$RUNNER_TEMP/game.sha256"
       - name: Fetch the catalog's packages of the mods
         run: |
           mkdir -p "$RUNNER_TEMP/hmods"
@@ -147,6 +150,10 @@ jobs:
           RUSTFLAGS: -C prefer-dynamic
         run: |
           python3 tools/android_native_sdk.py mods "$RUNNER_TEMP/native-libs" "$RUNNER_TEMP"/hmods/*.hmod --profile quick --abi arm64-v8a
+          # A mod library only loads beside the exact game it was linked against: the one in the APK.
+          (cd target/aarch64-linux-android/quick && sha256sum --quiet -c "$RUNNER_TEMP/game.sha256") \
+            || { echo "the mods' build changed the game's libraries: the mods don't match the APK"; exit 1; }
+          echo "the game's libraries are the APK's"
           readelf=$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf)
           for f in "$RUNNER_TEMP"/native-libs/*.so target/android/*.so; do
             echo "== $f"; "$readelf" -d "$f" | grep -E 'NEEDED|SONAME' || true

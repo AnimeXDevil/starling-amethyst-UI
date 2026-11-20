@@ -76,6 +76,26 @@ def prepare() -> None:
         manifest.write_text(text)
         changed.append(package["name"])
     print(f"prepare: rlib and dylib: {', '.join(sorted(changed))}")
+    # The mods' packages join the workspace from the start, so adding them later changes only Cargo.lock.
+    root = ROOT / "Cargo.toml"
+    text = root.read_text()
+    if f'"{MODS_DIR}/*"' not in text:
+        if text.count("members = [\n") != 1:
+            sys.exit("prepare: Cargo.toml has no single `members = [` to add the mods' folder to")
+        root.write_text(text.replace("members = [\n", f'members = [\n    "{MODS_DIR}/*",\n', 1))
+    (ROOT / MODS_DIR).mkdir(exist_ok=True)
+    # horizon-world's build script hashes Cargo.lock into its snapshot key and reruns when it changes: the mods'
+    # packages change it, and the whole game above horizon-world would build again, unlike the APK's. Here it
+    # watches its own sources and manifests only.
+    script = ROOT / "crates/horizon-world/build.rs"
+    text = script.read_text()
+    watched = 'for file in [manifest.join("Cargo.toml"), core.join("Cargo.toml"), lock] {'
+    lock_line = '    let lock = manifest.join("../../Cargo.lock");\n'
+    if watched not in text or lock_line not in text:
+        sys.exit("prepare: crates/horizon-world/build.rs no longer reads Cargo.lock as this script expects")
+    text = text.replace(lock_line, "").replace(watched, watched.replace(", lock]", "]"))
+    script.write_text(text)
+    print("prepare: horizon-world's build script leaves Cargo.lock out")
 
 
 def game_build() -> tuple[str, str]:
@@ -135,13 +155,11 @@ def mods(out: Path, packages: list[Path], profile: str, abi: str) -> None:
     commit, release = game_build()
     template = TEMPLATE.read_text()
     folder = ROOT / MODS_DIR
+    if f'"{MODS_DIR}/*"' not in (ROOT / "Cargo.toml").read_text():
+        sys.exit("mods: run `prepare` first, before the APK's build")
     if folder.exists():
         shutil.rmtree(folder)
     folder.mkdir()
-    root = ROOT / "Cargo.toml"
-    text = root.read_text()
-    if f'"{MODS_DIR}/*"' not in text:
-        root.write_text(text.replace("members = [\n", f'members = [\n    "{MODS_DIR}/*",\n', 1))
     built = []
     for path in packages:
         work = folder / path.stem
