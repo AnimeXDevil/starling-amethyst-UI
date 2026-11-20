@@ -1789,7 +1789,21 @@ impl Catalog {
                 query.everything = true;
                 browser::modrinth::Modrinth.search(&query)
             } else {
-                browser::horizon::Registry.search(&query)
+                // The native mods Compile v2 can't play on this build are left out (none where
+                // native mods don't load: those show as unsupported).
+                let hidden = if native_mods_load() {
+                    crate::starling_store::catalog_hidden()
+                } else {
+                    const NONE: &std::collections::BTreeSet<String> =
+                        &std::collections::BTreeSet::new();
+                    NONE
+                };
+                browser::horizon::Registry.search(&query).map(|found| {
+                    found
+                        .into_iter()
+                        .filter(|p| !(source_only_mod(p) && hidden.contains(&p.id)))
+                        .collect()
+                })
             };
             let _ = tx.send(result);
         });

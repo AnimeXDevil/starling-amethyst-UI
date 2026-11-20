@@ -232,6 +232,50 @@ pub struct Index {
     pub failed: BTreeMap<String, Failure>,
 }
 
+/// What a store's failure says of a mod only the whole-game Compile builds (mod-builds'
+/// scripts/mod_lib.py).
+const WHOLE_GAME: &str = "whole-game Compile";
+
+/// The native mods only the whole-game Compile builds, by id, as `index` says: a library of its own
+/// holds no mixin, nor a crate beside the mod API. A mod the store built some version of is not
+/// one.
+pub fn whole_game_only(index: &Index) -> BTreeSet<String> {
+    let built: BTreeSet<&str> = index.mods.values().map(|l| l.id.as_str()).collect();
+    index
+        .failed
+        .values()
+        .filter(|f| {
+            f.error.contains(WHOLE_GAME) && !f.id.is_empty() && !built.contains(f.id.as_str())
+        })
+        .map(|f| f.id.clone())
+        .collect()
+}
+
+/// The native mods the catalogs leave out on this game: those Compile v2 can't play
+/// ([`whole_game_only`]) in this APK's own build, read from GitHub once. It blocks: the catalogs
+/// ask from their search threads. None for a game that doesn't say its build, or without the
+/// network: the catalogs then list every mod, as before.
+pub fn catalog_hidden() -> &'static BTreeSet<String> {
+    static HIDDEN: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
+    HIDDEN.get_or_init(|| {
+        let Some(build) = option_env!("HORIZON_ANDROID_BUILD_COMMIT").filter(|c| c.len() == 40)
+        else {
+            return BTreeSet::new();
+        };
+        let text = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(10))
+            .timeout_read(Duration::from_secs(20))
+            .build()
+            .get(&download(STORE_REPO, &mods_tag(build), INDEX))
+            .call()
+            .ok()
+            .and_then(|response| response.into_string().ok());
+        text.and_then(|text| index(&text, build).ok())
+            .map(|index| whole_game_only(&index))
+            .unwrap_or_default()
+    })
+}
+
 /// The index of `build`, its rows by job; a row a phone shouldn't load is left out.
 pub fn index(text: &str, build: &str) -> Result<Index, String> {
     #[derive(Deserialize)]
@@ -528,6 +572,31 @@ mod tests {
         assert_eq!(read.mods.keys().cloned().collect::<Vec<_>>(), [good.job]);
         assert!(read.failed.contains_key("x"));
         assert!(index(&text, NEWER).is_err(), "another build's index");
+    }
+
+    #[test]
+    fn the_catalogs_leave_out_only_mods_the_whole_game_compile_alone_builds() {
+        let built = library("zoom", &"a".repeat(64), BUILD);
+        let failed = |job: &str, id: &str, error: &str| serde_json::json!({"job": job, "id": id, "error": error, "settled": true});
+        let text = serde_json::json!({
+            "schema": 1,
+            "build": BUILD,
+            "mods": [row(&built)],
+            "failed": [
+                failed("f", "freecam_plus", "This mod has [native.mixin]: it needs the whole-game Compile."),
+                failed("o", "oritech", "This mod uses the crate serde_json: it needs the whole-game Compile."),
+                // Another version of a mod the store built still plays.
+                failed("z", "zoom", "This mod has [native.mixin]: it needs the whole-game Compile."),
+                // Failed for another reason: Compile says so, and the mod stays listed.
+                failed("b", "broken", "error[E0425]: cannot find value"),
+            ],
+        })
+        .to_string();
+        let hidden = whole_game_only(&index(&text, BUILD).unwrap());
+        assert_eq!(
+            hidden.into_iter().collect::<Vec<_>>(),
+            ["freecam_plus", "oritech"]
+        );
     }
 
     #[test]
