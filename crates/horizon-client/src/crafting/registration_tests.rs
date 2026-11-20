@@ -27,7 +27,7 @@ fn unregistered_serializer_leaves_its_recipe_out_after_conditions() {
         recipes
             .by_type
             .values()
-            .flatten()
+            .flat_map(|recipes| recipes.iter())
             .all(|recipe| recipe.id != "minecraft:unknown")
     );
     std::fs::write(
