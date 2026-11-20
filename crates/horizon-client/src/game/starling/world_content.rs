@@ -234,11 +234,17 @@ pub(super) fn entry(folder: &str) -> Entry {
         return Entry::Open;
     }
     let kept = recorded(folder);
-    let now = running();
+    let running = running();
+    let set = kept
+        .clone()
+        .unwrap_or_else(|| world_default(enabled(), &loaded(), &running));
+    let code = mod_api::__private::installed_code_ids()
+        .map(str::to_owned)
+        .collect();
+    let now = for_world(running, &set, &code);
     decide(
         folder,
-        kept.clone()
-            .unwrap_or_else(|| world_default(enabled(), &loaded(), &now)),
+        set,
         &now,
         installed().as_ref(),
         next_start(),
@@ -248,6 +254,21 @@ pub(super) fn entry(folder: &str) -> Entry {
             }
         },
     )
+}
+
+/// What runs, as world `set` sees it: a mod with code loads with the game whatever a world plays
+/// with, so one the world doesn't name is left out. Starting again never takes it away, and
+/// comparing with it called the world's own mods missing (a native mod's blocks on the POCO,
+/// "This world plays with , which did not load", 2026-11-19).
+fn for_world(
+    running: BTreeSet<String>,
+    set: &BTreeSet<String>,
+    code: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    running
+        .into_iter()
+        .filter(|id| set.contains(id) || !code.contains(id))
+        .collect()
 }
 
 fn decide(
@@ -502,6 +523,30 @@ mod tests {
             decide("w", create.clone(), &none, Some(&create), None, || {}),
             Entry::Restart(create)
         );
+    }
+
+    /// A native mod's blocks load with the game: a world made without them opens as it is, and
+    /// one made with them still needs them.
+    #[test]
+    fn a_mod_with_code_a_world_does_not_name_is_not_running_for_it() {
+        let world = set(&["mcwdoors"]);
+        let running = set(&["mcwdoors", "cloudglass"]);
+        let code = set(&["cloudglass"]);
+        let now = for_world(running.clone(), &world, &code);
+        assert_eq!(now, world);
+        assert_eq!(
+            decide("w", world.clone(), &now, None, None, || {}),
+            Entry::Open
+        );
+        // A content mod without code still asks for a start with the world's set.
+        let other = for_world(running, &world, &set(&[]));
+        assert_eq!(
+            decide("w", world.clone(), &other, None, None, || {}),
+            Entry::Restart(world)
+        );
+        // A world made with it keeps it in what runs for it.
+        let with = set(&["mcwdoors", "cloudglass"]);
+        assert_eq!(for_world(with.clone(), &with, &code), with);
     }
 
     /// Calibrate... opens its test world whatever content mods are turned on (seen on a POCO:
