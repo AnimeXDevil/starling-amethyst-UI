@@ -1561,11 +1561,12 @@ pub fn apply_mobile_defaults(tier: crate::system_stats::Tier, s: &mut crate::set
     s.graphics_preset = "custom".into();
     let g = &mut s.horizon;
     g.preset = Preset::Custom;
-    g.resolution_scale = match tier {
-        Tier::High => 100,
-        Tier::Mid => 85,
-        Tier::Low => 70,
-    };
+    // Every tier at the window's own size, the world drawn straight to the screen. Below it the
+    // world goes to a target of its own and a full-screen pass scales it up, which costs a phone
+    // more than the pixels save: its GPU is held back by geometry (below), and on a Moto G51
+    // (Adreno 619, Low tier) the 70% this gave the Low tier ran far slower than 100% (a player's
+    // report, 2026-11-19). The Resolution Scale slider still lowers it.
+    g.resolution_scale = 100;
     g.animated_textures = tier != Tier::Low;
     // A phone's GPU is held back by geometry, which far terrain is most of: on the Snapdragon 8
     // Gen 2 at render distance 8 and LOD distance 128, Full drew the frame in 29 to 31 ms of GPU
@@ -1576,9 +1577,36 @@ pub fn apply_mobile_defaults(tier: crate::system_stats::Tier, s: &mut crate::set
     g.leaf_culling = LeafCullingMode::Hidden;
 }
 
+/// A phone that started before every tier began at the window's own size: the 70% (Low tier) or
+/// 85% (Mid tier) its first start saved goes to 100. Run once per installation (game.rs keeps the
+/// marker); a player who had picked one of them on the slider picks it again. Whether it changed.
+pub fn lift_old_mobile_resolution(s: &mut crate::settings::Settings) -> bool {
+    let g = &mut s.horizon;
+    let old_default = matches!(g.resolution_scale, 70 | 85);
+    if old_default {
+        g.resolution_scale = 100;
+    }
+    old_default
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_old_phone_defaults_go_to_the_window_size_and_other_scales_stay() {
+        for (saved, now, changed) in [
+            (70, 100, true),
+            (85, 100, true),
+            (75, 75, false),
+            (100, 100, false),
+        ] {
+            let mut s = crate::settings::Settings::default();
+            s.horizon.resolution_scale = saved;
+            assert_eq!(lift_old_mobile_resolution(&mut s), changed, "{saved}");
+            assert_eq!(s.horizon.resolution_scale, now, "{saved}");
+        }
+    }
 
     /// UI Brightness is saved in nits, 0 for Auto. An older file's share of Paper White reads
     /// as Auto at 100% or with Paper White on Auto, else as that share of it to the nearest step.
@@ -1699,7 +1727,11 @@ mod tests {
             (low.clouds.as_str(), high.clouds.as_str()),
             ("false", "fast")
         );
-        assert!(low.horizon.resolution_scale < high.horizon.resolution_scale);
+        // The window's size on every tier: below it the upscale pass costs more than it saves.
+        assert_eq!(
+            (low.horizon.resolution_scale, high.horizon.resolution_scale),
+            (100, 100)
+        );
         assert!(!low.horizon.animated_textures && high.horizon.animated_textures);
         // Auto-Jump on, as on Bedrock's touch screens.
         assert!(low.auto_jump && high.auto_jump);

@@ -11595,6 +11595,24 @@ pub(crate) fn run_with(
             early_settings.horizon.resolution_scale
         );
     }
+    // A phone that started before every tier began at the window's own size (graphics.rs
+    // `apply_mobile_defaults`): the 70% or 85% its first start saved goes to 100, once. The marker
+    // in the app's own files is written on a first start too, so a scale picked later stays.
+    #[cfg(target_os = "android")]
+    if let Some(private) = std::env::var_os("HORIZON_PRIVATE") {
+        let marker = std::path::Path::new(&private).join("resolution-scale-lifted");
+        if !marker.exists() {
+            if !first_start
+                && horizon_client::graphics::lift_old_mobile_resolution(&mut early_settings)
+            {
+                early_settings.save(&options_txt);
+                log::info!("Horizon: resolution scale from an old phone default to 100%");
+            }
+            if let Err(e) = std::fs::write(&marker, b"") {
+                log::warn!("Horizon: {}: {e}", marker.display());
+            }
+        }
+    }
     options
         .mods
         .capture_code_switches(&early_settings.mods.disabled);
