@@ -174,8 +174,12 @@ def build_library(profile, ndk, sdk, abi=ABI, packages=("horizon-android",)):
             ["git", "status", "--porcelain"], cwd=ROOT, text=True))).lower()
     except (OSError, subprocess.CalledProcessError):
         pass  # An exported source archive may not have Git metadata.
-    runtime = emutls_shared(ndk, abi) if rust_dylib_build() else emutls_runtime(ndk, abi)
-    tls = f"{TLS_FLAGS} -C link-arg={runtime}"
+    tls = f"{TLS_FLAGS} -C link-arg={emutls_runtime(ndk, abi)}"
+    if rust_dylib_build():
+        # libemutls.so first: the linker takes __emutls_get_address from it and then pulls only the rest from the
+        # archive (its outline atomics, `__aarch64_cas8_acq_rel` and the like, which the phone has nowhere else:
+        # without the archive the library did not open), never its emutls object.
+        tls = f"{TLS_FLAGS} -C link-arg={emutls_shared(ndk, abi)} -C link-arg={emutls_runtime(ndk, abi)}"
     env["RUSTFLAGS"] = " ".join(
         flags for flags in (env.get("RUSTFLAGS", ""), PAGE_FLAGS, BUILD_ID_FLAGS, tls) if flags
     )
