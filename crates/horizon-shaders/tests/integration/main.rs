@@ -6,6 +6,7 @@ mod array_initializer_lists;
 mod atomic_member_reads;
 mod callable_macro_boundary;
 mod global_constant_division;
+mod image_store_bounds;
 mod legacy_texture_size;
 mod length_array_sizes;
 mod local_constants;
