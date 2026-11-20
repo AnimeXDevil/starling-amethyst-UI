@@ -668,6 +668,8 @@
   "horizon.mods.in_world": " (deixe o mundo mudar)",
   "horizon.mods.not_built": " (Não compilado)",
   "starling.mods.native.now_apk": "Agora: Starling %s do APK, sem mods nativos.",
+  "starling.mods.native.now_libs": "Agora: Starling %s do APK, com mods nativos: %s.",
+  "starling.mods.native.next_libs": "Na próxima abertura: com mods nativos: %s.",
   "starling.mods.native.now_build": "Agora: Starling %s com %s, compilado %s.",
   "starling.mods.native.next_apk": "Na próxima abertura: sem mods nativos.",
   "starling.mods.native.next_build": "Na próxima abertura: com %s, compilado %s.",

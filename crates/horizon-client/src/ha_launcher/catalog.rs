@@ -1313,7 +1313,11 @@ impl Catalog {
             || (project.kind == Kind::Mod
                 && self.local.iter().any(|item| {
                     item.kind == crate::ha_launcher::client::content_files::Kind::Mods
-                        && (item.file == format!("{}.hmod", project.id)
+                        // The registry's id is its mod's: a package under any name (the
+                        // in-game catalog's `<id>.hmod`, a file opened with Starling) is it.
+                        && ((project.source == browser::SourceId::Horizon
+                            && item.mod_id == project.id)
+                            || item.file == format!("{}.hmod", project.id)
                             || item.file == format!("{}.jar", project.slug)
                             || item.file == format!("horizon-mods/{}", project.id)
                             || item.file == format!("horizon-mods/{}", project.slug)
