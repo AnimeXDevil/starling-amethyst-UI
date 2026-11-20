@@ -97,7 +97,12 @@ fn native_libraries() -> (
         }
     };
     match horizon_mod_host::packages_beside(&folder, opened.built) {
-        Ok(native) => (opened.entries, opened.slots, native),
+        Ok(native) => {
+            horizon_client::android::set_native_libs_opened(
+                opened.built.iter().map(|built| built.id).collect(),
+            );
+            (opened.entries, opened.slots, native)
+        }
         Err(error) => {
             // Their patch copies are installed already; none of their hooks will be called.
             horizon_client::android::warn(&format!("native mods left out: {error}"));

@@ -1198,6 +1198,8 @@
   "starling.mods.native.now_build": "Now: Starling %s with %s, compiled %s.",
   "starling.mods.native.hours_ago": "%s h ago",
   "starling.mods.native.now_apk": "Now: Starling %s from the APK, without native mods.",
+  "starling.mods.native.now_libs": "Now: Starling %s from the APK, with native mods: %s.",
+  "starling.mods.native.next_libs": "Next start: with native mods: %s.",
   "starling.mods.native.use_github": "Gunakan GitHub (perlahan)",
   "starling.mods.native.show_compile": "See the build",
   "starling.mods.native.next_build": "Next start: with %s, compiled %s.",

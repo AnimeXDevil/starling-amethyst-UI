@@ -26,6 +26,20 @@ pub fn set_shared_folder(folder: PathBuf) {
     let _ = SHARED_FOLDER.set(folder);
 }
 
+/// The native mods this start opened from their own libraries (Compile v2's folder, android_lib.rs),
+/// by id: the Mods page's top says them.
+static NATIVE_LIBS_OPENED: OnceLock<Vec<&'static str>> = OnceLock::new();
+
+/// android_lib.rs's start, once the libraries and their packages are in.
+pub fn set_native_libs_opened(ids: Vec<&'static str>) {
+    let _ = NATIVE_LIBS_OPENED.set(ids);
+}
+
+/// The native mods this start opened from their own libraries, none before or without them.
+pub fn native_libs_opened() -> &'static [&'static str] {
+    NATIVE_LIBS_OPENED.get().map_or(&[], Vec::as_slice)
+}
+
 /// NativeActivity's entry point (the manifest's `android.app.func_name`, through the cdylib's
 /// `starling_on_create`): the game of this library, or of the build with native mods
 /// StarlingActivity loaded in its place (`STARLING_GAME_LIBRARY`, NativeMods.java). The activity

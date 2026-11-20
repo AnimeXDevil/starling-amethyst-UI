@@ -914,28 +914,46 @@ fn put_native_libs(
     Ok(())
 }
 
-/// The libraries the next start opens are the native mods on now (`wanted`, sent as `request`).
-fn native_libs_current(wanted: &BTreeSet<String>, request: Option<&str>) -> bool {
+/// The mods in the libraries the next start opens ([`NATIVE_LIBS`]), by id. None when this APK
+/// plays no such libraries, or they are of another build.
+fn native_libs_mods() -> Option<BTreeSet<String>> {
     let folder = native_libs();
     if !loads_store_builds() || !folder.join(store::RECORD).is_file() {
-        return false;
+        return None;
     }
     let about = std::fs::read_to_string(folder.join("build.json"))
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .unwrap_or_default();
     if about["build"].as_str() != own_build() {
-        return false;
+        return None;
     }
-    let mods: BTreeSet<String> = about["mods"]
-        .as_array()
-        .map(|mods| {
-            mods.iter()
-                .filter_map(|m| m["id"].as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default();
-    let sent = std::fs::read_to_string(folder.join(SENT))
+    Some(
+        about["mods"]
+            .as_array()
+            .map(|mods| {
+                mods.iter()
+                    .filter_map(|m| m["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// Mod ids as a line of the Mods page lists them.
+fn listed(ids: &BTreeSet<String>) -> String {
+    ids.iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The libraries the next start opens are the native mods on now (`wanted`, sent as `request`).
+fn native_libs_current(wanted: &BTreeSet<String>, request: Option<&str>) -> bool {
+    let Some(mods) = native_libs_mods() else {
+        return false;
+    };
+    let sent = std::fs::read_to_string(native_libs().join(SENT))
         .ok()
         .map(|text| text.trim().to_owned());
     horizon_client::mod_list::native_build_current(sent.as_deref(), &mods, wanted, request)
@@ -1505,20 +1523,37 @@ impl Game<'_> {
             .compiling;
         let mut game = NativeGame::default();
         let running_build = now.as_deref().map(on_phone);
+        // Compile v2's: the mods this start opened from their own libraries.
+        let opened: BTreeSet<String> = horizon_client::android::native_libs_opened()
+            .iter()
+            .map(|id| (*id).to_owned())
+            .collect();
         let said = match &running_build {
             Some(b) => tr(
                 "starling.mods.native.now_build",
                 &[&version, &b.label(), &b.ago()],
             ),
+            None if !opened.is_empty() => tr(
+                "starling.mods.native.now_libs",
+                &[&version, &listed(&opened)],
+            ),
             None => tr("starling.mods.native.now_apk", &[&version]),
         };
         game.lines.push((said, false));
-        // The next start's: the chosen build when it loads (NativeMods.chosen), else the APK's.
+        // The next start's: the chosen build when it loads (NativeMods.chosen), else the APK's with
+        // the libraries of Compile v2, if any.
         let next_loads = next.clone().filter(|name| loads(name, &version));
         let next_build = next_loads.as_deref().map(on_phone);
-        if next_loads != now {
+        let next_libs = match next_build {
+            Some(_) => BTreeSet::new(),
+            None => native_libs_mods().unwrap_or_default(),
+        };
+        if next_loads != now || next_libs != opened {
             let said = match &next_build {
                 Some(b) => tr("starling.mods.native.next_build", &[&b.label(), &b.ago()]),
+                None if !next_libs.is_empty() => {
+                    tr("starling.mods.native.next_libs", &[&listed(&next_libs)])
+                }
                 None => tr("starling.mods.native.next_apk", &[]),
             };
             game.lines.push((said, false));
@@ -1869,14 +1904,27 @@ impl Game<'_> {
                     || "Starling's build server".to_owned(),
                     |host| format!("the build server at {host}"),
                 );
+                // Compile v2 (`compile`): with Starling's own service and an APK that plays a
+                // library per mod, each comes from the mod store, built once for this game.
+                let how = if custom_host.is_none() && loads_store_builds() {
+                    format!(
+                        "Starling downloads a library of each native mod turned on, made for \
+                         this game, from its mod store; {server} compiles the ones the store \
+                         doesn't have yet, in a few minutes. Then the game restarts with them."
+                    )
+                } else {
+                    format!(
+                        "It is sent to {server}, which compiles the game with your native mods \
+                         in a few minutes; then the game restarts with them."
+                    )
+                };
                 (
                     format!("Compile {id}?"),
                     format!(
                         "A native mod runs with the game's full access: it can do anything the \
-                         game can on this phone, so only compile mods you trust. It is sent to \
-                         {server}, which compiles the game with your native mods in a few \
-                         minutes; then the game restarts with them. If it closes before it shows, \
-                         Starling starts without it the time after.{on_github}"
+                         game can on this phone, so only compile mods you trust. {how} If it \
+                         closes before it shows, Starling starts without it the time \
+                         after.{on_github}"
                     ),
                 )
             }

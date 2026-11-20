@@ -393,6 +393,8 @@
   "starling.mods.native.hours_ago": "%s ч назад",
   "starling.mods.native.differs": "Включённые нативные моды не совпадают с этой сборкой: соберите заново, чтобы применить.",
   "starling.mods.native.now_apk": "Сейчас: Starling %s из APK, без нативных модов.",
+  "starling.mods.native.now_libs": "Сейчас: Starling %s из APK, с нативными модами: %s.",
+  "starling.mods.native.next_libs": "При следующем запуске: с нативными модами: %s.",
   "starling.mods.native.use_github": "Через GitHub (медленнее)",
   "starling.mods.native.next_apk": "При следующем запуске: без нативных модов.",
   "starling.mods.native.show_compile": "Показать сборку",
