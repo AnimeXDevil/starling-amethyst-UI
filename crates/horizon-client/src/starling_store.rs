@@ -629,7 +629,8 @@ mod tests {
     #[test]
     fn the_record_is_what_the_loader_reads() {
         let a = library("veinminer", &"a".repeat(64), BUILD);
-        let record: serde_json::Value = serde_json::from_str(&record(&[a.clone()])).unwrap();
+        let record: serde_json::Value =
+            serde_json::from_str(&record(std::slice::from_ref(&a))).unwrap();
         assert_eq!(
             record,
             serde_json::json!({"libraries": [{"file": "libveinminer.so", "sha256": a.sha256, "mod": "veinminer", "identity": a.identity}]})
