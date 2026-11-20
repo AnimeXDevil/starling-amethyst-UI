@@ -179,6 +179,7 @@ pub mod skull_models;
 pub mod social_screen;
 pub mod starling_mod_api;
 pub mod starling_releases;
+pub mod starling_store;
 pub mod world_geometry;
 pub use horizon_server_files as server;
 pub mod controller_notice;
