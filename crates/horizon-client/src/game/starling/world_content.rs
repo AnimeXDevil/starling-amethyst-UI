@@ -242,18 +242,14 @@ pub(super) fn entry(folder: &str) -> Entry {
         .map(str::to_owned)
         .collect();
     let now = for_world(running, &set, &code);
-    decide(
-        folder,
-        set,
-        &now,
-        installed().as_ref(),
-        next_start(),
-        || {
-            if kept.is_none() {
-                record(folder, &now);
-            }
-        },
-    )
+    // A mod with code that loaded is there, though not in the mods folder's content (`start_set`
+    // reads no native package): a world made with a native mod's blocks counted it missing.
+    let installed = installed().map(|installed| &installed | &code);
+    decide(folder, set, &now, installed.as_ref(), next_start(), || {
+        if kept.is_none() {
+            record(folder, &now);
+        }
+    })
 }
 
 /// What runs, as world `set` sees it: a mod with code loads with the game whatever a world plays
@@ -341,7 +337,14 @@ pub(super) fn start_set(
             continue;
         };
         let m = &package.manifest;
-        if package.is_native() || !m.capabilities.contains(&Capability::Registries) {
+        // Only a mod adding blocks or items is a world's (what `running` keeps): one with data
+        // only (structures, recipes, loot) follows Options > Mods whatever world opens. It was
+        // left out of a world whose set didn't name it, and that world then counted it missing
+        // (YUNG's structures on the POCO, 2026-11-19).
+        if package.is_native()
+            || !m.capabilities.contains(&Capability::Registries)
+            || !adds_blocks_or_items(path, &m.id)
+        {
             continue;
         }
         installed.insert(m.id.clone());
@@ -365,6 +368,29 @@ pub(super) fn start_set(
             .collect(),
         None => enabled.clone(),
     }
+}
+
+/// Whether the package at `path` (a folder or a `.hmod`) declares blocks or items: anything under
+/// `data/<id>/horizon/block/` or `item/`, where content mods declare them.
+fn adds_blocks_or_items(path: &Path, id: &str) -> bool {
+    let prefixes = [
+        format!("data/{id}/horizon/block/"),
+        format!("data/{id}/horizon/item/"),
+    ];
+    if path.is_dir() {
+        return prefixes.iter().any(|prefix| path.join(prefix).is_dir());
+    }
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(archive) = zip::ZipArchive::new(file) else {
+        return false;
+    };
+    archive.file_names().any(|name| {
+        prefixes
+            .iter()
+            .any(|prefix| name.starts_with(prefix.as_str()))
+    })
 }
 
 /// Writes the next start's request: world `folder` with `content`. A world with no level data
@@ -523,6 +549,23 @@ mod tests {
             decide("w", create.clone(), &none, Some(&create), None, || {}),
             Entry::Restart(create)
         );
+    }
+
+    /// Only a mod declaring blocks or items is a world's: a data-only one (structures) is not.
+    #[test]
+    fn only_blocks_and_items_make_a_mod_a_worlds() {
+        let dir = std::env::temp_dir().join(format!("horizon-adds-{}", std::process::id()));
+        let blocks = dir.join("glass");
+        std::fs::create_dir_all(blocks.join("data/glass/horizon/block")).unwrap();
+        let items = dir.join("gems");
+        std::fs::create_dir_all(items.join("data/gems/horizon/item")).unwrap();
+        let data = dir.join("temples");
+        std::fs::create_dir_all(data.join("data/temples/worldgen/structure")).unwrap();
+        assert!(adds_blocks_or_items(&blocks, "glass"));
+        assert!(adds_blocks_or_items(&items, "gems"));
+        assert!(!adds_blocks_or_items(&data, "temples"));
+        assert!(!adds_blocks_or_items(&dir.join("absent.hmod"), "absent"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A native mod's blocks load with the game: a world made without them opens as it is, and
