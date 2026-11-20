@@ -304,6 +304,13 @@ pub trait EntitiesBackend {
     #[access(WorldOnly)]
     fn entity_head_yaw(&self, entity: EntityRef) -> Option<f32>;
     /// Side: server.
+    /// The yaw of a mob's body (`LivingEntity.yBodyRot`): where its model faces, which its
+    /// head turns away from (`entity_head_yaw`). None for a stale handle and for every other
+    /// kind of entity, players included: the game keeps no body yaw of theirs apart from
+    /// the way they face.
+    #[access(WorldOnly)]
+    fn entity_body_yaw(&self, entity: EntityRef) -> Option<f32>;
+    /// Side: server.
     /// The horizontal direction the entity faces (`Entity.getDirection`):
     /// `north`, `south`, `east` or `west`.
     #[access(WorldOnly)]

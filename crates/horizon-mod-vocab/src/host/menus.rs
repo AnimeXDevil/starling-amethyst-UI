@@ -36,6 +36,23 @@ pub trait MenusServerHost {
     #[access(WorldOnly)]
     fn menu(&self, uuid: u128, window: i32) -> Option<MenuRef>;
     /// Side: server.
+    /// Replaces everything the player's open `open_menu` menu `window` shows with `items` (by
+    /// slot, padded with empty ones, extra ones dropped, as `open_menu` takes them) and sends
+    /// it at once in one `ClientboundContainerSetContentPacket`
+    /// (`AbstractContainerMenu.sendAllDataToRemote`), without opening the menu again: its
+    /// title, the cursor and the screen stay. Slots written through `menu` go one by one with
+    /// the next tick's sync; this is the whole page at once, for a page turned or a list
+    /// rebuilt. A refusal sends and changes nothing: [`MenuItemsRefusal`]'s `Client`,
+    /// `NoPlayer` (no placed player of that UUID), `NotOpen` (`window` is not their open
+    /// `open_menu` menu) and `Stack` (a stack the game's item conversion refuses).
+    #[access(WorldOnly)]
+    fn menu_set_items(
+        &mut self,
+        uuid: u128,
+        window: i32,
+        items: Vec<Option<ItemStack>>,
+    ) -> Result<(), MenuItemsRefusal>;
+    /// Side: server.
     /// Closes the player's native menu (a `menu_closed` follows).
     #[access(WorldOnly)]
     fn close_menu(&mut self, uuid: u128);

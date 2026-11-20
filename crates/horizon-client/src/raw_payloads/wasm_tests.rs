@@ -3,7 +3,11 @@ use super::*;
 use mod_api::{Hooks, PayloadBytes, Registrar};
 struct Receipt;
 impl mod_api::IPayloadHandler for Receipt {
-    fn handle(&self, _: PayloadBytes, _: &mut dyn mod_api::IPayloadContext) -> Result<(), String> {
+    fn handle(
+        &self,
+        _: PayloadBytes,
+        _: &mut dyn mod_api::IPayloadContext,
+    ) -> Result<(), mod_api::PayloadHandleError> {
         panic!("receipt must remain in the physical Outbox fixture")
     }
 }

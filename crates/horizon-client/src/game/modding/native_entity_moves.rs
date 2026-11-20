@@ -174,6 +174,13 @@ impl Game<'_> {
         }
         Some(0.0)
     }
+    /// A mob's body yaw (`LivingEntity.yBodyRot`); None for any other kind.
+    pub(super) fn entity_body_yaw(&self, entity: EntityRef) -> Option<f32> {
+        let Target::Mob(id) = self.native_entity_target(entity)? else {
+            return None;
+        };
+        Some(self.mobs.iter().find(|m| m.id == id)?.body_yaw)
+    }
     /// Turns a mob's head to `yaw` (`Entity.setYHeadRot`); its body follows
     /// as its AI turns it. Players' heads can turn too; false for other kinds
     /// or an unavailable player.

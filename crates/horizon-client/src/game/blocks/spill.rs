@@ -801,11 +801,23 @@ impl GameLevel<'_> {
         {
             let mut next_experience = experience;
             let mut next_canceled = canceled;
+            // The block entity still standing here: a level-side break drops before it goes.
+            let block_entity = self.api_level.and_then(|level| {
+                let at = [pos.x, pos.y, pos.z];
+                let generation = self
+                    .world
+                    .block_entities
+                    .generation(&(pos.x, pos.y, pos.z))?;
+                Some(mod_api::__private::game::block_entity_ref(
+                    level, at, generation,
+                ))
+            });
             self.native_block_drops(crate::game::native_hooks::BlockDropsCall {
                 dimension: self.dimension,
                 pos,
                 state,
                 breaker,
+                block_entity,
                 tool,
                 drops: &mut snapshots,
                 experience: &mut next_experience,

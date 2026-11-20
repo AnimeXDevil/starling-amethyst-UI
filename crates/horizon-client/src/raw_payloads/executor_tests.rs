@@ -50,7 +50,11 @@ impl Drop for ReentrantWork {
     }
 }
 impl IPayloadHandler for Probe {
-    fn handle(&self, _: PayloadBytes, ctx: &mut dyn IPayloadContext) -> Result<(), String> {
+    fn handle(
+        &self,
+        _: PayloadBytes,
+        ctx: &mut dyn IPayloadContext,
+    ) -> Result<(), mod_api::PayloadHandleError> {
         assert!(matches!(
             ctx.server_host(),
             Err(PayloadContextError::WrongThread)
@@ -85,7 +89,11 @@ impl IPayloadHandler for Probe {
         // Also prove that no assertion was caught as a handler panic.
         self.calls.fetch_add(1, Ordering::SeqCst);
         match self.mode {
-            Mode::Error => return Err("deliberate handler error".into()),
+            Mode::Error => {
+                return Err(mod_api::PayloadHandleError::Failed(
+                    "deliberate handler error".into(),
+                ));
+            }
             Mode::Cancel => transport.close(),
             Mode::PublicationClosed => drop(self.receiver.lock().unwrap().take()),
             _ => {}

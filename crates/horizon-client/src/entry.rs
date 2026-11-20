@@ -428,6 +428,9 @@ pub(crate) fn install_client_hooks() {
         sound_type: |context, pos, state, entity, cause, sound| {
             crate::game::native_block_sounds::sound_type(context, pos, state, entity, cause, sound);
         },
+        can_grindstone_repair: crate::game::native_item_rules::can_grindstone_repair,
+        can_fit_inside_container_items:
+            crate::game::native_item_rules::can_fit_inside_container_items,
     }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }

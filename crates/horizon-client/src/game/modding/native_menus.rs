@@ -181,6 +181,26 @@ impl Game<'_> {
         self.player_container_menu(self.player(uuid)?)
             .filter(|menu| menu.fields().window == window)
     }
+    /// Replaces what the player's native menu `window` shows with `items` and sends it whole at
+    /// once, the title, cursor and screen kept.
+    pub(super) fn menu_set_items(
+        &mut self,
+        uuid: u128,
+        window: i32,
+        items: Vec<Option<ItemStack>>,
+    ) -> Result<(), mod_api::MenuItemsRefusal> {
+        use mod_api::MenuItemsRefusal;
+        if !self.is_logical_server() {
+            return Err(MenuItemsRefusal::Client);
+        }
+        let conn = self.native_conn(uuid).ok_or(MenuItemsRefusal::NoPlayer)?;
+        let host = self.lan.as_mut().ok_or(MenuItemsRefusal::NoPlayer)?;
+        if host.hub.set_native_menu_items(conn, window, items) {
+            Ok(())
+        } else {
+            Err(MenuItemsRefusal::NotOpen)
+        }
+    }
     /// Closes the player's native menu (a `native_menu_closed` follows).
     pub(super) fn close_menu(&mut self, uuid: u128) {
         if let Some(conn) = self.native_conn(uuid)

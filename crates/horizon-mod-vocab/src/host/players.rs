@@ -1002,4 +1002,52 @@ pub trait PlayersBackendMut {
         player: PlayerRef,
         data: Compound,
     ) -> Result<(), PlayerDataRefusal>;
+    /// Side: server.
+    /// Breaks the block at `pos` in the player's level as the player breaks it
+    /// (`ServerPlayerGameMode.destroyBlock`), as a vein miner breaks each block of a vein. The
+    /// player's own rules apply: a spectator, an adventure player whose tool may not break
+    /// it, a held item that breaks no blocks (a sword in creative), a game master block
+    /// without the permission and a dedicated server's spawn protection keep the block.
+    /// `break_block` is asked and may cancel it; then the break runs as the player's own:
+    /// the block's effects, events, particles and sound, `player_destroyed_block`, the loot of
+    /// the held item and its enchantments, `block_drops` with this player breaking, the
+    /// item's wear, the mined statistic and the exhaustion. With `into_inventory` the drops
+    /// `block_drops` leaves go into the player's inventory, and what doesn't fit is dropped
+    /// from them (`Inventory.placeItemBackInInventory`); what else the break sets loose (a
+    /// torch losing its support, a container's contents) still drops in the world. The
+    /// player needn't reach or look at the block. Breaks started from `break_block` or
+    /// `block_drops` are heard there too, so a mod keeps its own guard; one started from
+    /// inside eight others is refused. True when the block was removed; false, with nothing
+    /// broken, for a stale handle, a player who isn't here or is dead, air, an unloaded
+    /// block, a block no survival player can break (bedrock), a canceled break, and off a
+    /// server.
+    #[access(WorldOnly)]
+    fn player_destroy_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        into_inventory: bool,
+    ) -> bool;
+    /// Side: server.
+    /// Writes `state` at `pos` in `level` for the player: a state the mod already chose (a
+    /// builder's wand, a schematic). It is `level_set_block` with a placement's flags
+    /// (`NEIGHBORS | CLIENTS`, and `KNOWN_SHAPE` when `update_neighbour_shapes` is false; with
+    /// it the neighbours' shapes update, so fences, walls and stairs connect), then
+    /// `Block.setPlacedBy` of the block standing there, in the player's turn: a bed places its
+    /// head, a door its upper half. Nothing else of `BlockItem.place` runs: no check that the
+    /// block may stand there, no `placed_block` trigger or statistic, no sound, no game
+    /// event, no item used, and `setPlacedBy` has no placer. The state is written as given.
+    /// Refuses, writing nothing, with [`PlayerWorldRefusal`]: `Client`, `Stale`, `Dead`,
+    /// `StaleLevel`, `OtherLevel` (not the level the player is in), `UnknownState`,
+    /// `OutOfWorld`, `NotLoaded` and `Unchanged` (the state already stands there, or the
+    /// level refused the write as `level_set_block` returns false).
+    #[access(WorldOnly)]
+    fn player_place_block(
+        &mut self,
+        player: PlayerRef,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+        update_neighbour_shapes: bool,
+    ) -> Result<(), PlayerWorldRefusal>;
 }

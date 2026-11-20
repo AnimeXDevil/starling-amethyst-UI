@@ -29,7 +29,17 @@ struct Step {
     log: Log,
 }
 impl IPayloadHandler for Step {
-    fn handle(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
+    fn handle(
+        &self,
+        bytes: PayloadBytes,
+        context: &mut dyn IPayloadContext,
+    ) -> Result<(), mod_api::PayloadHandleError> {
+        self.step(bytes, context)
+            .map_err(mod_api::PayloadHandleError::Failed)
+    }
+}
+impl Step {
+    fn step(&self, bytes: PayloadBytes, context: &mut dyn IPayloadContext) -> Result<(), String> {
         assert_eq!(std::thread::current().name(), Some("Server thread"));
         let round = bytes.0[0];
         let player = context.player().map_err(|e| format!("{e:?}"))?;

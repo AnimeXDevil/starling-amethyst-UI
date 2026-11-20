@@ -489,9 +489,27 @@ pub fn anvil_result(
 fn max_stack_size(items: &Items, stack: &ItemStack) -> u32 {
     crate::menu::item_max_stack(items, stack)
 }
-/// `GrindstoneMenu` slot filter: damageable or enchanted.
-pub fn grindstone_accepts(items: &Items, stack: &ItemStack) -> bool {
-    is_damageable(items, stack) || stack.has_any_enchantments()
+/// `GrindstoneMenu` slot filter: damageable or enchanted, the damage as the parts of the
+/// stack's item answer `can_grindstone_repair`.
+pub fn grindstone_accepts(context: &LoopContext, items: &Items, stack: &ItemStack) -> bool {
+    can_grindstone_repair(context, items, stack) || stack.has_any_enchantments()
+}
+/// `IItemExtension.canGrindstoneRepair`: whether the grindstone repairs `stack` as a damageable
+/// item, `isDamageableItem` unless the parts of its item answer otherwise.
+pub fn can_grindstone_repair(context: &LoopContext, items: &Items, stack: &ItemStack) -> bool {
+    let mut can_repair = is_damageable(items, stack);
+    native_can_grindstone_repair(context, stack, &mut can_repair);
+    can_repair
+}
+/// The parts of `stack`'s item answer whether the grindstone repairs it: `can_repair` arrives
+/// with `isDamageableItem` and leaves with their answer.
+#[inline(never)]
+pub fn native_can_grindstone_repair(
+    context: &LoopContext,
+    stack: &ItemStack,
+    can_repair: &mut bool,
+) {
+    crate::native_client_hooks::can_grindstone_repair(context, stack, can_repair);
 }
 fn remove_non_curses(e: &Enchantments, mut item: ItemStack) -> ItemStack {
     let kept: Levels = item
@@ -522,6 +540,7 @@ fn remove_non_curses(e: &Enchantments, mut item: ItemStack) -> ItemStack {
 }
 /// `GrindstoneMenu.computeResult`.
 pub fn grindstone_result(
+    context: &LoopContext,
     e: &Enchantments,
     items: &Items,
     input: Option<&ItemStack>,
@@ -543,7 +562,7 @@ pub fn grindstone_result(
                 + (max_damage(items, b) - damage_value(items, b))
                 + durability * 5 / 100;
             let mut count = 1;
-            if !is_damageable(items, a) {
+            if !can_grindstone_repair(context, items, a) {
                 let stack_max = max_stack_size(items, a);
                 if stack_max < 2 || a != b {
                     return None;
@@ -1044,6 +1063,11 @@ mod tests {
     use crate::enchant::tests::{sample, sample_items};
     use horizon_core::nbt::Tag;
 
+    /// A server's loop context, as the grindstone's menu gives its rules.
+    fn loop_context() -> Arc<LoopContext> {
+        crate::test_resources::loop_context(horizon_world::native_load_context::LoopSide::Server)
+    }
+
     fn sword(ench: &[(&str, u32)]) -> ItemStack {
         let mut s = ItemStack::new("minecraft:diamond_sword", 1);
         for (id, l) in ench {
@@ -1123,14 +1147,17 @@ mod tests {
             book
         };
         let one = enchanted_book(Some(Tag::Int(1)));
-        assert!(grindstone_result(&e, &items, Some(&one), Some(&one)).is_none());
+        assert!(grindstone_result(&loop_context(), &e, &items, Some(&one), Some(&one)).is_none());
         // A removed component is vanilla's default of one, not the item's 64.
         let removed = enchanted_book(None);
-        assert!(grindstone_result(&e, &items, Some(&removed), Some(&removed)).is_none());
+        assert!(
+            grindstone_result(&loop_context(), &e, &items, Some(&removed), Some(&removed))
+                .is_none()
+        );
         // Two plain books still combine to a count of two.
         let mut book = ItemStack::new("minecraft:book", 1);
         book.enchant("minecraft:sharpness", 1);
-        let out = grindstone_result(&e, &items, Some(&book), Some(&book)).unwrap();
+        let out = grindstone_result(&loop_context(), &e, &items, Some(&book), Some(&book)).unwrap();
         assert_eq!(out.count, 2);
         assert!(!out.has_any_enchantments());
     }
@@ -1303,7 +1330,7 @@ mod tests {
         let items = sample_items();
         let a = worn("minecraft:diamond_sword", 100, 90);
         let b = worn("minecraft:diamond_sword", 200, 190);
-        let out = grindstone_result(&e, &items, Some(&a), Some(&b)).unwrap();
+        let out = grindstone_result(&loop_context(), &e, &items, Some(&a), Some(&b)).unwrap();
         assert_eq!(
             out.data().unwrap().other("minecraft:max_damage"),
             Some(&horizon_core::nbt::Tag::Int(200))
@@ -1334,7 +1361,7 @@ mod tests {
         a.damage = 819;
         let mut b = ItemStack::new("minecraft:diamond_sword", 1);
         b.damage = 602;
-        let out = grindstone_result(&e, &items, Some(&a), Some(&b)).unwrap();
+        let out = grindstone_result(&loop_context(), &e, &items, Some(&a), Some(&b)).unwrap();
         assert_eq!(
             out.data().and_then(|d| d.other("minecraft:max_damage")),
             None
@@ -1343,7 +1370,7 @@ mod tests {
         assert_eq!(out.damage, 0);
         // A larger patched MAX_DAMAGE on the second stack still wins and is written.
         let b = worn("minecraft:diamond_sword", 2000, 1990);
-        let out = grindstone_result(&e, &items, Some(&a), Some(&b)).unwrap();
+        let out = grindstone_result(&loop_context(), &e, &items, Some(&a), Some(&b)).unwrap();
         assert_eq!(
             out.data().unwrap().other("minecraft:max_damage"),
             Some(&horizon_core::nbt::Tag::Int(2000))
@@ -1710,7 +1737,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let out = grindstone_result(&e, &items, Some(&book), None).unwrap();
+        let out = grindstone_result(&loop_context(), &e, &items, Some(&book), None).unwrap();
         assert_eq!(&*out.item, "minecraft:book");
         assert_eq!(out.enchantment_level("minecraft:sharpness"), 1);
         assert!(
@@ -1731,7 +1758,7 @@ mod tests {
             "!minecraft:repair_cost",
             Some(Tag::compound(Vec::<(&str, Tag)>::new())),
         );
-        let out = grindstone_result(&e, &items, Some(&book), None).unwrap();
+        let out = grindstone_result(&loop_context(), &e, &items, Some(&book), None).unwrap();
         assert_eq!(out.repair_cost(), 0);
         assert!(
             out.data()
@@ -1933,14 +1960,20 @@ mod tests {
         let e = sample();
         let items = sample_items();
         let s = sword(&[("minecraft:sharpness", 3)]);
-        let out = grindstone_result(&e, &items, Some(&s), None).unwrap();
+        let out = grindstone_result(&loop_context(), &e, &items, Some(&s), None).unwrap();
         assert!(out.enchantments().is_empty());
         assert_eq!(out.repair_cost(), 0);
         assert!(out.extra.is_none());
-        let b =
-            grindstone_result(&e, &items, None, Some(&book(&[("minecraft:mending", 1)]))).unwrap();
+        let b = grindstone_result(
+            &loop_context(),
+            &e,
+            &items,
+            None,
+            Some(&book(&[("minecraft:mending", 1)])),
+        )
+        .unwrap();
         assert_eq!(&*b.item, "minecraft:book");
-        assert!(grindstone_result(&e, &items, Some(&sword(&[])), None).is_none());
+        assert!(grindstone_result(&loop_context(), &e, &items, Some(&sword(&[])), None).is_none());
         let mut r = LegacyRandom::new(5);
         // min cost of Sharpness III = 23; ceil(23/2)=12 -> 12..23.
         let xp = grindstone_experience(&e, &mut r, Some(&s), None);
@@ -1963,8 +1996,17 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(grindstone_result(&e, &items, Some(&zero), Some(&plain)).is_none());
-        let out = grindstone_result(&e, &items, Some(&zero), Some(&zero.clone())).unwrap();
+        assert!(
+            grindstone_result(&loop_context(), &e, &items, Some(&zero), Some(&plain)).is_none()
+        );
+        let out = grindstone_result(
+            &loop_context(),
+            &e,
+            &items,
+            Some(&zero),
+            Some(&zero.clone()),
+        )
+        .unwrap();
         assert_eq!(out.count, 2);
         assert!(!out.has_any_enchantments());
     }
@@ -2008,9 +2050,12 @@ mod tests {
         // `/give @s minecraft:stick[minecraft:max_damage=10,minecraft:max_stack_size=1]`
         let patched = stick(r#"{"minecraft:max_damage":10,"minecraft:max_stack_size":1}"#);
         assert_eq!(patched.damage, 0);
-        assert!(!grindstone_accepts(&items, &patched));
+        assert!(!grindstone_accepts(&loop_context(), &items, &patched));
         // Two of them are not one "repaired" stick.
-        assert!(grindstone_result(&e, &items, Some(&patched), Some(&patched)).is_none());
+        assert!(
+            grindstone_result(&loop_context(), &e, &items, Some(&patched), Some(&patched))
+                .is_none()
+        );
         // The anvil's combine gate refuses a non-damageable stack
         // (`AnvilMenu.java:151`), so its enchantments do not merge either.
         let (a, b) = (sharp(patched.clone()), sharp(patched.clone()));
@@ -2023,9 +2068,16 @@ mod tests {
         let explicit = stick(
             r#"{"minecraft:max_damage":10,"minecraft:max_stack_size":1,"minecraft:damage":0}"#,
         );
-        assert!(grindstone_accepts(&items, &explicit));
+        assert!(grindstone_accepts(&loop_context(), &items, &explicit));
         // So the grindstone merges two into one and the anvil combines them.
-        let merged = grindstone_result(&e, &items, Some(&explicit), Some(&explicit)).unwrap();
+        let merged = grindstone_result(
+            &loop_context(),
+            &e,
+            &items,
+            Some(&explicit),
+            Some(&explicit),
+        )
+        .unwrap();
         assert_eq!((merged.count, merged.damage), (1, 0));
         let (a, b) = (sharp(explicit.clone()), sharp(explicit.clone()));
         assert_eq!(
@@ -2038,17 +2090,17 @@ mod tests {
         let sword = item_data::parse_stack(r#"{id:"minecraft:diamond_sword",count:1}"#)
             .unwrap()
             .unwrap();
-        assert!(grindstone_accepts(&items, &sword));
+        assert!(grindstone_accepts(&loop_context(), &items, &sword));
         let mut removed = sword.clone();
         removed.data_mut().set_other(
             "!minecraft:damage",
             Some(Tag::compound(Vec::<(&str, Tag)>::new())),
         );
-        assert!(!grindstone_accepts(&items, &removed));
+        assert!(!grindstone_accepts(&loop_context(), &items, &removed));
         // An enchanted book is accepted for its enchantments, not its damage.
         let mut book = ItemStack::new("minecraft:enchanted_book", 1);
         book.enchant("minecraft:sharpness", 1);
-        assert!(grindstone_accepts(&items, &book));
+        assert!(grindstone_accepts(&loop_context(), &items, &book));
         let _ = fs::remove_dir_all(&root);
     }
 
