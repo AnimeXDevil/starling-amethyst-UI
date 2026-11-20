@@ -17,6 +17,27 @@ pub fn source_only_mod(project: &Project) -> bool {
         && project.loaders.iter().any(|loader| loader == "hnmod")
 }
 
+/// A native mod (`source_only_mod`) this game can't play, which the catalog shows as unsupported
+/// instead of installing. A game made of Rust libraries (the dylib Preview) plays one: installed
+/// into `horizon-native-mods/` as the in-game catalog does, then the game's Options > Mods Compile
+/// takes its library from Compile v2's store.
+pub fn native_unsupported(project: &Project) -> bool {
+    source_only_mod(project) && !native_mods_load()
+}
+
+/// Whether this game's code is a set of Rust libraries that native mod libraries open beside: the
+/// game module's `native_builds::loads_store_builds`, which the launcher, below it, can't call.
+/// Asked once: the list asks for every row of every frame.
+fn native_mods_load() -> bool {
+    static LOADS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LOADS.get_or_init(|| match std::env::var("STARLING_STORE_LOADER").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => std::fs::read_to_string("/proc/self/maps")
+            .is_ok_and(|maps| maps.contains("/libhorizon_mod_host.so")),
+    })
+}
+
 /// Temporary dev registration published as Minecraft Nintendo Switch by PrismarineJS.
 /// Account tokens and client secrets are never bundled.
 pub const MICROSOFT_CLIENT_ID: &str = "00000000441cc96b";
@@ -1272,7 +1293,7 @@ impl Catalog {
         self.status = "Download cancelled.".into();
     }
     pub fn download_label(&self, project: &Project) -> Option<String> {
-        if source_only_mod(project) {
+        if native_unsupported(project) {
             return Some("Unsupported".into());
         }
         if self
@@ -1828,7 +1849,7 @@ impl Catalog {
             return;
         };
 
-        if source_only_mod(&project) {
+        if native_unsupported(&project) {
             self.status = "Native .hnmod mods are temporarily unsupported on Android. Built-in mods remain available.".into();
             return;
         }
@@ -1876,6 +1897,8 @@ impl Catalog {
                 }
             };
             let source = browser::source(project.source).ok_or("Unsupported download source")?;
+            // A native mod waits in `horizon-native-mods/` for the game's Compile.
+            let mut native = false;
             let count = if project.kind == Kind::Shader
                 && project.source == browser::SourceId::Modrinth
             {
@@ -1887,7 +1910,12 @@ impl Catalog {
                 )?
             } else {
                 match browser::installed::install(source.as_ref(), &project, true, &game, &report) {
-                    Ok(entries) => entries.len(),
+                    Ok(entries) => {
+                        native = entries
+                            .iter()
+                            .any(|e| e.file.starts_with("horizon-native-mods"));
+                        entries.len()
+                    }
                     Err(first_err)
                         if project.kind == Kind::Mod
                             && project.source == browser::SourceId::Modrinth =>
@@ -1904,7 +1932,14 @@ impl Catalog {
                 return Err("Download cancelled".into());
             }
             Ok(Reply::Done(
-                format!("Installed {count} item(s). Open Play to load this profile."),
+                if native {
+                    format!(
+                        "Installed {count} item(s). In the game, Options > Mods > Compile plays \
+                         the native mod."
+                    )
+                } else {
+                    format!("Installed {count} item(s). Open Play to load this profile.")
+                },
                 match project.kind {
                     Kind::Mod => crate::ha_launcher::client::content_files::Kind::Mods,
                     Kind::Shader => crate::ha_launcher::client::content_files::Kind::Shaders,
