@@ -12680,7 +12680,7 @@ impl Renderer {
                 log::info!("Horizon renderer: HDR output presented its first frame");
             }
             if let Some(marker) = self.start_marker.take() {
-                let _ = std::fs::remove_file(marker);
+                crate::graphics::start_went_through(&marker);
             }
             if reconfigure {
                 self.configure_surface();

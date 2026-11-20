@@ -341,7 +341,7 @@ impl BootRenderer {
         crate::spans::startup::time("boot.submit", || self.queue.submit([encoder.finish()]));
         crate::spans::startup::time("boot.present", || self.queue.present(frame));
         if let Some(marker) = self.start_marker.take() {
-            let _ = std::fs::remove_file(marker);
+            crate::graphics::start_went_through(&marker);
         }
         Ok(true)
     }

@@ -24,9 +24,50 @@ fn marker_driver(text: &str) -> &str {
 }
 /// Written beside it on Android before the renderer opens its device, and removed once it has
 /// presented a frame (`gfx::Renderer::forget_start_marker`). Found at the next start, the
-/// graphics driver took the game down while starting (a native crash the game can't catch,
-/// like the PowerVR GE8320's in `vkQueueSubmit`), so Auto and Vulkan become OpenGL ES.
+/// graphics driver may have taken the game down while starting (a native crash the game can't
+/// catch, like the PowerVR GE8320's in `vkQueueSubmit`); the second start in a row found with it
+/// (`RENDERER_STRIKES`) makes Auto and Vulkan OpenGL ES.
 pub const RENDERER_MARKER: &str = "horizon-renderer-pending";
+/// Beside `RENDERER_MARKER`: how many starts in a row ended before their first frame. One may not
+/// be the driver's: the player or the system can end the app while it loads (an app swiped away,
+/// a phone out of memory), and one such start sent every start after it to OpenGL ES, far slower
+/// on a Mali (#559). A driver that crashes does it every start, so only the second in a row
+/// ([`DRIVER_STRIKES`]) changes the graphics API.
+pub const RENDERER_STRIKES: &str = "horizon-renderer-strikes";
+/// The starts in a row that end before their first frame before Auto and Vulkan give way.
+const DRIVER_STRIKES: u32 = 2;
+
+/// The start went through (it presented a frame): its `RENDERER_MARKER` goes, and with it the
+/// count of starts that ended before one (`RENDERER_STRIKES`).
+pub fn start_went_through(marker: &Path) {
+    let _ = fs::remove_file(marker);
+    let _ = fs::remove_file(marker.with_file_name(RENDERER_STRIKES));
+}
+
+/// Whether the last starts ended in the graphics driver, now that one more ended before its first
+/// frame (`died`, its `RENDERER_MARKER` found in `dir`): the [`DRIVER_STRIKES`]th in a row. Fewer
+/// are counted in `RENDERER_STRIKES` for the next start.
+fn driver_crashed(dir: &Path, died: bool) -> bool {
+    if !died {
+        return false;
+    }
+    let strikes_file = dir.join(RENDERER_STRIKES);
+    let strikes = fs::read_to_string(&strikes_file)
+        .ok()
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+        + 1;
+    if strikes >= DRIVER_STRIKES {
+        let _ = fs::remove_file(&strikes_file);
+        return true;
+    }
+    let _ = fs::write(&strikes_file, strikes.to_string());
+    log::warn!(
+        "the last start ended before its first frame; this one keeps its graphics API, and \
+         another such start in a row goes to OpenGL ES"
+    );
+    false
+}
 
 /// The `RENDERER_MARKER`s this process wrote ([`note_start_marker`]).
 static START_MARKERS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
@@ -1184,7 +1225,7 @@ impl Graphics {
                 &crate::logging::private_home(),
             ));
         }
-        if driver_died
+        if driver_crashed(dir, driver_died)
             && cfg!(target_os = "android")
             // A custom GPU driver keeps Vulkan: its own start counter (gpu_drivers::note_start)
             // sets it aside after repeated crashes, instead of swinging the API to OpenGL ES.
@@ -1592,6 +1633,24 @@ pub fn lift_old_mobile_resolution(s: &mut crate::settings::Settings) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One start that ended before its first frame keeps the graphics API (an app swiped away
+    /// while loading, #559); the second in a row is the driver's. A start that presents a frame
+    /// clears the count.
+    #[test]
+    fn only_the_second_start_in_a_row_without_a_frame_is_a_driver_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join(RENDERER_MARKER);
+        assert!(!driver_crashed(dir.path(), false));
+        assert!(!driver_crashed(dir.path(), true));
+        assert!(driver_crashed(dir.path(), true));
+        assert!(!dir.path().join(RENDERER_STRIKES).exists());
+        assert!(!driver_crashed(dir.path(), true));
+        fs::write(&marker, "the renderer was starting\n").unwrap();
+        start_went_through(&marker);
+        assert!(!marker.exists() && !dir.path().join(RENDERER_STRIKES).exists());
+        assert!(!driver_crashed(dir.path(), true));
+    }
 
     #[test]
     fn the_old_phone_defaults_go_to_the_window_size_and_other_scales_stay() {
