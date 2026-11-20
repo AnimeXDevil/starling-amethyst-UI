@@ -39,7 +39,8 @@ fn registered_conditions_select_content_root_tags_and_structure_modifiers() {
         ],
     );
     let mut previous: Option<PathBuf> = None;
-    for enabled in [true, false] {
+    // The third start's handlers answer as the second's did: its root is reused.
+    for (start, enabled) in [true, false, false].into_iter().enumerate() {
         let conditions = LoadConditions::new(["testmod"]).with_lookup(
             BTreeMap::from([("testmod".into(), "testmod".into())]),
             move |name, args| {
@@ -75,7 +76,10 @@ fn registered_conditions_select_content_root_tags_and_structure_modifiers() {
         assert_eq!(rabbits, enabled);
         assert_eq!(conditions.check_errors(), Ok(()));
         if let Some(old) = &previous {
-            assert_ne!(old, &out);
+            match start {
+                2 => assert_eq!(old, &out, "the same answers built a new root"),
+                _ => assert_ne!(old, &out),
+            }
             assert!(
                 old.join("data/testmod/tags/block/flag.json").exists(),
                 "old usable root was overwritten"
@@ -83,6 +87,49 @@ fn registered_conditions_select_content_root_tags_and_structure_modifiers() {
         }
         previous = Some(out);
     }
+}
+
+/// A root built with registered handlers is reused at the next start while they give every
+/// answer it was built with (a start used to build a fresh one every time, 6 s on a phone with
+/// 22 mods and a new root on disk each start), and a changed answer builds a new root beside
+/// the old one, which stays whole.
+#[test]
+fn a_root_built_with_handlers_is_reused_while_they_answer_the_same() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let scratch = tempfile::tempdir().unwrap();
+    let base = scratch.path().join("base");
+    fs::create_dir_all(&base).unwrap();
+    fs::write(base.join("horizon-resources.json"), b"{}").unwrap();
+    let cache = scratch.path().join("cache");
+    let inventory =
+        horizon_mod_package::enabled::EnabledMods::new([("testmod".into(), mod_api::Side::Both)]);
+    let flag = std::sync::Arc::new(AtomicBool::new(true));
+    // One start: fresh handlers (a new table each start), asked about one file during the load.
+    let start = || {
+        let flag = flag.clone();
+        let conditions = LoadConditions::new(["testmod"]).with_lookup(
+            BTreeMap::from([("testmod".into(), "testmod".into())]),
+            move |name, _| (name == "testmod:flag").then(|| Ok(flag.load(Ordering::Relaxed))),
+        );
+        let file = serde_json::json!({"neoforge:conditions": [{"type": "testmod:flag"}]});
+        conditions.allows_file(&file, "data/testmod/recipe/gated.json");
+        super::super::resource_root_with_conditions(
+            &base,
+            Path::new(""),
+            &[],
+            &cache,
+            &inventory,
+            &conditions,
+        )
+        .unwrap()
+    };
+    let first = start();
+    assert_eq!(start(), first, "the same answers built a new root");
+    flag.store(false, Ordering::Relaxed);
+    let second = start();
+    assert_ne!(second, first, "a changed answer reused the old root");
+    assert!(first.join(STAMP).exists(), "the old root was overwritten");
+    assert_eq!(start(), second);
 }
 
 #[test]
