@@ -26,9 +26,8 @@ mod_render = { package = "horizon-mod-render", path = "../horizon-mod-render" }
 # The NativeActivity glue (android-activity): `android_main` gets the app.
 winit = { version = "0.30.13", features = ["android-native-activity"] }
 jni = "0.21.1"
-# The game folder's wasm mods, loaded as the desktop's mod host loads them (`load_code`, android_lib.rs
-# `start`). 64-bit Android compiles them to the phone's code; 32-bit has no Wasmtime compiler and runs
-# them on Pulley, Wasmtime's interpreter.
+# The native mod libraries' loading, as the desktop's mod host loads them (`load_code`, android_lib.rs
+# `start`). Starling runs no WebAssembly mods since 2026-11-20.
 horizon-mod-host = { path = "../horizon-mod-host", default-features = false }
 # The packages of the native mod libraries the phone loads (android_lib.rs `native_libraries`).
 horizon-mod-package = { path = "../horizon-mod-package" }
