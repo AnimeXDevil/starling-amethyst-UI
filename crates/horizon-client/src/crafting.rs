@@ -2842,20 +2842,20 @@ mod tests {
                 )
                 .unwrap();
                 let items = Items::for_tests(HashMap::new());
-                let error = Recipes::load(
+                // A file whose serializer nobody registered is left out and the rest load.
+                let with_later = Recipes::load(
                     &root,
                     &items,
                     &PackOverlay::NONE,
                     &crate::test_resources::server_load(),
                 )
-                .err()
-                .unwrap()
-                .to_string();
+                .unwrap();
                 assert!(
-                    error.contains("later.json")
-                        && error.contains("minecraft:from_a_later_version"),
-                    "{error}"
+                    !with_later
+                        .by_type
+                        .contains_key("minecraft:from_a_later_version")
                 );
+                assert_eq!(with_later.by_type["mymod:crusher"].len(), 2);
                 fs::remove_file(root.join("data/minecraft/recipe/later.json")).unwrap();
                 let recipes = Recipes::load(
                     &root,

@@ -207,7 +207,7 @@ fn registered_crafting_remainder_drops_through_server_item_toss() {
 
 #[test]
 #[ignore = "daily"]
-fn unregistered_serializer_failed_reload_preserves_previous_recipes() {
+fn unregistered_serializer_leaves_its_recipe_out_of_a_reload() {
     let bad_recipe = Arc::new(AtomicBool::new(false));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "recipe_probe",
@@ -237,16 +237,9 @@ fn unregistered_serializer_failed_reload_preserves_previous_recipes() {
             game.recipe_tables.install_test_recipes(recipes);
             assert!(game.recipes().recipe("recipe_probe:literal").is_some());
             bad_recipe.store(true, Ordering::Relaxed);
-            let error = game
-                .reload_datapacks(true, &game.level.enabled_features.clone())
-                .err()
-                .expect("unknown serializer must fail reload");
-            let text = format!("{error:?}");
-            assert!(
-                text.contains("bad.json") && text.contains("missing:serializer"),
-                "{text}"
-            );
-            assert!(game.recipes().recipe("recipe_probe:literal").is_some());
+            // As vanilla's RecipeManager, the file is left out and the reload goes on.
+            game.reload_datapacks(true, &game.level.enabled_features.clone())
+                .expect("an unknown serializer leaves its file out");
             assert!(game.recipes().recipe("recipe_probe:bad").is_none());
         });
     });
