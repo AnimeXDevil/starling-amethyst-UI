@@ -184,6 +184,12 @@ def build_library(profile, ndk, sdk, abi=ABI, packages=("horizon-android",)):
         flags for flags in (env.get("RUSTFLAGS", ""), PAGE_FLAGS, BUILD_ID_FLAGS, tls) if flags
     )
     env["RUSTC_BOOTSTRAP"] = "1"
+    # Incremental compilation is part of a profile, and so of the hash in every workspace crate's symbol names:
+    # `fast` turns it on, while CI's rust-cache turns it off (CARGO_INCREMENTAL=0). The APK's game built on CI and
+    # Compile v2's store's copy of it built elsewhere then named mod_vocab and the rest differently, and every mod
+    # library from the store failed to open on the phone ("cannot locate symbol", 2026-11-20). Off here, wherever
+    # the build runs, so a native mod built beside any copy of this game build loads in the APK.
+    env["CARGO_INCREMENTAL"] = "0"
     # The std's source (`TLS_FLAGS`): CI installs it with the toolchain (`--component rust-src`), and the mod
     # service's build cache holds it, with its crates, for its sandbox, which has no network.
     sysroot = subprocess.check_output(["rustc", "--print", "sysroot"], cwd=ROOT, text=True, env=env).strip()
