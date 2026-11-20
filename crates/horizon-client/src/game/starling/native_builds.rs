@@ -622,9 +622,9 @@ fn fetch_library(
 // doesn't have, and leaves in the app's own files:
 //
 //   HORIZON_PRIVATE/native-libs/          what the game opens at its start (android_lib.rs):
-//                                         native-mods.json, each lib<id>.so, each mod's package in
-//                                         horizon-native-mods/<id>/, and build.json and sent.sha256
-//                                         for the Mods page
+//                                         native-mods.json, each lib<id>.so, each mod's whole
+//                                         package (its .hmod unpacked) in horizon-native-mods/<id>/,
+//                                         and build.json and sent.sha256 for the Mods page
 //   HORIZON_PRIVATE/native/store-libs/    every library downloaded, <job>.so beside its <job>.json,
 //                                         so turning a mod back on is no download
 //
@@ -822,7 +822,8 @@ fn compile_from_store(
 }
 
 /// [`NATIVE_LIBS`] made again with `libraries` (each in [`STORE_LIBS`]) and the packages of the
-/// mods `wanted`, whole or not at all: made beside it, then put in its place. The game opens it
+/// mods `wanted` (each `.hmod` unpacked), whole or not at all: made beside it, then put in its
+/// place. The game opens it
 /// at its next start; one that runs now keeps the libraries it opened.
 fn put_native_libs(
     libraries: &[store::Library],
@@ -851,12 +852,25 @@ fn put_native_libs(
         else {
             return Err(format!("{}: can't be read", path.display()));
         };
+        // The whole package, its source too: the game refuses a `[native]` manifest without it
+        // ("inconsistent code declaration"). Only plain names inside the package's folder.
         let package = next.join(PACKAGES).join(&library.id);
         std::fs::create_dir_all(&package).map_err(io(&package))?;
-        for name in ["horizon-mod.toml", "icon.png"] {
-            if let Some(bytes) = bundle.files.get(name) {
-                std::fs::write(package.join(name), bytes).map_err(io(&package))?;
+        for (name, bytes) in &bundle.files {
+            let inside = std::path::Path::new(name);
+            let plain = !name.contains('\\')
+                && inside.components().count() > 0
+                && inside
+                    .components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_)));
+            if !plain {
+                return Err(format!("{}: {name} is outside the package", library.id));
             }
+            let to = package.join(inside);
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent).map_err(io(parent))?;
+            }
+            std::fs::write(&to, bytes).map_err(io(&to))?;
         }
     }
     std::fs::write(next.join(store::RECORD), store::record(libraries)).map_err(io(&next))?;
