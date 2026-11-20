@@ -665,10 +665,18 @@ fn own_build() -> Option<&'static str> {
         .filter(|commit| commit.len() == 40)
 }
 
-/// The native mods on, as the store knows them: each one's `.hmod` and its SHA-256, once each as
-/// `bundles_body` takes them. None when one is Starling's old bundle (`.hnmod`, or a `.hmod` in
-/// its format), which only the whole-game Compile builds.
-fn store_wanted() -> Result<Option<Vec<(PathBuf, store::Wanted)>>, String> {
+/// The native mods on, as [`store_wanted`] finds them.
+struct StoreWanted {
+    /// Those the store knows: each one's `.hmod` and its SHA-256, once each as `bundles_body`
+    /// takes them.
+    mods: Vec<(PathBuf, store::Wanted)>,
+    /// Starling's old bundles (`.hnmod`, or a `.hmod` in its format), by id: only the whole-game
+    /// Compile builds them.
+    old: Vec<String>,
+}
+
+/// The native mods on (`StoreWanted`).
+fn store_wanted() -> Result<StoreWanted, String> {
     let off = horizon_client::mod_list::ModList::load(&Game::game_dir()).disabled;
     let folder = Game::game_dir().join(horizon_client::mod_list::NATIVE_DIR);
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&folder)
@@ -678,6 +686,7 @@ fn store_wanted() -> Result<Option<Vec<(PathBuf, store::Wanted)>>, String> {
     paths.sort_by_key(|p| (p.extension().is_some_and(|e| e == "hmod"), p.clone()));
     let mut seen = BTreeSet::new();
     let mut wanted = Vec::new();
+    let mut old = Vec::new();
     for path in paths {
         let Ok(bundle) = horizon_mod_package::index::native::Any::read(&path) else {
             continue;
@@ -686,7 +695,8 @@ fn store_wanted() -> Result<Option<Vec<(PathBuf, store::Wanted)>>, String> {
             continue;
         }
         if !matches!(bundle, horizon_mod_package::index::native::Any::Flat(_)) {
-            return Ok(None);
+            old.push(bundle.id().to_owned());
+            continue;
         }
         let source =
             file_sha256(&path).ok_or_else(|| format!("{}: can't be read", path.display()))?;
@@ -698,7 +708,7 @@ fn store_wanted() -> Result<Option<Vec<(PathBuf, store::Wanted)>>, String> {
             },
         ));
     }
-    Ok(Some(wanted))
+    Ok(StoreWanted { mods: wanted, old })
 }
 
 /// A text file on GitHub, or None when it isn't there.
@@ -735,11 +745,22 @@ fn compile_from_store(
     let Some(own) = own_build() else {
         return Ok(FromStore::NotHere("this APK doesn't say its build".into()));
     };
-    let Some(wanted) = store_wanted()? else {
+    let StoreWanted { mods: wanted, old } = store_wanted()?;
+    // Starling's old bundles alone go to the whole-game Compile, as before. Beside mods the store
+    // plays they are left out of this game: one sent the whole set there, which builds no Preview
+    // and no game made of libraries, and the store's mods failed with it (2026-11-20).
+    if wanted.is_empty() && !old.is_empty() {
         return Ok(FromStore::NotHere("a mod is Starling's old bundle".into()));
-    };
+    }
     if wanted.is_empty() {
         return Err("There is no native mod to compile.".into());
+    }
+    if !old.is_empty() {
+        log::warn!(
+            "Horizon: left out of this game, as Starling's old bundles only the whole-game \
+             Compile builds: {}",
+            old.join(", ")
+        );
     }
     let abi = releases::process_abi();
     say("Looking for your mods in the store...".into());
@@ -927,9 +948,13 @@ fn native_libs_follow() {
     if !loads_store_builds() || own_build().is_none() || !native_libs().exists() {
         return;
     }
-    let Ok(Some(wanted)) = store_wanted() else {
+    let Ok(StoreWanted { mods: wanted, old }) = store_wanted() else {
         return;
     };
+    // Old bundles alone play from a whole-game build, never from these libraries.
+    if wanted.is_empty() && !old.is_empty() {
+        return;
+    }
     let abi = releases::process_abi();
     let cache = dir().join(STORE_LIBS);
     let mut libraries = Vec::new();
