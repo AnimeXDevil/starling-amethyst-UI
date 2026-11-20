@@ -483,6 +483,26 @@ def rust_dylibs(ndk, built, out):
     return found
 
 
+def compiler_runtime_resolves(ndk, libraries):
+    """The compiler runtime's symbols (outline atomics, emulated TLS) every library of a several-library game leaves
+    undefined, each defined by one of `libraries`: the phone has them in no system library, and a missing one stopped
+    the game before its first line ("cannot locate symbol __aarch64_cas8_acq_rel", 2026-11-19)."""
+    nm = str(ndk_tool(ndk, "llvm-nm"))
+    runtime = re.compile(r"__(aarch64_|emutls_)\w+")
+    defined, wanted = set(), {}
+    for path in libraries:
+        defined.update(subprocess.check_output([nm, "-D", "--defined-only", "--format=just-symbols", str(path)],
+                                               text=True).split())
+        for name in subprocess.check_output([nm, "-D", "--undefined-only", "--format=just-symbols", str(path)],
+                                            text=True).split():
+            if runtime.fullmatch(name):
+                wanted.setdefault(name, []).append(Path(path).name)
+    missing = {name: users for name, users in wanted.items() if name not in defined}
+    if missing:
+        sys.exit("build_apk: compiler runtime symbols no library defines: "
+                 + "; ".join(f"{name} ({', '.join(users)})" for name, users in sorted(missing.items())))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -557,8 +577,10 @@ def main():
     libraries.update(build_adrenotools(ndk, out, args.abi))
     libraries[library.name] = library
     libraries.update(rust_dylibs(ndk, built, out))
-    if rust_dylib_build() and "libemutls.so" not in libraries:
-        sys.exit("build_apk: no library of the game needs libemutls.so: its thread locals would have no runtime")
+    if rust_dylib_build():
+        if "libemutls.so" not in libraries:
+            sys.exit("build_apk: no library of the game needs libemutls.so: its thread locals would have no runtime")
+        compiler_runtime_resolves(ndk, [library, *(libraries[name] for name in libraries if name.endswith(".so"))])
     add_code(out / "base.apk", libraries, dex, out / "unsigned.apk", args.abi)
     aligned = out / "aligned.apk"
     run(tool(build_tools, "zipalign"), "-P", "16", "-f", "4", out / "unsigned.apk", aligned)
