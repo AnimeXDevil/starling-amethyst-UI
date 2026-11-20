@@ -96,6 +96,17 @@ def prepare() -> None:
     text = text.replace(lock_line, "").replace(watched, watched.replace(", lock]", "]"))
     script.write_text(text)
     print("prepare: horizon-world's build script leaves Cargo.lock out")
+    # One heap for the game and every mod. The phone opens a mod library on its own (RTLD_LOCAL), so its
+    # `__rust_alloc` binds to the std's library it needs (the system heap), never to the game's mimalloc: a block
+    # a mod allocated and the game freed crashed the first start (SIGSEGV in `native_libraries::open`, 2026-11-19).
+    # tools/prebuilt_game.py `cargo_features` builds every desktop but Linux this way for the same reason.
+    manifest = ROOT / "crates/horizon-android/Cargo.toml"
+    text = manifest.read_text()
+    client = 'features = ["horizon-extras"] }'
+    if text.count(client) != 1:
+        sys.exit("prepare: crates/horizon-android/Cargo.toml no longer names horizon-client's features as expected")
+    manifest.write_text(text.replace(client, 'features = ["horizon-extras", "system-allocator"] }'))
+    print("prepare: the game on the system heap (horizon-client's system-allocator)")
 
 
 def placeholder() -> None:
