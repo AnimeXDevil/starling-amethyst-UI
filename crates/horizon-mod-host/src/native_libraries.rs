@@ -135,6 +135,54 @@ fn load(folder: &Path) -> Result<Vec<&'static mod_api::__private::native::Native
         .collect()
 }
 
+/// What a start registers from one folder's native mod libraries: their hook entries, their typed
+/// listeners and the build records of the mods they hold.
+pub struct Opened {
+    pub entries: Vec<mod_api::ModEntry>,
+    pub slots: Vec<crate::SlotListener>,
+    pub built: &'static [mod_api::__private::native::BuiltMod],
+}
+
+/// The libraries `folder`'s `native-mods.json` lists (none without one), checked, opened and
+/// installed. Every patch copy is installed and checked before any mod's hook factory runs, as the
+/// generated `main` did: a factory may call a patched function, and a refused install stops the
+/// start before any mod code beyond the installs has run. The desktop's fixed executable reads the
+/// folder beside it ([`main`]); Starling's Android start reads one in the app's own storage
+/// (android_lib.rs), since a phone has no executable to put them beside.
+pub fn open(folder: &Path) -> Result<Opened, String> {
+    let libraries = load(folder)?;
+    let mut installs = Vec::new();
+    for library in &libraries {
+        installs.extend((library.installs)());
+    }
+    horizon_client::entry::installed(&installs);
+    let mut entries = Vec::new();
+    let mut slots = Vec::new();
+    let mut built = Vec::new();
+    for library in libraries {
+        entries.extend((library.entries)());
+        slots.extend((library.slots)());
+        built.extend_from_slice(library.built);
+    }
+    Ok(Opened {
+        entries,
+        slots,
+        built: Box::leak(built.into_boxed_slice()),
+    })
+}
+
+/// The packages of the mods `built` names, read where [`main_with`](crate::main_with) reads them
+/// beside an executable: `folder`'s `horizon-native-mods/<id>/`. For a start that has no
+/// executable beside its libraries (Starling's Android start).
+pub fn packages_beside(
+    folder: &Path,
+    built: &'static [mod_api::__private::native::BuiltMod],
+) -> Result<horizon_mod_package::runtime::Runtime, String> {
+    // `Runtime::load` reads the folder named `horizon-native-mods` beside the file it is given.
+    horizon_mod_package::runtime::Runtime::load(&folder.join("game"), built)
+        .map_err(|error| error.to_string())
+}
+
 /// Start the fixed executable, registering checked native libraries before the engine seal.
 pub fn main() {
     crate::prepare_main_stack();
@@ -142,33 +190,12 @@ pub fn main() {
     let startup = horizon_client::entry::prepare();
     let result = std::env::current_exe()
         .map_err(|e| e.to_string())
-        .and_then(|exe| load(exe.parent().expect("executable parent")));
-    let libraries = result.unwrap_or_else(|error| {
+        .and_then(|exe| open(exe.parent().expect("executable parent")));
+    let opened = result.unwrap_or_else(|error| {
         eprintln!("Horizon: refusing native startup: {error}");
         std::process::exit(1);
     });
-    let mut entries = Vec::new();
-    let mut slots = Vec::new();
-    let mut built = Vec::new();
-    let mut installs = Vec::new();
-    // Every patch copy is installed and checked before any mod's hook factory runs, as the
-    // generated `main` did: a factory may call a patched function, and a refused install stops
-    // the start before any mod code beyond the installs has run.
-    for library in &libraries {
-        installs.extend((library.installs)());
-    }
-    horizon_client::entry::installed(&installs);
-    for library in libraries {
-        entries.extend((library.entries)());
-        slots.extend((library.slots)());
-        built.extend_from_slice(library.built);
-    }
-    crate::main_with(
-        entries,
-        &slots,
-        Box::leak(built.into_boxed_slice()),
-        startup,
-    );
+    crate::main_with(opened.entries, &opened.slots, opened.built, startup);
 }
 
 #[cfg(test)]

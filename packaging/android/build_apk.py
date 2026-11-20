@@ -136,7 +136,35 @@ def emutls_runtime(ndk, abi):
     return path
 
 
-def build_library(profile, ndk, sdk, abi=ABI):
+def rust_dylib_build():
+    """Whether this build keeps the game's crates in libraries of their own (tools/android_native_sdk.py)."""
+    return "prefer-dynamic" in os.environ.get("RUSTFLAGS", "")
+
+
+def emutls_shared(ndk, abi):
+    """`emutls_runtime`'s emulated TLS as one shared library, `libemutls.so`, for a build whose game is several Rust
+    libraries (`rust_dylib_build`). Each variable's control block keeps the slot the runtime gave it, and the runtime
+    hands slots out from a counter of its own: the archive put a hidden copy of the runtime in every library, so two
+    variables of two libraries got one slot, and the first world a phone made aborted in std's thread-local
+    destructor list ("already borrowed", 2026-11-19). Every library needs this one instead."""
+    archive = emutls_runtime(ndk, abi)
+    folder = ROOT / "target" / TARGETS[abi][0] / "emutls"
+    folder.mkdir(parents=True, exist_ok=True)
+    ar = ndk_tool(ndk, "llvm-ar")
+    members = [name for name in subprocess.check_output([str(ar), "t", archive], text=True).split() if "emutls" in name]
+    if len(members) != 1:
+        sys.exit(f"build_apk: expected one emutls object in {archive}, found {members}")
+    run(ar, "x", archive, members[0], cwd=folder)
+    library = folder / "libemutls.so"
+    run(ndk_tool(ndk, f"{TARGETS[abi][1]}{MIN_SDK}-clang"), "-shared", "-o", library, folder / members[0],
+        "-Wl,-soname,libemutls.so", "-Wl,-z,max-page-size=16384", "-Wl,--build-id=sha1")
+    path = library.as_posix()
+    if " " in path:
+        sys.exit(f"build_apk: {path} has a space, which RUSTFLAGS would split: move the checkout")
+    return path
+
+
+def build_library(profile, ndk, sdk, abi=ABI, packages=("horizon-android",)):
     env = dict(os.environ, ANDROID_NDK_HOME=str(ndk), ANDROID_HOME=str(sdk))
     # Preserve source identity in local diagnostic reports, including source builds.
     try:
@@ -147,6 +175,11 @@ def build_library(profile, ndk, sdk, abi=ABI):
     except (OSError, subprocess.CalledProcessError):
         pass  # An exported source archive may not have Git metadata.
     tls = f"{TLS_FLAGS} -C link-arg={emutls_runtime(ndk, abi)}"
+    if rust_dylib_build():
+        # libemutls.so first: the linker takes __emutls_get_address from it and then pulls only the rest from the
+        # archive (its outline atomics, `__aarch64_cas8_acq_rel` and the like, which the phone has nowhere else:
+        # without the archive the library did not open), never its emutls object.
+        tls = f"{TLS_FLAGS} -C link-arg={emutls_shared(ndk, abi)} -C link-arg={emutls_runtime(ndk, abi)}"
     env["RUSTFLAGS"] = " ".join(
         flags for flags in (env.get("RUSTFLAGS", ""), PAGE_FLAGS, BUILD_ID_FLAGS, tls) if flags
     )
@@ -159,7 +192,9 @@ def build_library(profile, ndk, sdk, abi=ABI):
                  "rustup component add rust-src")
     run(
         "cargo", "ndk", "-t", abi, "--platform", MIN_SDK,
-        "build", BUILD_STD, "--profile", profile, "-p", "horizon-android",
+        # More packages than the game only for native mod libraries (tools/android_native_sdk.py `mods`), built
+        # beside it with the same features and flags, so the game's crates are the ones the APK ships.
+        "build", BUILD_STD, "--profile", profile, *(flag for p in packages for flag in ("-p", p)),
         cwd=ROOT, env=env,
     )
 
@@ -423,6 +458,51 @@ def sign(build_tools, aligned, apk, out):
     run(apksigner, "verify", apk)
 
 
+def rust_dylibs(ndk, built, out):
+    """The game's Rust libraries the entry library needs, stripped into `out`: none in a usual build, every crate
+    being inside `built`. A build with `-C prefer-dynamic` after tools/android_native_sdk.py's `prepare` keeps the
+    game and the mod API in libraries of their own, which native mod libraries link against (and the std inside
+    the lowest of them): Cargo's deps folder holds them, and each may need more of them."""
+    if not rust_dylib_build():
+        return {}
+    readelf = ndk_tool(ndk, "llvm-readelf")
+    # Cargo's deps folder, and `emutls_shared`'s for the emulated TLS every one of them needs.
+    folders = (built.parent / "deps", built.parent.parent / "emutls")
+    found, pending = {}, [built]
+    while pending:
+        needs = subprocess.check_output([str(readelf), "-d", str(pending.pop())], text=True)
+        for name in re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", needs):
+            source = next((folder / name for folder in folders if (folder / name).is_file()), None)
+            if name in found or source is None:
+                continue
+            target = out / name
+            run(ndk_tool(ndk, "llvm-strip"), "--strip-unneeded", "-o", target, source)
+            found[name] = target
+            pending.append(source)
+    print(f"build_apk: the game's Rust libraries: {', '.join(sorted(found)) or 'none'}")
+    return found
+
+
+def compiler_runtime_resolves(ndk, libraries):
+    """The compiler runtime's symbols (outline atomics, emulated TLS) every library of a several-library game leaves
+    undefined, each defined by one of `libraries`: the phone has them in no system library, and a missing one stopped
+    the game before its first line ("cannot locate symbol __aarch64_cas8_acq_rel", 2026-11-19)."""
+    nm = str(ndk_tool(ndk, "llvm-nm"))
+    runtime = re.compile(r"__(aarch64_|emutls_)\w+")
+    defined, wanted = set(), {}
+    for path in libraries:
+        defined.update(subprocess.check_output([nm, "-D", "--defined-only", "--format=just-symbols", str(path)],
+                                               text=True).split())
+        for name in subprocess.check_output([nm, "-D", "--undefined-only", "--format=just-symbols", str(path)],
+                                            text=True).split():
+            if runtime.fullmatch(name):
+                wanted.setdefault(name, []).append(Path(path).name)
+    missing = {name: users for name, users in wanted.items() if name not in defined}
+    if missing:
+        sys.exit("build_apk: compiler runtime symbols no library defines: "
+                 + "; ".join(f"{name} ({', '.join(users)})" for name, users in sorted(missing.items())))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -469,7 +549,8 @@ def main():
         sys.exit(f"build_apk: {built} not built")
     # The check the phone's dynamic linker makes when it opens the library (`emutls_runtime`), made here first.
     undefined = subprocess.check_output([str(ndk_tool(ndk, "llvm-nm")), "-D", "--undefined-only", str(built)], text=True)
-    if "__emutls_get_address" in undefined.split():
+    # A build whose game is several Rust libraries takes it from libemutls.so (`emutls_shared`), checked below.
+    if "__emutls_get_address" in undefined.split() and not rust_dylib_build():
         sys.exit(f"build_apk: {built} leaves __emutls_get_address undefined, and no phone defines it")
 
     out = ROOT / "target" / "android"
@@ -495,6 +576,11 @@ def main():
     # Custom GPU drivers (libadrenotools): arm64-v8a only, beside the launchers.
     libraries.update(build_adrenotools(ndk, out, args.abi))
     libraries[library.name] = library
+    libraries.update(rust_dylibs(ndk, built, out))
+    if rust_dylib_build():
+        if "libemutls.so" not in libraries:
+            sys.exit("build_apk: no library of the game needs libemutls.so: its thread locals would have no runtime")
+        compiler_runtime_resolves(ndk, [library, *(libraries[name] for name in libraries if name.endswith(".so"))])
     add_code(out / "base.apk", libraries, dex, out / "unsigned.apk", args.abi)
     aligned = out / "aligned.apk"
     run(tool(build_tools, "zipalign"), "-P", "16", "-f", "4", out / "unsigned.apk", aligned)
