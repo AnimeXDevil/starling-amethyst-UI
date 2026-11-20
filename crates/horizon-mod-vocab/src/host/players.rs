@@ -1022,8 +1022,12 @@ pub trait PlayersBackendMut {
     /// block, a block no survival player can break (bedrock), a canceled break, and off a
     /// server.
     #[access(WorldOnly)]
-    fn player_destroy_block(&mut self, player: PlayerRef, pos: [i32; 3], into_inventory: bool)
-    -> bool;
+    fn player_destroy_block(
+        &mut self,
+        player: PlayerRef,
+        pos: [i32; 3],
+        into_inventory: bool,
+    ) -> bool;
     /// Side: server.
     /// Writes `state` at `pos` in `level` for the player: a state the mod already chose (a
     /// builder's wand, a schematic). It is `level_set_block` with a placement's flags
