@@ -386,7 +386,8 @@ fn adds_blocks_or_items(path: &Path, id: &str) -> bool {
     let Ok(archive) = zip::ZipArchive::new(file) else {
         return false;
     };
-    archive.file_names().any(|name| {
+    // A name that doesn't decode is no declaration.
+    archive.file_names().flatten().any(|name| {
         prefixes
             .iter()
             .any(|prefix| name.starts_with(prefix.as_str()))
