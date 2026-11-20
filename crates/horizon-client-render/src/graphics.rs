@@ -1577,9 +1577,36 @@ pub fn apply_mobile_defaults(tier: crate::system_stats::Tier, s: &mut crate::set
     g.leaf_culling = LeafCullingMode::Hidden;
 }
 
+/// A phone that started before every tier began at the window's own size: the 70% (Low tier) or
+/// 85% (Mid tier) its first start saved goes to 100. Run once per installation (game.rs keeps the
+/// marker); a player who had picked one of them on the slider picks it again. Whether it changed.
+pub fn lift_old_mobile_resolution(s: &mut crate::settings::Settings) -> bool {
+    let g = &mut s.horizon;
+    let old_default = matches!(g.resolution_scale, 70 | 85);
+    if old_default {
+        g.resolution_scale = 100;
+    }
+    old_default
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_old_phone_defaults_go_to_the_window_size_and_other_scales_stay() {
+        for (saved, now, changed) in [
+            (70, 100, true),
+            (85, 100, true),
+            (75, 75, false),
+            (100, 100, false),
+        ] {
+            let mut s = crate::settings::Settings::default();
+            s.horizon.resolution_scale = saved;
+            assert_eq!(lift_old_mobile_resolution(&mut s), changed, "{saved}");
+            assert_eq!(s.horizon.resolution_scale, now, "{saved}");
+        }
+    }
 
     /// UI Brightness is saved in nits, 0 for Auto. An older file's share of Paper White reads
     /// as Auto at 100% or with Paper White on Auto, else as that share of it to the nearest step.
