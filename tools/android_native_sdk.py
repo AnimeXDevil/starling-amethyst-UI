@@ -237,12 +237,9 @@ def mods(out: Path, packages: list[Path], profile: str, abi: str) -> None:
         build_apk.run(build_apk.ndk_tool(ndk, "llvm-strip"), "--strip-unneeded", "-o", library, made)
         records.append({"file": library.name, "sha256": hashlib.sha256(library.read_bytes()).hexdigest(),
                         "mod": mod_id, "identity": identity})
-        package = out / "horizon-native-mods" / mod_id
-        package.mkdir()
-        with zipfile.ZipFile(path) as z:
-            for name in ("horizon-mod.toml", "icon.png"):
-                if name in z.namelist():
-                    (package / name).write_bytes(z.read(name))
+        # The whole package, its source too: the game reads it as the desktop reads the one beside its
+        # executable, and a `[native]` manifest without its source is refused ("inconsistent code declaration").
+        unpack(path, out / "horizon-native-mods" / mod_id)
     (out / "native-mods.json").write_text(json.dumps({"libraries": records}, indent=2) + "\n")
     print(f"mods: {', '.join(m for m, *_ in built)} for {identity.split()[0][:10]} in {out}")
 
