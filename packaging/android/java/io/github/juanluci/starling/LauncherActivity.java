@@ -82,7 +82,10 @@ public final class LauncherActivity extends Activity {
                     .putExtra(StartupRecovery.RECOVERY, true));
             finish();
         } else {
-            play();
+            // A plain launch: the portrait home screen, whose PLAY starts the game.
+            startActivity(new Intent(this, HomeActivity.class));
+            finish();
+            overridePendingTransition(0, 0);
         }
     }
 
