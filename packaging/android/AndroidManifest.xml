@@ -107,6 +107,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+        <!-- The portrait home screen of a plain launch (HomeActivity): PLAY starts the game. -->
+        <activity
+            android:name="io.github.juanluci.starling.HomeActivity"
+            android:exported="false"
+            android:process=":launcher"
+            android:taskAffinity="@APPLICATION_ID@.launcher"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <activity
             android:name="io.github.juanluci.starling.GameActivity"
             android:exported="true"
